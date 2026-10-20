@@ -43,7 +43,7 @@ export function StocktakeWorkspace() {
   async function resolve(line: JsonRecord) {
     const id = getId(line); if (!id) return;
     setBusyLine(id); setError(""); setSuccess("");
-    try { await requestJson(`/api/stocktakes?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ resolutionNote: "Подтверждено при разборе инвентаризации" }) }); setSuccess("Расхождение подтверждено, остатки пересчитаны."); await refresh(); }
+    try { await requestJson(`/api/stocktakes?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ resolutionNote: "Подтверждено при разборе инвентаризации" }) }); setSuccess("Расхождение подтверждено. Остатки обновлены."); await refresh(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось подтвердить расхождение"); }
     finally { setBusyLine(""); }
   }
@@ -52,7 +52,7 @@ export function StocktakeWorkspace() {
     const id = getId(row); if (!id) return;
     if (typeof window !== "undefined" && !window.confirm("Удалить инвентаризацию целиком? Её корректировки также будут отменены.")) return;
     setBusy(true); setError(""); setSuccess("");
-    try { await requestJson(`/api/stocktakes?id=${encodeURIComponent(id)}`, { method: "DELETE" }); setSuccess("Инвентаризация удалена. Остатки пересчитаны."); await refresh(); }
+    try { await requestJson(`/api/stocktakes?id=${encodeURIComponent(id)}`, { method: "DELETE" }); setSuccess("Инвентаризация удалена. Остатки обновлены."); await refresh(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось удалить инвентаризацию"); }
     finally { setBusy(false); }
   }

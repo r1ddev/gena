@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, RefreshCw, RotateCcw } from "lucide-react";
+import { AlertCircle, CheckCircle2, RotateCcw } from "lucide-react";
 import { findRows, getId, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { OzonSyncButton } from "./ozon-sync-button";
+import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 
 function returnLabel(value: unknown) {
   const labels: Record<string, string> = { seller: "Мне", ozon: "На склад Ozon", unknown: "Не определено" };
@@ -28,6 +29,11 @@ export function ReturnsWorkspace() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    const refreshAfterSync = () => { void refresh(); };
+    window.addEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
+    return () => window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
+  }, [refresh]);
 
   async function markReceived(row: JsonRecord) {
     const id = getId(row); if (!id) return;
@@ -35,7 +41,7 @@ export function ReturnsWorkspace() {
     const today = new Date().toISOString();
     try {
       await requestJson(`/api/returns?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ destination: "seller", receivedBySellerAt: today }) });
-      setSuccess("Получение записано. Товар добавлен на ваш склад; итоги пересчитаны.");
+      setSuccess("Получение записано. Товар добавлен на ваш склад.");
       await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось обновить возврат"); }
     finally { setBusyId(""); }
@@ -50,7 +56,7 @@ export function ReturnsWorkspace() {
       await requestJson(`/api/returns?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ postingNumber }) });
       setPostingNumbers((current) => ({ ...current, [id]: "" }));
       setEditingPosting((current) => ({ ...current, [id]: false }));
-      setSuccess("Возврат связан с отправлением. Прибыль пересчитана по финансовым данным Ozon.");
+      setSuccess("Возврат связан с отправлением. Денежный итог по заказу обновлён.");
       await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось связать возврат с отправлением"); }
     finally { setBusyId(""); }
@@ -63,10 +69,10 @@ export function ReturnsWorkspace() {
   }
 
   return <>
-    <PageHeader eyebrow="Обработка возвратов" title="Возвраты" description="Отказ покупателя и возврат товара на склад Ozon отображаются как состояние заказа; отдельного движения остатков нет. Если возврат направлен вам, товар попадёт на ваш склад только после фактического получения — нажмите «Получил я». Доставка исходного заказа уже уменьшает остаток Ozon. «Перечитать возвраты» показывает сохранённые записи без запроса к Ozon; синхронизация ставит обновление данных Ozon в фоновую очередь." actions={<div className="toolbar"><OzonSyncButton afterSyncHint="После завершения нажмите «Перечитать возвраты», чтобы увидеть обновлённые данные." /><button className="button secondary" title="Читает сохранённые возвраты из локальной базы. Ozon не запрашивается." onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Перечитать возвраты</button></div>} />
+    <PageHeader eyebrow="Обработка возвратов" title="Возвраты" description="Возврат на склад Ozon отображается у заказа и не меняет остатки. Если возврат направлен вам, он попадёт на ваш склад после фактического получения — нажмите «Получил я». Обновите возвраты кнопкой здесь; связанные статусы и суммы загрузятся автоматически." actions={<OzonSyncButton label="Обновить возвраты" completedMessage="Возвраты и связанные с ними статусы и суммы обновлены." />} />
     {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}{success && <div className="success-banner" role="status"><CheckCircle2 size={15} />{success}</div>}
     <section className="panel">
-      <div className="panel-head"><div><h2>Возвраты, требующие действия</h2><span className="small-note">{loading ? "Читаем из локальной базы…" : `${rows.length} записей`}</span></div><RotateCcw size={17} color="#178b63" /></div>
+      <div className="panel-head"><div><h2>Возвраты, требующие действия</h2><span className="small-note">{loading ? "Загружаем возвраты…" : `${rows.length} записей`}</span></div><RotateCcw size={17} color="#178b63" /></div>
       {loading ? <div className="panel-body"><div className="loading-line" /></div> : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={18} /></div><div className="empty-title">Не удалось загрузить возвраты</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 12 }} onClick={() => void refresh()}>Повторить</button></div></div> : rows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><RotateCcw size={18} /></div><div className="empty-title">Возвратов, требующих действия, пока нет</div><p className="empty-description">Здесь появятся возвраты, направленные вам, и возвраты с неопределённым местом. Возврат на склад Ozon виден в состоянии заказа и не меняет остаток.</p></div></div> : <div className="table-wrap"><table><thead><tr><th>Возврат</th><th>Товар</th><th>Количество</th><th>Куда</th><th>Статус</th><th>Дата</th><th>Действие</th></tr></thead><tbody>{rows.map((row, index) => {
         const id = getId(row) ?? String(index); const destination = row.destination;
         const sellerDone = destination === "seller" && Boolean(row.receivedBySellerAt);

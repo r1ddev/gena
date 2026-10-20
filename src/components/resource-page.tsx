@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Package, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { asRecord, displayValue, findRows, getId, localToday, requestJson, valueAt, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
+import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 
 export type FieldConfig = {
   name: string;
@@ -31,6 +32,7 @@ export type ResourceConfig = {
   columns: ColumnConfig[];
   emptyTitle?: string;
   emptyDescription?: string;
+  hideRefresh?: boolean;
   deleteUrl?: (row: JsonRecord) => string | null;
   help?: string;
 };
@@ -100,6 +102,11 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
 
   useEffect(() => { void refresh(); }, [refresh, refreshKey]);
   useEffect(() => {
+    const refreshAfterSync = () => { void refresh(); };
+    window.addEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
+    return () => window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
+  }, [refresh]);
+  useEffect(() => {
     if (config.fields.some((field) => field.optionsFrom === "/api/products")) {
       requestJson("/api/products").then((value) => setProductOptions(productOptionsFrom(value))).catch(() => setProductOptions([]));
     }
@@ -117,7 +124,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     const payload = buildResourcePayload(config.fields, formValues, localToday());
     try {
       await requestJson(config.createUrl, { method: "POST", body: JSON.stringify(payload) });
-      setFormValues({}); setFormOpen(false); setSuccess("Запись добавлена. Итоги пересчитаны."); onMutation?.(); await refresh();
+      setFormValues({}); setFormOpen(false); setSuccess("Запись добавлена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось сохранить запись"); }
     finally { setBusy(false); }
   }
@@ -126,9 +133,9 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     if (!config.deleteUrl) return;
     const url = config.deleteUrl(row);
     if (!url) return;
-    if (typeof window !== "undefined" && !window.confirm("Удалить эту запись? Связанные остатки и итоги будут пересчитаны.")) return;
+    if (typeof window !== "undefined" && !window.confirm("Удалить эту запись? Связанные остатки и итоги обновятся автоматически.")) return;
     setBusy(true); setError(""); setSuccess("");
-    try { await requestJson(url, { method: "DELETE" }); setSuccess("Запись удалена. Итоги пересчитаны."); onMutation?.(); await refresh(); }
+    try { await requestJson(url, { method: "DELETE" }); setSuccess("Запись удалена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось удалить запись"); }
     finally { setBusy(false); }
   }
@@ -149,7 +156,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     </section>}
     {beforeTable}
     <section className="panel">
-      <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Читаем из локальной базы…" : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder="Поиск" value={search} onChange={(event) => setSearch(event.target.value)} /></div><button className="button secondary small" title="Показывает сохранённые записи из локальной базы. Ozon не запрашивается." onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Перечитать из базы</button></div></div>
+      <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Загружаем список…" : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder="Поиск" value={search} onChange={(event) => setSearch(event.target.value)} /></div>{!config.hideRefresh && <button className="button secondary small" title="Обновляет список записей." onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Обновить список</button>}</div></div>
       {loading ? <div className="panel-body" aria-label="Загрузка списка"><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /></div>
         : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={20} /></div><div className="empty-title">Не удалось загрузить данные</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 13 }} onClick={() => void refresh()}>Повторить</button></div></div>
           : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><Package size={20} /></div><div className="empty-title">{config.emptyTitle ?? "Пока нет записей"}</div><p className="empty-description">{config.emptyDescription ?? "Добавьте первую запись — она появится в этом списке, а связанные итоги обновятся автоматически."}</p></div></div>

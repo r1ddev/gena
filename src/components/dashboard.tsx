@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, Boxes, CircleDollarSign, Clock3, RefreshCw, ShoppingBag, TrendingUp, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, Boxes, CircleDollarSign, Clock3, ShoppingBag, TrendingUp, Wallet } from "lucide-react";
 import { asRecord, displayValue, findRows, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { UnmatchedItems } from "./unmatched-items";
-import { latestOzonSyncNotice, returnsNeedingAction, unmatchedItemsNotice } from "./dashboard-summary";
+import { returnsNeedingAction, unmatchedItemsNotice } from "./dashboard-summary";
+import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 
 type Overview = JsonRecord & { products?: unknown; recentOrders?: unknown; pendingReturns?: unknown; reconciliationErrors?: unknown; profitReconciliationIssues?: unknown };
 
@@ -48,56 +49,30 @@ export function Dashboard() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState("");
-  const [syncError, setSyncError] = useState("");
-  const [syncJobs, setSyncJobs] = useState<JsonRecord[]>([]);
 
   const refresh = useCallback(async () => {
     setLoading(true); setError("");
     try {
       const result = asRecord(await requestJson("/api/dashboard"));
       setOverview((asRecord(result?.data) ?? result) as Overview | null);
-      setSyncJobs(findRows(result?.syncJobs));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось загрузить обзор"); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
-
-  const refreshSyncJobs = useCallback(async () => {
-    try {
-      const response = await requestJson("/api/sync");
-      const result = asRecord(response);
-      const jobs = findRows(result?.items ?? response);
-      setSyncJobs(jobs);
-      return jobs;
-    } catch (reason) {
-      setSyncError(reason instanceof Error ? reason.message : "Не удалось проверить состояние обновления Ozon");
-      return [];
-    }
-  }, []);
-
-  const syncIsActive = syncJobs.some((job) => job.status === "running" || job.status === "queued");
   useEffect(() => {
-    if (!syncIsActive) return;
-    const timer = setInterval(() => {
-      void refreshSyncJobs().then((jobs) => {
-        if (jobs.length && jobs[0].status !== "running" && jobs[0].status !== "queued") void refresh();
-      });
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [refresh, refreshSyncJobs, syncIsActive]);
-
-  async function sync() {
-    setSyncing(true); setSyncMessage(""); setSyncError("");
-    try {
-      const response = asRecord(await requestJson("/api/sync", { method: "POST", body: JSON.stringify({ kind: "full" }) }));
-      await refreshSyncJobs();
-      setSyncMessage(typeof response?.message === "string" ? response.message : "Синхронизация поставлена в очередь. Ход и результат появятся здесь.");
-    }
-    catch (reason) { setSyncError(reason instanceof Error ? reason.message : "Не удалось запустить обновление"); }
-    finally { setSyncing(false); }
-  }
+    const refreshAfterSync = () => { void refresh(); };
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void refresh(); };
+    window.addEventListener("focus", refreshAfterSync);
+    window.addEventListener("popstate", refreshAfterSync);
+    window.addEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", refreshAfterSync);
+      window.removeEventListener("popstate", refreshAfterSync);
+      window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [refresh]);
 
   const products = findRows(overview?.products);
   const recentOrders = findRows(overview?.recentOrders ?? overview?.recentPostings ?? overview?.postingRows);
@@ -116,20 +91,17 @@ export function Dashboard() {
   const unrecognizedFinanceAmount = numeric(overview?.unrecognizedFinanceAmount);
   const unresolvedExternalItems = findRows(overview?.unresolvedExternalItems);
   const unmatchedNotice = unmatchedItemsNotice(unresolvedExternalItems.length, unrecognizedFinanceAmount);
-  const latestSyncNotice = latestOzonSyncNotice(syncJobs[0] ?? findRows(overview?.syncJobs)[0]);
 
   return <>
-    <PageHeader eyebrow="Панель управления" title="Обзор магазина" description="«Перечитать данные» обновляет обзор из локальной базы и не запрашивает Ozon. «Синхронизировать с Ozon» обновляет заказы и связанные с ними суммы, возвраты и другие операции Ozon, влияющие на деньги и остатки." actions={<div className="toolbar"><button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Перечитать данные</button><button className="button" onClick={() => void sync()} disabled={syncing}><RefreshCw size={14} className={syncing ? "spin" : ""} />{syncing ? "Запускаем…" : "Синхронизировать с Ozon"}</button></div>} />
-    {(error || syncError) && <div className="error-banner" role="alert"><AlertTriangle size={15} />{error || syncError}</div>}
-    {syncMessage && <div className="success-banner" role="status">{syncMessage}</div>}
-    {latestSyncNotice && <div className={`notice ${latestSyncNotice.tone === "warning" ? "critical" : ""}`} role={latestSyncNotice.tone === "warning" ? "alert" : "status"} style={{ marginBottom: 16 }}><RefreshCw size={15} /><span>{latestSyncNotice.message}</span></div>}
+    <PageHeader eyebrow="Панель управления" title="Обзор магазина" description="Актуальные остатки, денежный баланс, прибыль и последние заказы." />
+    {error && <div className="error-banner" role="alert"><AlertTriangle size={15} />{error}</div>}
     {unmatchedNotice && <section className="notice" style={{ marginBottom: 16 }} aria-live="polite">
       <AlertTriangle size={16} />
       <span><strong>{unmatchedNotice.count} записей товаров Ozon требуют решения.</strong> Свяжите их с каталогом, создайте товары или сохраните выбор «Игнорировать». {unmatchedNotice.excludedFinanceAmount !== 0 && <>Пока начисления на {metric(Math.abs(unmatchedNotice.excludedFinanceAmount))} не входят в расчёт баланса и прибыли.</>}</span>
       <Link href={unmatchedNotice.href} className="button secondary small">Открыть список</Link>
     </section>}
 
-    {loading && !overview ? <div className="metrics-grid">{[1, 2, 3, 4].map((item) => <div key={item} className="panel metric-card"><div className="loading-line" style={{ width: "65%" }} /><div style={{ height: 19 }} /><div className="loading-line" style={{ width: "45%", height: 22 }} /></div>)}</div> : error && !overview ? <div className="panel empty-state"><div><div className="empty-icon"><AlertTriangle size={19} /></div><div className="empty-title">Обзор пока недоступен</div><p className="empty-description">Обновите страницу после запуска базы данных или повторите загрузку.</p><button className="button secondary" style={{ marginTop: 12 }} onClick={() => void refresh()}>Повторить</button></div></div> : <>
+    {loading && !overview ? <div className="metrics-grid">{[1, 2, 3, 4].map((item) => <div key={item} className="panel metric-card"><div className="loading-line" style={{ width: "65%" }} /><div style={{ height: 19 }} /><div className="loading-line" style={{ width: "45%", height: 22 }} /></div>)}</div> : error && !overview ? <div className="panel empty-state"><div><div className="empty-icon"><AlertTriangle size={19} /></div><div className="empty-title">Обзор пока недоступен</div><p className="empty-description">Попробуйте загрузить данные ещё раз через несколько секунд.</p><button className="button secondary" style={{ marginTop: 12 }} onClick={() => void refresh()}>Повторить</button></div></div> : <>
       <div className="metrics-grid">
         <div className="panel metric-card" style={{ "--metric-bg": "#e8f6ee" } as React.CSSProperties}><Wallet className="metric-icon" size={18} /><div className="metric-label">Расчётный денежный баланс</div><div className="metric-value">{metric(overview?.cashBalance)}</div><div className="metric-help">{unmatchedNotice ? "Частичный расчёт: есть начисления Ozon, не включённые до сопоставления товаров" : "Покупки, расходы и признанные операции Ozon"}</div></div>
         <div className="panel metric-card" style={{ "--metric-bg": "#ecf7f2" } as React.CSSProperties}><TrendingUp className="metric-icon" size={18} /><div className="metric-label">Фактическая прибыль</div><div className="metric-value">{metric(overview?.confirmedProfit)}</div><div className="metric-help">{unmatchedNotice ? "Неполный расчёт: начисления по несопоставленным товарам не включены" : profitReconciliationIssues.length ? `${profitReconciliationIssues.length} возвратов требуют сверки` : overview?.confirmedProfit === null ? "Не хватает себестоимости по части товаров" : "По завершённым и признанным операциям"}</div></div>
@@ -171,7 +143,7 @@ export function Dashboard() {
 
           <section className="panel">
             <div className="panel-head"><div><h2>Последние заказы</h2><span className="small-note">Предварительные и признанные</span></div><Link href="/sales" className="button secondary small">Все заказы</Link></div>
-            {recentOrders.length ? <div className="table-wrap"><table><thead><tr><th>Отправление</th><th>Дата</th><th>Статус</th><th>Сумма</th></tr></thead><tbody>{recentOrders.slice(0, 5).map((order, index) => <tr key={String(order.id ?? order.orderNumber ?? index)}><td className="table-primary">{String(order.orderNumber ?? order.postingNumber ?? order.id ?? "Заказ")}</td><td>{displayValue(order.deliveredAt ?? order.orderDate, "date")}</td><td><span className="badge">{displayValue(order.status, "status")}</span></td><td className="number">{displayValue(order.amount ?? order.accrualAmount, "money")}</td></tr>)}</tbody></table></div> : <div className="empty-state" style={{ minHeight: 135 }}><div><div className="empty-icon"><ShoppingBag size={19} /></div><div className="empty-title">Заказы появятся здесь</div><p className="empty-description">Запустите обновление из Ozon в настройках.</p></div></div>}
+            {recentOrders.length ? <div className="table-wrap"><table><thead><tr><th>Отправление</th><th>Дата</th><th>Статус</th><th>Сумма</th></tr></thead><tbody>{recentOrders.slice(0, 5).map((order, index) => <tr key={String(order.id ?? order.orderNumber ?? index)}><td className="table-primary">{String(order.orderNumber ?? order.postingNumber ?? order.id ?? "Заказ")}</td><td>{displayValue(order.deliveredAt ?? order.orderDate, "date")}</td><td><span className="badge">{displayValue(order.status, "status")}</span></td><td className="number">{displayValue(order.amount ?? order.accrualAmount, "money")}</td></tr>)}</tbody></table></div> : <div className="empty-state" style={{ minHeight: 135 }}><div><div className="empty-icon"><ShoppingBag size={19} /></div><div className="empty-title">Заказов пока нет</div><p className="empty-description">Обновите продажи на странице «Продажи», чтобы загрузить заказы.</p><Link href="/sales" className="button secondary small" style={{ marginTop: 12 }}>Открыть продажи</Link></div></div>}
           </section>
         </div>
 

@@ -28,7 +28,7 @@ export function PurchasesWorkspace() {
     setBusy(true); setError(""); setSuccess("");
     try {
       await requestJson("/api/purchases/receipts", { method: "POST", body: JSON.stringify({ purchaseId: selectedId, receivedAt, receivedQuantity: Number(quantity), unitCost: Number(unitCost), note }) });
-      setQuantity(""); setUnitCost(""); setNote(""); setSuccess("Приёмка записана. Остаток и средняя себестоимость пересчитаны."); setRefreshKey((value) => value + 1);
+      setQuantity(""); setUnitCost(""); setNote(""); setSuccess("Приёмка записана. Остаток и средняя себестоимость обновлены."); setRefreshKey((value) => value + 1);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось записать приёмку"); }
     finally { setBusy(false); }
   }
