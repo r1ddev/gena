@@ -9,6 +9,7 @@ import {
   Menu, Package, PackageCheck, RotateCcw, Settings2, ShoppingCart, Truck,
   Wallet, X,
 } from "lucide-react";
+import { ProductCatalogProvider } from "./product-hover-card";
 
 const navSections = [
   {
@@ -70,7 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button className="mobile-menu" aria-label={mobileOpen ? "Закрыть меню" : "Открыть меню"} onClick={() => setMobileOpen((open) => !open)}>{mobileOpen ? <X size={17} /> : <Menu size={17} />}</button>
           </div>
         </header>
-        <main className="page-content">{children}</main>
+        <ProductCatalogProvider><main className="page-content">{children}</main></ProductCatalogProvider>
       </div>
     </div>
   );

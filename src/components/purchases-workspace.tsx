@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, PackageCheck, Search } from "lucide-react";
 import { findRows, getId, localToday, requestJson, type JsonRecord } from "./api";
 import { ResourcePage } from "./resource-page";
+import { ProductArticle } from "./product-hover-card";
 
 function formatPurchaseQuantity(value: unknown): string {
   const number = Number(value ?? 0);
@@ -118,7 +119,7 @@ function PurchasePicker({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => choose(purchase)}
           >
-            <span className="purchase-picker-option-title">Артикул {article}</span>
+            <span className="purchase-picker-option-title">Артикул <ProductArticle identifier={article} productId={typeof purchase.productId === "string" ? purchase.productId : null} fallback={purchase} stopClickPropagation /></span>
             <span className="purchase-picker-option-details">
               {formatPurchaseDate(purchase.purchasedAt)} · заказано {formatPurchaseQuantity(purchase.orderedQuantity)} · принято {formatPurchaseQuantity(purchase.receivedQuantity)} · ожидается {formatPurchaseQuantity(purchase.expectedQuantity)} шт. · оплачено {formatPurchaseAmount(purchase.amountPaid)} ₽
             </span>

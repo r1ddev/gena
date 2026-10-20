@@ -7,6 +7,7 @@ import { PageHeader } from "./page-header";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
+import { notifyProductCatalogChanged, ProductArticle } from "./product-hover-card";
 
 export type FieldConfig = {
   name: string;
@@ -52,18 +53,31 @@ export function buildResourcePayload(fields: FieldConfig[], formValues: Record<s
   return payload;
 }
 
-function orderArticleText(value: unknown) {
-  if (!Array.isArray(value)) return displayValue(value);
-  const quantities = new Map<string, number>();
+function orderArticleItems(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const quantities = new Map<string, { article: string; quantity: number; productId: string | null; identifierLabel: "Артикул" | "SKU Ozon"; details: JsonRecord }>();
   value.forEach((item) => {
     const row = asRecord(item);
     if (!row) return;
     const article = stringValue(row.sku) ?? stringValue(row.offerId) ?? stringValue(row.ozonSku);
     const quantity = Number(row.quantity ?? 1);
     const key = article ?? "Артикул не указан";
-    if (Number.isFinite(quantity)) quantities.set(key, (quantities.get(key) ?? 0) + quantity);
+    if (!Number.isFinite(quantity)) return;
+    const current = quantities.get(key);
+    quantities.set(key, {
+      article: key,
+      quantity: (current?.quantity ?? 0) + quantity,
+      productId: current?.productId ?? stringValue(row.productId),
+      identifierLabel: current?.identifierLabel ?? (stringValue(row.sku) || stringValue(row.offerId) ? "Артикул" : "SKU Ozon"),
+      details: current?.details ?? row,
+    });
   });
-  return [...quantities].map(([article, quantity]) => `${article} × ${displayValue(quantity, "quantity")}`).join("; ") || "—";
+  return [...quantities.values()];
+}
+
+function orderArticleText(value: unknown) {
+  if (!Array.isArray(value)) return displayValue(value);
+  return orderArticleItems(value).map(({ article, quantity }) => `${article} × ${displayValue(quantity, "quantity")}`).join("; ") || "—";
 }
 
 function supplyArticleList(row: JsonRecord) {
@@ -74,13 +88,15 @@ function supplyArticleList(row: JsonRecord) {
     return [{
       key: getId(line) ?? `${stringValue(line.sku) ?? "article"}-${index}`,
       sku: stringValue(line.sku) || "Артикул не указан",
+      productId: stringValue(line.productId),
+      details: line,
       quantity: displayValue(line.quantity ?? 0, "quantity"),
     }];
   });
   if (lines.length === 0) return null;
-  return <div className="supply-article-list" aria-label={`Артикулы в поставке: ${lines.length}`}>
-    {lines.map((line) => <span className="supply-article-chip" key={line.key}>
-      <span className="supply-article-code">{line.sku}</span>
+  return <div className="supply-article-list" role="list" aria-label={`Артикулы в поставке: ${lines.length}`}>
+    {lines.map((line) => <span className="supply-article-chip" role="listitem" key={line.key}>
+      <ProductArticle identifier={line.sku} productId={line.productId} fallback={line.details} className="supply-article-code" />
       <strong>× {line.quantity}</strong>
     </span>)}
   </div>;
@@ -270,6 +286,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       const url = editing && editingRow ? config.editUrl?.(editingRow) : config.createUrl;
       if (!url) throw new Error("Не удалось определить запись для редактирования.");
       await requestJson(url, { method: editing ? "PATCH" : "POST", body });
+      if (config.collectionUrl === "/api/products") notifyProductCatalogChanged();
       setFormValues({}); setProductImage(null); setFormOpen(false);
       if (editing) closeEdit();
       setSuccess(editing ? "Товар сохранён." : "Запись добавлена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh();
@@ -287,7 +304,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     if (!url) return;
     if (typeof window !== "undefined" && !window.confirm("Удалить эту запись? Связанные остатки и итоги обновятся автоматически.")) return;
     setBusy(true); setError(""); setSuccess("");
-    try { await requestJson(url, { method: "DELETE" }); setSuccess("Запись удалена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh(); }
+    try { await requestJson(url, { method: "DELETE" }); if (config.collectionUrl === "/api/products") notifyProductCatalogChanged(); setSuccess("Запись удалена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось удалить запись"); }
     finally { setBusy(false); }
   }
@@ -343,11 +360,25 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
             }))} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || config.editUrl || rowActions ? ["Действия"] : []} /><tbody>{loadError ? <TableEmptyRow colSpan={tableColumnCount} message={loadError} /> : config.remotePageSize && loading ? <TableEmptyRow colSpan={tableColumnCount} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={tableColumnCount} message="По заданным условиям совпадений нет." onClear={clearTableFilters} /> : visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
               const value = valueAt(row, column.key);
               const displayKind = column.kind === "date" || column.kind === "money" || column.kind === "quantity" || column.kind === "status" ? column.kind : undefined;
+              if (["sku", "offerId", "ozonSku"].includes(column.key)) {
+                const identifier = stringValue(value);
+                const productId = stringValue(row.productId) ?? (["offerId", "ozonSku"].includes(column.key) ? getId(row) : null);
+                const label = column.key === "ozonSku" || (column.key === "sku" && row.kind === "ozon" && !productId) ? "SKU Ozon" : "Артикул";
+                const article = identifier ? <ProductArticle identifier={identifier} productId={productId} identifierLabel={label} fallback={row} /> : "—";
+                return <td key={column.key}>{column.primary ? <span className="table-primary">{article}</span> : article}</td>;
+              }
+              if (column.key === "article") {
+                const articles = orderArticleItems(row.items);
+                if (articles.length > 0) return <td key={column.key}><div className="order-article-list">{articles.map((item, articleIndex) => <span className="order-article-item" key={`${item.article}-${articleIndex}`}>
+                  <ProductArticle identifier={item.article} productId={item.productId} identifierLabel={item.identifierLabel} fallback={item.details} />
+                  <strong>× {displayValue(item.quantity, "quantity")}</strong>
+                </span>)}</div></td>;
+              }
               if (column.key === "articles") {
                 const articles = supplyArticleList(row);
                 if (articles) return <td key={column.key}>{articles}</td>;
               }
-              if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, displayKind)}</span>{typeof row.sku === "string" && column.key !== "sku" && column.key !== "offerId" && <span className="table-secondary">{row.sku}</span>}</td>;
+              if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, displayKind)}</span>{typeof row.sku === "string" && column.key !== "sku" && column.key !== "offerId" && <span className="table-secondary"><ProductArticle identifier={row.sku} productId={stringValue(row.productId)} fallback={row} /></span>}</td>;
               if (column.key === "article") return <td key={column.key}>{orderArticleText(row.items)}</td>;
               const rendered = displayValue(value, displayKind);
               return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") ? <><span className="badge">{rendered}</span>{column.key === "status" && typeof row.returnState === "string" && <span className="table-secondary">{row.returnState}</span>}</> : rendered}</td>;

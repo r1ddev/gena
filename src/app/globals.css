@@ -104,10 +104,24 @@ td { padding: 12px 13px; border-top: 1px solid #edf0ed; color: #34413a; font-siz
 tbody tr:hover { background: #fcfdfc; }
 .table-primary { color: var(--ink); font-weight: 700; }
 .table-secondary { display: block; margin-top: 3px; color: #929c95; font-size: 10px; }
+.product-article-trigger { padding: 0; border: 0; border-radius: 2px; color: inherit; background: transparent; font: inherit; font-weight: inherit; text-align: inherit; text-decoration: underline dotted #bdc9c0; text-underline-offset: 2px; cursor: help; }
+.product-article-trigger:hover, .product-article-trigger:focus-visible { color: var(--green-dark); text-decoration-color: currentColor; }
+.product-article-trigger:focus-visible { outline: 2px solid #82c5a4; outline-offset: 2px; }
+.product-hover-card { position: fixed; z-index: 1000; display: grid; width: min(348px, calc(100vw - 24px)); max-height: min(360px, calc(100vh - 24px)); grid-template-columns: 88px minmax(0, 1fr); gap: 12px; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 11px; color: var(--ink); background: white; box-shadow: 0 12px 34px rgba(24, 50, 40, .2); font-size: 11px; }
+.product-hover-image { display: grid; width: 88px; height: 88px; place-items: center; overflow: hidden; border: 1px solid #e8eee9; border-radius: 8px; color: #9aa69e; background: #f6f8f6; }
+.product-hover-image img { width: 100%; height: 100%; object-fit: cover; }
+.product-hover-details { display: grid; min-width: 0; align-content: start; }
+.product-hover-title { margin: 1px 0 7px; overflow-wrap: anywhere; font-size: 12px; line-height: 1.35; }
+.product-hover-field { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 7px; padding: 4px 0; border-top: 1px solid #eef1ee; line-height: 1.35; }
+.product-hover-field span { color: var(--muted); }
+.product-hover-field b { overflow-wrap: anywhere; font-weight: 700; text-align: right; }
 .supply-article-list { display: flex; max-width: 520px; flex-wrap: wrap; align-items: center; gap: 6px; }
 .supply-article-chip { display: inline-flex; max-width: 100%; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid #e8eee9; border-radius: 7px; color: #4e5c54; background: #fafcfb; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 1.35; }
 .supply-article-code { color: var(--ink); overflow-wrap: anywhere; font-weight: 700; }
 .supply-article-chip strong { color: #65746b; white-space: nowrap; }
+.order-article-list { display: flex; max-width: 360px; flex-wrap: wrap; align-items: center; gap: 6px; }
+.order-article-item { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid #e8eee9; border-radius: 7px; background: #fafcfb; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.order-article-item strong { color: #65746b; font-size: 10px; }
 .number { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .badge { display: inline-flex; min-height: 23px; align-items: center; padding: 0 8px; border-radius: 6px; color: #4f6258; background: #eff3f0; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .badge.green { color: #19704f; background: #e8f6ef; }

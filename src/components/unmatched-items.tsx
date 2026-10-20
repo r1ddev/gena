@@ -6,6 +6,7 @@ import { asRecord, findRows, getId, requestJson, type JsonRecord } from "./api";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
+import { notifyProductCatalogChanged, ProductArticle } from "./product-hover-card";
 
 type Option = { id: string; label: string };
 const sourceLabels: Record<string, string> = {
@@ -142,6 +143,7 @@ export function UnmatchedItems() {
       const image = productImages[id];
       if (image) formData.append("image", image, image.name || "product-image");
       await requestJson(`/api/external-items?id=${encodeURIComponent(id)}`, { method: "PATCH", body: formData });
+      notifyProductCatalogChanged();
       setSuccess("Товар создан в каталоге и связан с записью Ozon.");
       setMode((current) => { const { [id]: _removed, ...rest } = current; return rest; });
       setProductDrafts((current) => { const { [id]: _removed, ...rest } = current; return rest; });
@@ -167,7 +169,7 @@ export function UnmatchedItems() {
       const setDraftValue = (field: string, value: string) => setProductDrafts((current) => ({ ...current, [id]: { ...current[id], [field]: value } }));
       const source = sourceInfoFor(row); const sourceKind = String(source.kind ?? "other");
       return <Fragment key={id}>
-        <tr><td><span className="table-primary">Артикул: {article || "—"}</span><span className="table-secondary">SKU Ozon: {ozonSku || "—"}</span></td><td><span className="table-primary">{sourceLabels[sourceKind] ?? sourceLabels.other}</span><span className="table-secondary">{sourceDetails(row)}</span></td><td>{String(row.firstSeenAt ?? "—").slice(0, 10)}</td><td>
+        <tr><td><span className="table-primary">Артикул: {article ? <ProductArticle identifier={article} identifierLabel="Артикул" fallback={row} /> : "—"}</span><span className="table-secondary">SKU Ozon: {ozonSku ? <ProductArticle identifier={ozonSku} identifierLabel="SKU Ozon" fallback={row} /> : "—"}</span></td><td><span className="table-primary">{sourceLabels[sourceKind] ?? sourceLabels.other}</span><span className="table-secondary">{sourceDetails(row)}</span></td><td>{String(row.firstSeenAt ?? "—").slice(0, 10)}</td><td>
           {currentMode === "map" ? <div className="toolbar"><select aria-label="Выберите товар каталога" value={selected[id] ?? ""} onChange={(event) => setSelected((current) => ({ ...current, [id]: event.target.value }))}><option value="">Выберите товар…</option>{products.map((product) => <option key={product.id} value={product.id}>{product.label}</option>)}</select><button className="button small" disabled={!selected[id] || busy === id} onClick={() => void decide(row, "map")}><Link2 size={12} />Связать</button><button className="icon-button" aria-label="Отмена" onClick={() => setMode((current) => ({ ...current, [id]: undefined as never }))}><XCircle size={14} /></button></div>
             : currentMode === "create" ? <span className="small-note">Форма создания ниже</span>
               : <div className="row-actions"><button className="button secondary small" disabled={products.length === 0} onClick={() => setMode((current) => ({ ...current, [id]: "map" }))}><Link2 size={12} />Сопоставить</button><button className="button secondary small" onClick={() => setMode((current) => ({ ...current, [id]: "create" }))}><Plus size={12} />Создать товар</button><button className="button secondary small" disabled={busy === id} onClick={() => void decide(row, "ignore")}><XCircle size={12} />Игнорировать</button></div>}

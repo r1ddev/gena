@@ -182,7 +182,7 @@ export async function GET(request: Request) {
           status: translatedStatus,
           returnState: returnStatesByPosting.get(posting.externalId) ?? null,
           items: items.map(({ item, productSku }) => ({
-            title: item.title, sku: productSku, offerId: item.offerId, ozonSku: item.ozonSku, quantity: item.quantity, price: item.price, mapped: Boolean(item.productId), isMarketplaceBuyout: item.isMarketplaceBuyout,
+            title: item.title, sku: productSku, offerId: item.offerId, ozonSku: item.ozonSku, productId: item.productId, quantity: item.quantity, price: item.price, mapped: Boolean(item.productId), isMarketplaceBuyout: item.isMarketplaceBuyout,
           })),
           amount: ((accrualCentsByPosting.get(posting.externalId) ?? 0) + buyoutCents) / 100,
         };
