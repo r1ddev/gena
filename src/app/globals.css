@@ -104,6 +104,10 @@ td { padding: 12px 13px; border-top: 1px solid #edf0ed; color: #34413a; font-siz
 tbody tr:hover { background: #fcfdfc; }
 .table-primary { color: var(--ink); font-weight: 700; }
 .table-secondary { display: block; margin-top: 3px; color: #929c95; font-size: 10px; }
+.supply-article-list { display: flex; max-width: 520px; flex-wrap: wrap; align-items: center; gap: 6px; }
+.supply-article-chip { display: inline-flex; max-width: 100%; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid #e8eee9; border-radius: 7px; color: #4e5c54; background: #fafcfb; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 1.35; }
+.supply-article-code { color: var(--ink); overflow-wrap: anywhere; font-weight: 700; }
+.supply-article-chip strong { color: #65746b; white-space: nowrap; }
 .number { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .badge { display: inline-flex; min-height: 23px; align-items: center; padding: 0 8px; border-radius: 6px; color: #4f6258; background: #eff3f0; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .badge.green { color: #19704f; background: #e8f6ef; }

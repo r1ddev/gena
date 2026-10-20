@@ -66,6 +66,26 @@ function orderArticleText(value: unknown) {
   return [...quantities].map(([article, quantity]) => `${article} × ${displayValue(quantity, "quantity")}`).join("; ") || "—";
 }
 
+function supplyArticleList(row: JsonRecord) {
+  if (!Array.isArray(row.lines)) return null;
+  const lines = row.lines.flatMap((value, index) => {
+    const line = asRecord(value);
+    if (!line) return [];
+    return [{
+      key: getId(line) ?? `${stringValue(line.sku) ?? "article"}-${index}`,
+      sku: stringValue(line.sku) || "Артикул не указан",
+      quantity: displayValue(line.quantity ?? 0, "quantity"),
+    }];
+  });
+  if (lines.length === 0) return null;
+  return <div className="supply-article-list" aria-label={`Артикулы в поставке: ${lines.length}`}>
+    {lines.map((line) => <span className="supply-article-chip" key={line.key}>
+      <span className="supply-article-code">{line.sku}</span>
+      <strong>× {line.quantity}</strong>
+    </span>)}
+  </div>;
+}
+
 function labelFor(key: string) {
   const labels: Record<string, string> = {
     sku: "Артикул", title: "Товар", category: "Категория", offerId: "Артикул Ozon", ozonSku: "SKU Ozon",
@@ -323,6 +343,10 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
             }))} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || config.editUrl || rowActions ? ["Действия"] : []} /><tbody>{loadError ? <TableEmptyRow colSpan={tableColumnCount} message={loadError} /> : config.remotePageSize && loading ? <TableEmptyRow colSpan={tableColumnCount} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={tableColumnCount} message="По заданным условиям совпадений нет." onClear={clearTableFilters} /> : visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
               const value = valueAt(row, column.key);
               const displayKind = column.kind === "date" || column.kind === "money" || column.kind === "quantity" || column.kind === "status" ? column.kind : undefined;
+              if (column.key === "articles") {
+                const articles = supplyArticleList(row);
+                if (articles) return <td key={column.key}>{articles}</td>;
+              }
               if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, displayKind)}</span>{typeof row.sku === "string" && column.key !== "sku" && column.key !== "offerId" && <span className="table-secondary">{row.sku}</span>}</td>;
               if (column.key === "article") return <td key={column.key}>{orderArticleText(row.items)}</td>;
               const rendered = displayValue(value, displayKind);
