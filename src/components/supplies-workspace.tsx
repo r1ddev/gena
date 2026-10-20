@@ -6,6 +6,7 @@ import { asRecord, findRows, getId, localToday, requestJson, type JsonRecord } f
 import { ResourcePage } from "./resource-page";
 
 type ProductOption = { id: string; label: string };
+type SupplyEditLine = { productId: string; quantity: string; sku: string };
 
 function productOptions(value: unknown): ProductOption[] {
   return findRows(value).flatMap((row) => {
@@ -61,9 +62,9 @@ function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: Json
   const id = getId(supply);
   const initialLines = Array.isArray(supply.lines) ? supply.lines.flatMap((value) => {
     const line = asRecord(value);
-    return line && typeof line.productId === "string" ? [{ productId: line.productId, quantity: String(line.quantity ?? "") }] : [];
+    return line && typeof line.productId === "string" ? [{ productId: line.productId, quantity: String(line.quantity ?? ""), sku: typeof line.sku === "string" ? line.sku : "" }] : [];
   }) : [];
-  const [lines, setLines] = useState(initialLines.length ? initialLines : [{ productId: "", quantity: "" }]);
+  const [lines, setLines] = useState<SupplyEditLine[]>(initialLines.length ? initialLines : [{ productId: "", quantity: "", sku: "" }]);
   const [suppliedAt, setSuppliedAt] = useState(typeof supply.suppliedAt === "string" ? supply.suppliedAt.slice(0, 10) : localToday());
   const [shippingCost, setShippingCost] = useState(String(supply.shippingCost ?? "0"));
   const [note, setNote] = useState(String(supply.note ?? ""));
@@ -101,11 +102,15 @@ function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: Json
         </div>
         <div className="form-help" style={{ marginBottom: 8, color: "#5f6d64", fontWeight: 700 }}>Состав поставки</div>
         <div className="line-items">{lines.map((line, index) => <div className="line-item" key={index}>
-          <div className="field"><label htmlFor={`edit-supply-product-${index}`}>Артикул *</label><select id={`edit-supply-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, productId: event.target.value } : item))}><option value="">Выберите артикул…</option>{products.filter((product) => product.id === line.productId || !lines.some((other, row) => row !== index && other.productId === product.id)).map((product) => <option value={product.id} key={product.id}>{product.label}</option>)}</select></div>
+          <div className="field"><label htmlFor={`edit-supply-product-${index}`}>Артикул *</label><select id={`edit-supply-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, row) => {
+            if (row !== index) return item;
+            const productId = event.target.value;
+            return { ...item, productId, sku: products.find((product) => product.id === productId)?.label ?? item.sku };
+          }))}><option value="">Выберите артикул…</option>{line.productId && !products.some((product) => product.id === line.productId) && <option value={line.productId}>{line.sku || "Артикул сохранён"}</option>}{products.filter((product) => product.id === line.productId || !lines.some((other, row) => row !== index && other.productId === product.id)).map((product) => <option value={product.id} key={product.id}>{product.label}</option>)}</select></div>
           <div className="field"><label htmlFor={`edit-supply-quantity-${index}`}>Количество, шт. *</label><input id={`edit-supply-quantity-${index}`} type="number" min="1" step="1" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, quantity: event.target.value } : item))} /></div>
           <button type="button" className="icon-button" aria-label="Удалить товар из поставки" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((_, row) => row !== index))}><Trash2 size={14} /></button>
         </div>)}</div>
-        <div className="form-actions" style={{ justifyContent: "space-between" }}><button type="button" className="button secondary" onClick={() => setLines((current) => [...current, { productId: "", quantity: "" }])}><Plus size={14} />Добавить товар</button><div className="toolbar"><button type="button" className="button secondary" onClick={onClose}>Отмена</button><button className="button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></div></div>
+        <div className="form-actions" style={{ justifyContent: "space-between" }}><button type="button" className="button secondary" onClick={() => setLines((current) => [...current, { productId: "", quantity: "", sku: "" }])}><Plus size={14} />Добавить товар</button><div className="toolbar"><button type="button" className="button secondary" onClick={onClose}>Отмена</button><button className="button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></div></div>
       </form>
     </section>
   </div>;
