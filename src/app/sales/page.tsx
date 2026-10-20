@@ -11,8 +11,8 @@ export default function SalesPage() {
     fields: [],
     columns: [
       { key: "externalId", label: "Отправление", primary: true }, { key: "orderDate", label: "Создан", kind: "date" },
-      { key: "status", label: "Статус", kind: "status" }, { key: "deliveredAt", label: "Доставлен", kind: "date" },
-      { key: "returnState", label: "Возврат", kind: "status" }, { key: "items", label: "Товар / артикул" }, { key: "amount", label: "Денежный итог", kind: "money" },
+      { key: "status", label: "Статус", kind: "status" }, { key: "items", label: "Товар" },
+      { key: "article", label: "Артикул" }, { key: "amount", label: "Денежный итог", kind: "money" },
     ],
     emptyTitle: "Заказов пока нет", emptyDescription: "Нажмите «Синхронизировать продажи», чтобы загрузить заказы, статусы и суммы.",
   }} actions={<OzonSyncButton kind="orders" label="Синхронизировать продажи" completedMessage="Заказы, статусы и связанные денежные суммы обновлены." />} />;

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Package, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
-import { asRecord, displayValue, findRows, getId, localToday, requestJson, valueAt, type JsonRecord } from "./api";
+import { asRecord, displayValue, findRows, getId, localToday, requestJson, stringValue, valueAt, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 
@@ -46,6 +46,18 @@ export function buildResourcePayload(fields: FieldConfig[], formValues: Record<s
     payload[field.name] = field.type === "number" ? Number(value) : value;
   }
   return payload;
+}
+
+function orderItemText(value: unknown, showArticle: boolean) {
+  if (!Array.isArray(value)) return displayValue(value);
+  return value.map((item) => {
+    const row = asRecord(item);
+    if (!row) return String(item);
+    const title = stringValue(row.title) ?? "Товар";
+    const article = stringValue(row.sku) ?? stringValue(row.offerId) ?? stringValue(row.ozonSku);
+    const quantity = row.quantity == null ? "" : ` × ${displayValue(row.quantity, "quantity")}`;
+    return showArticle ? `${article ?? "Артикул не указан"}${quantity}` : `${title}${quantity}`;
+  }).join("; ") || "—";
 }
 
 function labelFor(key: string) {
@@ -212,8 +224,10 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
             : <div className="table-wrap"><table><thead><tr>{config.columns.map((column) => <th key={column.key}>{column.label}</th>)}{(config.deleteUrl || rowActions) && <th aria-label="Действия" />}</tr></thead><tbody>{visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
               const value = valueAt(row, column.key);
               if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, column.kind)}</span>{typeof row.sku === "string" && column.key !== "sku" && <span className="table-secondary">{row.sku}</span>}</td>;
+              if (column.key === "items") return <td key={column.key}>{orderItemText(value, false)}</td>;
+              if (column.key === "article") return <td key={column.key}>{orderItemText(row.items, true)}</td>;
               const rendered = column.key === "archived" ? (value ? "В архиве" : "Активен") : displayValue(value, column.kind);
-              return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") || column.key === "archived" ? <span className={`badge ${column.key === "archived" && !value ? "green" : ""}`}>{rendered}</span> : rendered}</td>;
+              return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") || column.key === "archived" ? <><span className={`badge ${column.key === "archived" && !value ? "green" : ""}`}>{rendered}</span>{column.key === "status" && typeof row.returnState === "string" && <span className="table-secondary">{row.returnState}</span>}</> : rendered}</td>;
             })}{(config.deleteUrl || rowActions) && <td><div className="row-actions">{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
       {pagination && pagination.totalPages > 1 && <nav className="pagination-controls" aria-label={`Страницы: ${config.title}`} aria-busy={loading}>
         {pageItems(pagination.page, pagination.totalPages).map((item, index) => item === "ellipsis"
