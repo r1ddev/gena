@@ -62,7 +62,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         ))}
         <div className="sidebar-spacer" />
         <Link className={`nav-link ${pathname.startsWith("/settings") ? "active" : ""}`} href="/settings" aria-current={pathname.startsWith("/settings") ? "page" : undefined} onClick={() => setMobileOpen(false)}><Settings2 size={16} strokeWidth={1.8} /><span>Настройки</span></Link>
-        <div className="local-note"><span className="local-dot" /><span>Данные хранятся на этом компьютере</span></div>
         <div className="sidebar-bottom">Личный кабинет · Ozon FBO</div>
       </aside>
 
@@ -74,7 +73,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <div className="topbar-right">
             <span className="today">{today}</span>
-            <span className="status-pill"><span className="local-dot" />Локально</span>
           </div>
         </header>
         <main className="page-content">{children}</main>

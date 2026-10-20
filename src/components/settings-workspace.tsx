@@ -74,7 +74,7 @@ export function SettingsWorkspace() {
             <div className="field"><label htmlFor="sync-interval">Интервал, часов</label><select id="sync-interval" value={interval} onChange={(event) => setInterval(event.target.value)}><option value="24">Раз в день</option><option value="12">Каждые 12 часов</option><option value="6">Каждые 6 часов</option></select></div>
             <div className="field"><label htmlFor="last-sync">Последнее обновление</label><div id="last-sync" className="status-pill" style={{ width: "fit-content", minHeight: 38, borderRadius: 8 }}>{lastSync ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(lastSync)) : "Ещё не запускалось"}</div></div>
           </div>
-          <div className="form-actions"><span className="form-help"><Clock3 size={13} style={{ display: "inline", verticalAlign: "-2px" }} /> Автоматическое обновление выполняется, пока запущен сервис на этом компьютере.</span></div>
+          <div className="form-actions"><span className="form-help"><Clock3 size={13} style={{ display: "inline", verticalAlign: "-2px" }} /> Автоматическое обновление выполняется, пока сервис запущен.</span></div>
         </div>
         <div className="form-actions"><button className="button" disabled={saving || loading}><Save size={14} />{saving ? "Сохраняем…" : "Сохранить настройки"}</button></div>
       </form>
