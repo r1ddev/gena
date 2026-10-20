@@ -282,6 +282,22 @@ describe("calculateAccounting", () => {
     expect(result.products[0].ozonStock).toBe("0.000");
   });
 
+  it("does not move stock again when a delivered order is returned to Ozon", () => {
+    const result = calculateAccounting(
+      base({
+        receipts: [{ productId: "p1", quantity: "1", unitCost: "50" }],
+        supplies: [{ productId: "p1", quantity: "1", shippingCost: "0" }],
+        postings: [{ id: "returned", status: "delivered", deliveredAt: "2026-10-01T10:00:00Z", isMarketplaceBuyout: false }],
+        postingItems: [{ postingId: "returned", productId: "p1", quantity: "1", price: "300" }],
+        returns: [{ postingId: "returned", productId: "p1", quantity: "1", destination: "ozon", receivedBySellerAt: null, availableAtOzon: "2026-10-10T10:00:00Z" }],
+      }),
+      new Date("2026-10-20T12:00:00Z"),
+    );
+
+    expect(result.products[0].sellerStock).toBe("0.000");
+    expect(result.products[0].ozonStock).toBe("0.000");
+  });
+
   it("does not restore more units than were removed by the linked posting", () => {
     const result = calculateAccounting(
       base({
