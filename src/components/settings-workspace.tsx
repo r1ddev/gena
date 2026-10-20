@@ -73,14 +73,14 @@ export function SettingsWorkspace() {
         </div>
         <div className="settings-section">
           <div className="settings-title">Начало учёта</div>
-          <p className="settings-description">Первая загрузка заказов, возвратов и финансовых операций начнётся с этой даты. Повторная синхронизация запрашивает изменения за последние 45 дней, но не раньше этой даты.</p>
+          <p className="settings-description">Первая загрузка заказов, сумм по заказам и возвратов начнётся с этой даты. Повторная синхронизация запрашивает изменения за последние 45 дней, но не раньше этой даты.</p>
           <div className="form-grid">
             <div className="field"><label htmlFor="accounting-start-date">Начинать учёт с</label><input id="accounting-start-date" type="date" value={accountingStartDate} onChange={(event) => setAccountingStartDate(event.target.value)} required disabled={loading} /></div>
           </div>
         </div>
         <div className="settings-section">
           <div className="settings-title">Автоматическое обновление</div>
-          <p className="settings-description">По расписанию загружаются заказы и статусы, возвраты, отчёты о выкупах, начисления и списания. Та же синхронизация запускается вручную с главной, продаж, возвратов или этой страницы.</p>
+          <p className="settings-description">По расписанию обновляются заказы и их статусы, денежный итог по каждому отправлению, возвраты и другие операции Ozon, влияющие на деньги и остатки. Ту же синхронизацию можно запустить с главной страницы, из продаж, возвратов или отсюда.</p>
           <div className="form-grid">
             <div className="field"><label htmlFor="sync-interval">Интервал, часов</label><select id="sync-interval" value={interval} onChange={(event) => setInterval(event.target.value)}><option value="24">Раз в день</option><option value="12">Каждые 12 часов</option><option value="6">Каждые 6 часов</option></select></div>
             <div className="field"><label htmlFor="last-sync">Последнее обновление</label><div id="last-sync" className="status-pill" style={{ width: "fit-content", minHeight: 38, borderRadius: 8 }}>{lastSync ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(lastSync)) : "Ещё не запускалось"}</div></div>
