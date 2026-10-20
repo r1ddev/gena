@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Link2, Plus, XCircle } from "lucide-react";
 import { asRecord, findRows, getId, requestJson, type JsonRecord } from "./api";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
@@ -29,7 +29,7 @@ function offerIdsFor(row: JsonRecord) {
   const related = Array.isArray(row.relatedOfferIds) ? row.relatedOfferIds.filter((value): value is string => typeof value === "string" && value.length > 0) : [];
   return [...new Set([offerIdFor(row), ...related].filter(Boolean))];
 }
-function articleFor(row: JsonRecord) { const offerIds = offerIdsFor(row); return offerIds.length === 1 ? offerIds[0] : ""; }
+function articleFor(row: JsonRecord) { const offerId = offerIdFor(row); if (offerId) return offerId; const offerIds = offerIdsFor(row); return offerIds.length === 1 ? offerIds[0] : ""; }
 function nameFor(row: JsonRecord) {
   const title = typeof row.title === "string" ? row.title.trim() : "";
   return title && title !== `Ozon SKU ${ozonSkuFor(row)}` ? title : "";
@@ -69,8 +69,7 @@ export function UnmatchedItems() {
   const [busy, setBusy] = useState("");
   const [mode, setMode] = useState<Record<string, "map" | "create" | undefined>>({});
   const [selected, setSelected] = useState<Record<string, string>>({});
-  const [sku, setSku] = useState<Record<string, string>>({});
-  const [title, setTitle] = useState<Record<string, string>>({});
+  const [productDrafts, setProductDrafts] = useState<Record<string, Record<string, string>>>({});
 
   const refresh = useCallback(async () => {
     setLoading(true); setError("");
@@ -96,15 +95,37 @@ export function UnmatchedItems() {
     };
   }, [refresh]);
 
-  async function decide(row: JsonRecord, action: "map" | "create" | "ignore") {
+  async function decide(row: JsonRecord, action: "map" | "ignore") {
     const id = getId(row); if (!id) return;
     setBusy(id); setError(""); setSuccess("");
-    const body = action === "map" ? { action, productId: selected[id] } : action === "create" ? { action, sku: sku[id] || articleFor(row), title: title[id] || nameFor(row) || "Товар Ozon", category: "Без категории" } : { action };
+    const body = action === "map" ? { action, productId: selected[id] } : { action };
     try {
       await requestJson(`/api/external-items?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
-      setSuccess(action === "map" ? "Артикул связан с товаром каталога." : action === "create" ? "Товар создан и связан с артикулом Ozon." : "Выбор игнорировать сохранён для последующих синхронизаций.");
+      setSuccess(action === "map" ? "Артикул связан с товаром каталога." : "Выбор игнорировать сохранён для последующих синхронизаций.");
       setMode((current) => { const { [id]: _removed, ...rest } = current; return rest; }); await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось сохранить выбор"); }
+    finally { setBusy(""); }
+  }
+
+  async function createProduct(event: React.FormEvent<HTMLFormElement>, row: JsonRecord, id: string, defaults: { sku: string; title: string; category: string; offerId: string; ozonSku: string }) {
+    event.preventDefault();
+    setBusy(id); setError(""); setSuccess("");
+    const draft = productDrafts[id] ?? {};
+    const body = {
+      action: "create",
+      sku: draft.sku ?? defaults.sku,
+      title: draft.title ?? defaults.title,
+      category: (draft.category ?? defaults.category).trim() || "Без категории",
+      offerId: draft.offerId ?? defaults.offerId,
+      ozonSku: draft.ozonSku ?? defaults.ozonSku,
+    };
+    try {
+      await requestJson(`/api/external-items?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
+      setSuccess("Товар создан в каталоге и связан с записью Ozon.");
+      setMode((current) => { const { [id]: _removed, ...rest } = current; return rest; });
+      setProductDrafts((current) => { const { [id]: _removed, ...rest } = current; return rest; });
+      await refresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось создать товар"); }
     finally { setBusy(""); }
   }
 
@@ -119,12 +140,33 @@ export function UnmatchedItems() {
     {loading ? <div className="panel-body"><div className="loading-line" /></div> : rows.length === 0 && !error ? <div className="empty-state" style={{ minHeight: 130 }}><div><div className="empty-icon"><CheckCircle2 size={18} /></div><div className="empty-title">Нет записей без связи с каталогом</div><p className="empty-description">Такие записи появятся после синхронизации Ozon.</p></div></div> : <div className="table-wrap"><table><thead><tr><th>Артикул продавца / SKU Ozon</th><th>Источник и сумма</th><th>Впервые замечен</th><th>Действие</th></tr></thead><tbody>{rows.map((row, index) => {
       const id = getId(row) ?? String(index); const currentMode = mode[id]; const ozonSku = ozonSkuFor(row); const article = articleFor(row); const productName = nameFor(row);
       const offerIds = offerIdsFor(row);
+      const defaults = { sku: article, title: productName, category: "", offerId: article, ozonSku };
+      const draft = productDrafts[id] ?? {};
+      const values = { sku: draft.sku ?? defaults.sku, title: draft.title ?? defaults.title, category: draft.category ?? defaults.category, offerId: draft.offerId ?? defaults.offerId, ozonSku: draft.ozonSku ?? defaults.ozonSku };
+      const setDraftValue = (field: string, value: string) => setProductDrafts((current) => ({ ...current, [id]: { ...current[id], [field]: value } }));
       const source = sourceInfoFor(row); const sourceKind = String(source.kind ?? "other");
-      return <tr key={id}><td><span className="table-primary">Артикул продавца: {offerIds.length ? offerIds.join(", ") : "—"}</span><span className="table-secondary">SKU Ozon: {ozonSku || "—"}</span></td><td><span className="table-primary">{sourceLabels[sourceKind] ?? sourceLabels.other}</span><span className="table-secondary">{sourceDetails(row)}</span></td><td>{String(row.firstSeenAt ?? "—").slice(0, 10)}</td><td>
-        {currentMode === "map" ? <div className="toolbar"><select aria-label="Выберите товар каталога" value={selected[id] ?? ""} onChange={(event) => setSelected((current) => ({ ...current, [id]: event.target.value }))}><option value="">Выберите товар…</option>{products.map((product) => <option key={product.id} value={product.id}>{product.label}</option>)}</select><button className="button small" disabled={!selected[id] || busy === id} onClick={() => void decide(row, "map")}><Link2 size={12} />Связать</button><button className="icon-button" aria-label="Отмена" onClick={() => setMode((current) => ({ ...current, [id]: undefined as never }))}><XCircle size={14} /></button></div>
-          : currentMode === "create" ? <div className="toolbar"><input aria-label="Внутренний артикул" value={sku[id] ?? article} onChange={(event) => setSku((current) => ({ ...current, [id]: event.target.value }))} placeholder="Артикул" /><input aria-label="Название товара" value={title[id] ?? productName} onChange={(event) => setTitle((current) => ({ ...current, [id]: event.target.value }))} placeholder="Название" /><button className="button small" disabled={(!sku[id] && !article) || !(title[id] ?? productName).trim() || busy === id} onClick={() => void decide(row, "create")}><Plus size={12} />Создать</button><button className="icon-button" aria-label="Отмена" onClick={() => setMode((current) => ({ ...current, [id]: undefined }))}><XCircle size={14} /></button></div>
-          : <div className="row-actions"><button className="button secondary small" disabled={products.length === 0} onClick={() => setMode((current) => ({ ...current, [id]: "map" }))}><Link2 size={12} />Сопоставить</button><button className="button secondary small" onClick={() => setMode((current) => ({ ...current, [id]: "create" }))}><Plus size={12} />Создать товар</button><button className="button secondary small" disabled={busy === id} onClick={() => void decide(row, "ignore")}><XCircle size={12} />Игнорировать</button></div>}
-      </td></tr>;
+      return <Fragment key={id}>
+        <tr><td><span className="table-primary">Артикул продавца: {offerIds.length ? offerIds.join(", ") : "—"}</span><span className="table-secondary">SKU Ozon: {ozonSku || "—"}</span></td><td><span className="table-primary">{sourceLabels[sourceKind] ?? sourceLabels.other}</span><span className="table-secondary">{sourceDetails(row)}</span></td><td>{String(row.firstSeenAt ?? "—").slice(0, 10)}</td><td>
+          {currentMode === "map" ? <div className="toolbar"><select aria-label="Выберите товар каталога" value={selected[id] ?? ""} onChange={(event) => setSelected((current) => ({ ...current, [id]: event.target.value }))}><option value="">Выберите товар…</option>{products.map((product) => <option key={product.id} value={product.id}>{product.label}</option>)}</select><button className="button small" disabled={!selected[id] || busy === id} onClick={() => void decide(row, "map")}><Link2 size={12} />Связать</button><button className="icon-button" aria-label="Отмена" onClick={() => setMode((current) => ({ ...current, [id]: undefined as never }))}><XCircle size={14} /></button></div>
+            : currentMode === "create" ? <span className="small-note">Форма создания ниже</span>
+              : <div className="row-actions"><button className="button secondary small" disabled={products.length === 0} onClick={() => setMode((current) => ({ ...current, [id]: "map" }))}><Link2 size={12} />Сопоставить</button><button className="button secondary small" onClick={() => setMode((current) => ({ ...current, [id]: "create" }))}><Plus size={12} />Создать товар</button><button className="button secondary small" disabled={busy === id} onClick={() => void decide(row, "ignore")}><XCircle size={12} />Игнорировать</button></div>}
+        </td></tr>
+        {currentMode === "create" && <tr><td colSpan={4}>
+          <section className="panel form-panel" aria-label="Новый товар">
+            <div className="panel-head"><h2>Новый товар</h2><span className="small-note">Поля со звёздочкой обязательны</span></div>
+            <form className="panel-body" onSubmit={(event) => void createProduct(event, row, id, defaults)}>
+              <div className="form-grid">
+                <div className="field"><label htmlFor={`new-sku-${id}`}>Внутренний артикул *</label><input id={`new-sku-${id}`} value={values.sku} required placeholder="Например, BAG-001" onChange={(event) => setDraftValue("sku", event.target.value)} /></div>
+                <div className="field wide"><label htmlFor={`new-title-${id}`}>Название товара *</label><input id={`new-title-${id}`} value={values.title} required onChange={(event) => setDraftValue("title", event.target.value)} /></div>
+                <div className="field"><label htmlFor={`new-category-${id}`}>Категория</label><input id={`new-category-${id}`} value={values.category} placeholder="Например, аксессуары" onChange={(event) => setDraftValue("category", event.target.value)} /></div>
+                <div className="field"><label htmlFor={`new-offer-id-${id}`}>Артикул Ozon</label><input id={`new-offer-id-${id}`} value={values.offerId} onChange={(event) => setDraftValue("offerId", event.target.value)} /></div>
+                <div className="field"><label htmlFor={`new-ozon-sku-${id}`}>SKU Ozon</label><input id={`new-ozon-sku-${id}`} value={values.ozonSku} onChange={(event) => setDraftValue("ozonSku", event.target.value)} /></div>
+              </div>
+              <div className="form-actions"><button type="button" className="button secondary" onClick={() => setMode((current) => ({ ...current, [id]: undefined }))}>Отмена</button><button className="button" disabled={busy === id}>{busy === id ? "Сохраняем…" : "Сохранить"}</button></div>
+            </form>
+          </section>
+        </td></tr>}
+      </Fragment>;
     })}</tbody></table></div>}
   </section>;
 }

@@ -46,7 +46,14 @@ function feeFacts(raw: Record<string, unknown>, sku: string) {
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("map"), productId: z.string().uuid() }),
-  z.object({ action: z.literal("create"), sku: z.string().trim().min(1).max(100), title: z.string().trim().min(1).max(300), category: z.string().trim().max(120).optional().default("Без категории") }),
+  z.object({
+    action: z.literal("create"),
+    sku: z.string().trim().min(1).max(100),
+    title: z.string().trim().min(1).max(300),
+    category: z.string().trim().max(120).optional().default("Без категории"),
+    offerId: z.string().trim().max(120).optional().default(""),
+    ozonSku: z.string().trim().max(40).optional().default(""),
+  }),
   z.object({ action: z.literal("ignore") }),
 ]);
 
@@ -192,13 +199,17 @@ export async function PATCH(request: Request) {
       }
       const [product] = await tx.select().from(products).where(eq(products.id, productId)).limit(1);
       if (!product) throw new Error("Сначала создайте товар в каталоге.");
-      if (!external.offerId && !external.ozonSku) throw new Error("У события нет артикула Ozon, по которому можно сохранить сопоставление.");
+      const offerId = body.action === "create" ? body.offerId || external.offerId : external.offerId;
+      const ozonSku = body.action === "create" ? body.ozonSku || external.ozonSku : external.ozonSku;
+      if (!offerId && !ozonSku) throw new Error("Укажите артикул продавца или SKU Ozon, чтобы связать товар с записью.");
 
-      const linked = await tx.select().from(productLinks).where(eq(productLinks.offerId, external.offerId));
-      const conflict = linked.find((row) => (row.ozonSku ?? "") === external.ozonSku && row.productId !== productId);
+      const linked = offerId
+        ? await tx.select().from(productLinks).where(eq(productLinks.offerId, offerId))
+        : await tx.select().from(productLinks).where(eq(productLinks.ozonSku, ozonSku));
+      const conflict = linked.find((row) => (row.ozonSku ?? "") === ozonSku && row.productId !== productId);
       if (conflict) throw new Error("Этот артикул Ozon уже связан с другим товаром.");
-      if (!linked.some((row) => (row.ozonSku ?? "") === external.ozonSku && row.productId === productId)) {
-        await tx.insert(productLinks).values({ productId, offerId: external.offerId, ozonSku: external.ozonSku || null });
+      if (!linked.some((row) => (row.ozonSku ?? "") === ozonSku && row.productId === productId)) {
+        await tx.insert(productLinks).values({ productId, offerId, ozonSku: ozonSku || null });
       }
 
       const disposition = body.action === "create" ? "created" : "mapped";
