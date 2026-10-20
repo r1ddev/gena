@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveOzonSyncRange, splitUtcDateRange } from "./sync-range";
+import { isValidHistoryStartDate, resolveOzonSyncRange, splitUtcDateRange } from "./sync-range";
 
 describe("resolveOzonSyncRange", () => {
   const startDate = "2025-10-20";
@@ -17,6 +17,12 @@ describe("resolveOzonSyncRange", () => {
       .toEqual(new Date("2025-10-20T00:00:00.000Z"));
     expect(resolveOzonSyncRange(startDate, new Date("2026-01-01T12:00:00.000Z"), now).from)
       .toEqual(new Date("2025-11-17T00:00:00.000Z"));
+  });
+
+  it("accepts real calendar dates through today only", () => {
+    expect(isValidHistoryStartDate("2025-02-28", now)).toBe(true);
+    expect(isValidHistoryStartDate("2025-02-30", now)).toBe(false);
+    expect(isValidHistoryStartDate("2026-10-21", now)).toBe(false);
   });
 });
 
