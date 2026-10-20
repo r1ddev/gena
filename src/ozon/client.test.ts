@@ -13,6 +13,11 @@ describe("ozonRetryDelay", () => {
     expect(ozonRetryDelay(2, "later")).toBe(4_000);
   });
 
+  it("accepts the HTTP-date form of retry-after", () => {
+    const now = new Date("2026-10-20T12:00:00.000Z").getTime();
+    expect(ozonRetryDelay(0, "Tue, 20 Oct 2026 12:00:02 GMT", now)).toBe(2_000);
+  });
+
   it("spaces consecutive API calls at least one second apart", () => {
     expect(ozonRequestWait(10_000, 10_500)).toBe(500);
     expect(ozonRequestWait(10_000, 11_000)).toBe(0);

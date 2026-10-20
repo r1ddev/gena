@@ -286,6 +286,7 @@ export const appSettings = pgTable(
     id: integer("id").primaryKey().default(1),
     ozonClientId: text("ozon_client_id"),
     ozonApiKeyEncrypted: text("ozon_api_key_encrypted"),
+    accountingStartDate: date("accounting_start_date").notNull().default("2025-10-20"),
     syncIntervalHours: integer("sync_interval_hours").notNull().default(24),
     lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

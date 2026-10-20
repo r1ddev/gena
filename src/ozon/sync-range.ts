@@ -1,5 +1,7 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+export const DEFAULT_ACCOUNTING_START_DATE = "2025-10-20";
+
 function utcStartOfDay(date: Date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }

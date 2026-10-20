@@ -3,11 +3,13 @@ import { z } from "zod";
 import { db } from "@/db";
 import { appSettings } from "@/db/schema";
 import { encryptSecret } from "@/security/secrets";
+import { DEFAULT_ACCOUNTING_START_DATE, isValidHistoryStartDate } from "@/ozon/sync-range";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 
 const settingsSchema = z.object({
   clientId: z.string().trim().min(1).max(100),
   apiKey: z.string().trim().max(500).optional().default(""),
+  accountingStartDate: z.string().refine((value) => isValidHistoryStartDate(value), "Укажи существующую дату не позже сегодняшней."),
   syncIntervalHours: z.number().int().min(1).max(168).optional().default(24),
 });
 
@@ -18,6 +20,7 @@ export async function GET(request: Request) {
       configured: Boolean(settings?.ozonClientId && settings?.ozonApiKeyEncrypted),
       clientId: settings?.ozonClientId ?? "",
       hasApiKey: Boolean(settings?.ozonApiKeyEncrypted),
+      accountingStartDate: settings?.accountingStartDate ?? DEFAULT_ACCOUNTING_START_DATE,
       syncIntervalHours: settings?.syncIntervalHours ?? 24,
       lastSyncAt: settings?.lastSyncAt?.toISOString() ?? null,
       updatedAt: settings?.updatedAt?.toISOString() ?? null,
@@ -35,6 +38,7 @@ export async function POST(request: Request) {
       id: 1,
       ozonClientId: body.clientId,
       ...(body.apiKey ? { ozonApiKeyEncrypted: encryptSecret(body.apiKey) } : {}),
+      accountingStartDate: body.accountingStartDate,
       syncIntervalHours: body.syncIntervalHours,
       updatedAt: new Date(),
     };
@@ -43,6 +47,7 @@ export async function POST(request: Request) {
       set: {
         ozonClientId: values.ozonClientId,
         ...(values.ozonApiKeyEncrypted ? { ozonApiKeyEncrypted: values.ozonApiKeyEncrypted } : {}),
+        accountingStartDate: values.accountingStartDate,
         syncIntervalHours: values.syncIntervalHours,
         updatedAt: values.updatedAt,
       },
@@ -51,6 +56,7 @@ export async function POST(request: Request) {
       saved: true,
       clientId: body.clientId,
       hasApiKey: true,
+      accountingStartDate: body.accountingStartDate,
       syncIntervalHours: body.syncIntervalHours,
     });
   } catch (error) { return errorResponse(error); }

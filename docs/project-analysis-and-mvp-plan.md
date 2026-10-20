@@ -56,6 +56,7 @@ The calculation inputs and deletion/recalculation cases are documented in [accou
 - Derived stock, cost, cash and profit views, plus separate preliminary sales and nominal profit.
 - Ozon FBO posting, return, daily finance, buyout report, and decommission report adapters; manual and scheduled sync entry points.
 - Encrypted settings, local daily backups, and a database replacement restore workflow.
+- Configurable Ozon history start date; long history requests are split into bounded periods and API calls are rate-limited with retry handling.
 
 ### Still required before calling the service verified for daily use
 

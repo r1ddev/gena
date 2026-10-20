@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowDownRight, ArrowUpRight, Boxes, CircleDollarSign, C
 import { asRecord, displayValue, findRows, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { UnmatchedItems } from "./unmatched-items";
+import { latestOzonSyncNotice, unmatchedItemsNotice } from "./dashboard-summary";
 
 type Overview = JsonRecord & { products?: unknown; recentOrders?: unknown; pendingReturns?: unknown; reconciliationErrors?: unknown; profitReconciliationIssues?: unknown };
 
@@ -50,20 +51,46 @@ export function Dashboard() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [syncError, setSyncError] = useState("");
+  const [syncJobs, setSyncJobs] = useState<JsonRecord[]>([]);
 
   const refresh = useCallback(async () => {
     setLoading(true); setError("");
     try {
       const result = asRecord(await requestJson("/api/dashboard"));
       setOverview((asRecord(result?.data) ?? result) as Overview | null);
+      setSyncJobs(findRows(result?.syncJobs));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось загрузить обзор"); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
+  const refreshSyncJobs = useCallback(async () => {
+    try {
+      const response = await requestJson("/api/sync");
+      const result = asRecord(response);
+      const jobs = findRows(result?.items ?? response);
+      setSyncJobs(jobs);
+      return jobs;
+    } catch (reason) {
+      setSyncError(reason instanceof Error ? reason.message : "Не удалось проверить состояние обновления Ozon");
+      return [];
+    }
+  }, []);
+
+  const syncIsActive = syncJobs.some((job) => job.status === "running" || job.status === "queued");
+  useEffect(() => {
+    if (!syncIsActive) return;
+    const timer = setInterval(() => {
+      void refreshSyncJobs().then((jobs) => {
+        if (jobs.length && jobs[0].status !== "running" && jobs[0].status !== "queued") void refresh();
+      });
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [refresh, refreshSyncJobs, syncIsActive]);
+
   async function sync() {
     setSyncing(true); setSyncMessage(""); setSyncError("");
-    try { await requestJson("/api/sync", { method: "POST", body: JSON.stringify({ kind: "full" }) }); setSyncMessage("Обновление Ozon запущено. Данные появятся после завершения синхронизации."); }
+    try { await requestJson("/api/sync", { method: "POST", body: JSON.stringify({ kind: "full" }) }); await refreshSyncJobs(); setSyncMessage("Обновление Ozon запущено. Статус и результат будут видны на этой странице."); }
     catch (reason) { setSyncError(reason instanceof Error ? reason.message : "Не удалось запустить обновление"); }
     finally { setSyncing(false); }
   }
@@ -83,16 +110,25 @@ export function Dashboard() {
   const costingIssues = Array.isArray(overview?.costingIssues) ? overview!.costingIssues as JsonRecord[] : [];
   const profitReconciliationIssues = Array.isArray(overview?.profitReconciliationIssues) ? overview!.profitReconciliationIssues as JsonRecord[] : [];
   const unrecognizedFinanceAmount = numeric(overview?.unrecognizedFinanceAmount);
+  const unresolvedExternalItems = findRows(overview?.unresolvedExternalItems);
+  const unmatchedNotice = unmatchedItemsNotice(unresolvedExternalItems.length, unrecognizedFinanceAmount);
+  const latestSyncNotice = latestOzonSyncNotice(syncJobs[0] ?? findRows(overview?.syncJobs)[0]);
 
   return <>
     <PageHeader eyebrow="Панель управления" title="Обзор магазина" description="Коротко о деньгах, остатках и текущих операциях в вашем магазине." actions={<div className="toolbar"><button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Обновить</button><button className="button" onClick={() => void sync()} disabled={syncing}><RefreshCw size={14} className={syncing ? "spin" : ""} />{syncing ? "Запускаем…" : "Обновить из Ozon"}</button></div>} />
     {(error || syncError) && <div className="error-banner" role="alert"><AlertTriangle size={15} />{error || syncError}</div>}
     {syncMessage && <div className="success-banner" role="status">{syncMessage}</div>}
+    {latestSyncNotice && <div className={`notice ${latestSyncNotice.tone === "warning" ? "critical" : ""}`} role={latestSyncNotice.tone === "warning" ? "alert" : "status"} style={{ marginBottom: 16 }}><RefreshCw size={15} /><span>{latestSyncNotice.message}</span></div>}
+    {unmatchedNotice && <section className="notice" style={{ marginBottom: 16 }} aria-live="polite">
+      <AlertTriangle size={16} />
+      <span><strong>{unmatchedNotice.count} записей товаров Ozon требуют решения.</strong> Свяжите их с каталогом, создайте товары или сохраните выбор «Игнорировать». {unmatchedNotice.excludedFinanceAmount !== 0 && <>Пока начисления на {metric(Math.abs(unmatchedNotice.excludedFinanceAmount))} не входят в расчёт баланса и прибыли.</>}</span>
+      <Link href={unmatchedNotice.href} className="button secondary small">Открыть список</Link>
+    </section>}
 
     {loading && !overview ? <div className="metrics-grid">{[1, 2, 3, 4].map((item) => <div key={item} className="panel metric-card"><div className="loading-line" style={{ width: "65%" }} /><div style={{ height: 19 }} /><div className="loading-line" style={{ width: "45%", height: 22 }} /></div>)}</div> : error && !overview ? <div className="panel empty-state"><div><div className="empty-icon"><AlertTriangle size={19} /></div><div className="empty-title">Обзор пока недоступен</div><p className="empty-description">Обновите страницу после запуска базы данных или повторите загрузку.</p><button className="button secondary" style={{ marginTop: 12 }} onClick={() => void refresh()}>Повторить</button></div></div> : <>
       <div className="metrics-grid">
-        <div className="panel metric-card" style={{ "--metric-bg": "#e8f6ee" } as React.CSSProperties}><Wallet className="metric-icon" size={18} /><div className="metric-label">Расчётный денежный баланс</div><div className="metric-value">{metric(overview?.cashBalance)}</div><div className="metric-help">Покупки, расходы и признанные операции Ozon</div></div>
-        <div className="panel metric-card" style={{ "--metric-bg": "#ecf7f2" } as React.CSSProperties}><TrendingUp className="metric-icon" size={18} /><div className="metric-label">Фактическая прибыль</div><div className="metric-value">{metric(overview?.confirmedProfit)}</div><div className="metric-help">{profitReconciliationIssues.length ? `${profitReconciliationIssues.length} возвратов требуют сверки` : overview?.confirmedProfit === null ? "Не хватает себестоимости по части товаров" : "По завершённым и признанным операциям"}</div></div>
+        <div className="panel metric-card" style={{ "--metric-bg": "#e8f6ee" } as React.CSSProperties}><Wallet className="metric-icon" size={18} /><div className="metric-label">Расчётный денежный баланс</div><div className="metric-value">{metric(overview?.cashBalance)}</div><div className="metric-help">{unmatchedNotice ? "Частичный расчёт: есть начисления Ozon, не включённые до сопоставления товаров" : "Покупки, расходы и признанные операции Ozon"}</div></div>
+        <div className="panel metric-card" style={{ "--metric-bg": "#ecf7f2" } as React.CSSProperties}><TrendingUp className="metric-icon" size={18} /><div className="metric-label">Фактическая прибыль</div><div className="metric-value">{metric(overview?.confirmedProfit)}</div><div className="metric-help">{unmatchedNotice ? "Неполный расчёт: начисления по несопоставленным товарам не включены" : profitReconciliationIssues.length ? `${profitReconciliationIssues.length} возвратов требуют сверки` : overview?.confirmedProfit === null ? "Не хватает себестоимости по части товаров" : "По завершённым и признанным операциям"}</div></div>
         <div className="panel metric-card" style={{ "--metric-bg": "#eef5fa" } as React.CSSProperties}><Boxes className="metric-icon" size={18} /><div className="metric-label">Остаток у меня</div><div className="metric-value">{new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(sellerQuantity)} шт.</div><div className="metric-help">Только принятые закупки и полученные возвраты</div></div>
         <div className="panel metric-card" style={{ "--metric-bg": "#fff5e5" } as React.CSSProperties}><ShoppingBag className="metric-icon" size={18} /><div className="metric-label">Предварительные доставки</div><div className="metric-value">{displayValue(preliminary.count ?? overview?.preliminaryOrderCount ?? 0)}</div><div className="metric-help">Заказы младше 21 дня · ожидают признания</div></div>
       </div>
