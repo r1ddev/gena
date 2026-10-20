@@ -367,7 +367,8 @@ async function importDailyAccruals(credentials: OzonCredentials, from: Date, to:
       const category = asString(accrual.accrued_category, "unknown");
       const accrualId = asString(accrual.accrual_id ?? accrual.type_id);
       const postingNumber = financeAccrualPostingNumber(category, unitNumber);
-      if (postingNumber) legacyPostingNumbers.add(postingNumber);
+      if (!postingNumber) continue;
+      legacyPostingNumbers.add(postingNumber);
       const itemFees = accrual.item_fees as { fees?: { sku?: unknown; fees?: { accrued?: unknown; type_id?: unknown }[] }[] } | undefined;
       const financeRows: { suffix: string; productId: string | null; amount: number; typeId: string }[] = [];
       if (category.toUpperCase() === "ITEM" && itemFees?.fees?.length) {

@@ -346,30 +346,32 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
     ozonWriteoffSharedCosts = ozonWriteoffSharedCosts.plus(quantity.times(landedCost.minus(averageCost)));
   }
 
-  const recognizedFinance = input.financeAccruals.filter((accrual) => {
+  const orderFinance = input.financeAccruals.filter((accrual) => {
+    const category = accrual.category?.toUpperCase();
+    return accrual.postingId !== null
+      && postingById.has(accrual.postingId)
+      && (!category || category === "POSTING" || category === "ITEM");
+  });
+  const recognizedFinance = orderFinance.filter((accrual) => {
     if (!isEffectiveAt(accrual.accrualDate, now)) return false;
     if (accrual.ignored) return false;
     if (accrual.isOzonWriteoffCompensation) return true;
-    const posting = accrual.postingId ? postingById.get(accrual.postingId) : undefined;
+    const posting = postingById.get(accrual.postingId!);
     const category = accrual.category?.toUpperCase();
-    if (posting) {
-      if (!mappablePostingIds.has(posting.id)) return false;
-      if (category === "ITEM") {
-        const candidates = input.postingItems.filter((item) =>
-          item.postingId === posting.id &&
-          (accrual.ozonSku ? item.ozonSku === accrual.ozonSku : item.productId === accrual.productId),
-        );
-        if (!candidates.length || candidates.some((item) => !isAccountableItem(item))) return false;
-        if (isCancelled(posting)) return true;
-        return candidates.every((item) => isRecognizedItem(posting, item, now));
-      }
+    if (!mappablePostingIds.has(posting.id)) return false;
+    if (category === "ITEM") {
+      const candidates = input.postingItems.filter((item) =>
+        item.postingId === posting.id &&
+        (accrual.ozonSku ? item.ozonSku === accrual.ozonSku : item.productId === accrual.productId),
+      );
+      if (!candidates.length || candidates.some((item) => !isAccountableItem(item))) return false;
       if (isCancelled(posting)) return true;
-      return recognizedPostings.has(posting.id);
+      return candidates.every((item) => isRecognizedItem(posting, item, now));
     }
-    if (category === "ITEM") return Boolean(accrual.productId);
-    return category === "NON_ITEM" || category === "CONTAINER_FEES";
+    if (isCancelled(posting)) return true;
+    return recognizedPostings.has(posting.id);
   });
-  const ignoredFinance = input.financeAccruals.filter((accrual) => !recognizedFinance.includes(accrual));
+  const ignoredFinance = orderFinance.filter((accrual) => !recognizedFinance.includes(accrual));
   const recognizedFinanceAmount = sum(recognizedFinance.map((accrual) => d(accrual.amount)));
   const recognizedOzonWriteoffCompensation = sum(recognizedFinance
     .filter((accrual) => accrual.isOzonWriteoffCompensation)
