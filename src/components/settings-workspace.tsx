@@ -49,13 +49,16 @@ export function SettingsWorkspace() {
 
   async function syncNow() {
     setSyncing(true); setError(""); setSuccess("");
-    try { await requestJson("/api/sync", { method: "POST", body: JSON.stringify({ kind: "full" }) }); setSuccess("Синхронизация поставлена в очередь. Статусы и возвраты появятся после завершения обработки."); }
+    try {
+      const response = asRecord(await requestJson("/api/sync", { method: "POST", body: JSON.stringify({ kind: "full" }) }));
+      setSuccess(typeof response?.message === "string" ? response.message : "Синхронизация поставлена в очередь. Результат появится на главной.");
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось запустить синхронизацию"); }
     finally { setSyncing(false); }
   }
 
   return <>
-    <PageHeader eyebrow="Подключения и обслуживание" title="Настройки" description="Подключите кабинет Ozon, проверьте синхронизацию и резервные копии локальных данных." actions={<button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Обновить</button>} />
+    <PageHeader eyebrow="Подключения и обслуживание" title="Настройки" description="Настройки и дату последней синхронизации можно перечитать из локальной базы. Запрос к Ozon запускается отдельно." actions={<button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Перечитать настройки</button>} />
     {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}{success && <div className="success-banner" role="status"><CheckCircle2 size={15} />{success}</div>}
     <section className="panel">
       <form onSubmit={save}>
@@ -77,12 +80,12 @@ export function SettingsWorkspace() {
         </div>
         <div className="settings-section">
           <div className="settings-title">Автоматическое обновление</div>
-          <p className="settings-description">Рабочий процесс проверяет заказы и возвраты по расписанию. Также можно запустить синхронизацию вручную.</p>
+          <p className="settings-description">По расписанию загружаются заказы и статусы, возвраты, отчёты о выкупах, начисления и списания. Та же синхронизация запускается вручную с главной, продаж, возвратов или этой страницы.</p>
           <div className="form-grid">
             <div className="field"><label htmlFor="sync-interval">Интервал, часов</label><select id="sync-interval" value={interval} onChange={(event) => setInterval(event.target.value)}><option value="24">Раз в день</option><option value="12">Каждые 12 часов</option><option value="6">Каждые 6 часов</option></select></div>
             <div className="field"><label htmlFor="last-sync">Последнее обновление</label><div id="last-sync" className="status-pill" style={{ width: "fit-content", minHeight: 38, borderRadius: 8 }}>{lastSync ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(lastSync)) : "Ещё не запускалось"}</div></div>
           </div>
-          <div className="form-actions" style={{ justifyContent: "space-between" }}><span className="form-help"><Clock3 size={13} style={{ display: "inline", verticalAlign: "-2px" }} /> Синхронизация работает, пока запущен сервис на этом компьютере.</span><button type="button" className="button secondary" onClick={() => void syncNow()} disabled={syncing || loading || !accountingStartDate || accountingStartDate !== savedStartDate}><RefreshCw size={14} />{syncing ? "Запускаем…" : "Обновить сейчас"}</button></div>
+          <div className="form-actions" style={{ justifyContent: "space-between" }}><span className="form-help"><Clock3 size={13} style={{ display: "inline", verticalAlign: "-2px" }} /> Синхронизация работает, пока запущен сервис на этом компьютере.</span><button type="button" className="button secondary" onClick={() => void syncNow()} disabled={syncing || loading || !accountingStartDate || accountingStartDate !== savedStartDate}><RefreshCw size={14} />{syncing ? "Запускаем…" : "Синхронизировать с Ozon"}</button></div>
         </div>
         <div className="form-actions"><button className="button" disabled={saving || loading}><Save size={14} />{saving ? "Сохраняем…" : "Сохранить настройки"}</button></div>
       </form>

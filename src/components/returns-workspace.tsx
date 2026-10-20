@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, RefreshCw, RotateCcw } from "lucide-react";
 import { findRows, getId, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
+import { OzonSyncButton } from "./ozon-sync-button";
 
 function returnLabel(value: unknown) {
   const labels: Record<string, string> = { seller: "Мне", ozon: "На склад Ozon", unknown: "Не определено" };
@@ -63,10 +64,10 @@ export function ReturnsWorkspace() {
   }
 
   return <>
-    <PageHeader eyebrow="Обработка возвратов" title="Возвраты" description="Возврат на Ozon добавляется в остаток, когда товар снова доступен к продаже. Возврат вам попадёт на ваш склад только после фактического получения." actions={<button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Обновить список</button>} />
+    <PageHeader eyebrow="Обработка возвратов" title="Возвраты" description="«Синхронизировать с Ozon» запрашивает заказы и статусы, возвраты, отчёты о выкупах, начисления и списания. «Перечитать возвраты» показывает уже сохранённые записи и не обращается к Ozon. Возврат на Ozon добавляется в остаток, когда товар снова доступен к продаже; возврат вам попадёт на ваш склад только после фактического получения." actions={<div className="toolbar"><OzonSyncButton /><button className="button secondary" title="Читает сохранённые возвраты из локальной базы. Ozon не запрашивается." onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Перечитать возвраты</button></div>} />
     {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}{success && <div className="success-banner" role="status"><CheckCircle2 size={15} />{success}</div>}
     <section className="panel">
-      <div className="panel-head"><div><h2>Возвраты из Ozon</h2><span className="small-note">{loading ? "Обновляем…" : `${rows.length} записей`}</span></div><RotateCcw size={17} color="#178b63" /></div>
+      <div className="panel-head"><div><h2>Возвраты из Ozon</h2><span className="small-note">{loading ? "Читаем из локальной базы…" : `${rows.length} записей`}</span></div><RotateCcw size={17} color="#178b63" /></div>
       {loading ? <div className="panel-body"><div className="loading-line" /></div> : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={18} /></div><div className="empty-title">Не удалось загрузить возвраты</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 12 }} onClick={() => void refresh()}>Повторить</button></div></div> : rows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><RotateCcw size={18} /></div><div className="empty-title">Возвратов пока нет</div><p className="empty-description">Возвраты появятся после синхронизации данных Ozon.</p></div></div> : <div className="table-wrap"><table><thead><tr><th>Возврат</th><th>Товар</th><th>Количество</th><th>Куда</th><th>Статус</th><th>Дата</th><th>Действие</th></tr></thead><tbody>{rows.map((row, index) => {
         const id = getId(row) ?? String(index); const destination = row.destination;
         const sellerDone = destination === "seller" && Boolean(row.receivedBySellerAt);

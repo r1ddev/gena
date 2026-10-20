@@ -90,7 +90,11 @@ export function Dashboard() {
 
   async function sync() {
     setSyncing(true); setSyncMessage(""); setSyncError("");
-    try { await requestJson("/api/sync", { method: "POST", body: JSON.stringify({ kind: "full" }) }); await refreshSyncJobs(); setSyncMessage("Обновление Ozon запущено. Статус и результат будут видны на этой странице."); }
+    try {
+      const response = asRecord(await requestJson("/api/sync", { method: "POST", body: JSON.stringify({ kind: "full" }) }));
+      await refreshSyncJobs();
+      setSyncMessage(typeof response?.message === "string" ? response.message : "Синхронизация поставлена в очередь. Ход и результат появятся здесь.");
+    }
     catch (reason) { setSyncError(reason instanceof Error ? reason.message : "Не удалось запустить обновление"); }
     finally { setSyncing(false); }
   }
@@ -115,7 +119,7 @@ export function Dashboard() {
   const latestSyncNotice = latestOzonSyncNotice(syncJobs[0] ?? findRows(overview?.syncJobs)[0]);
 
   return <>
-    <PageHeader eyebrow="Панель управления" title="Обзор магазина" description="Коротко о деньгах, остатках и текущих операциях в вашем магазине." actions={<div className="toolbar"><button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Обновить</button><button className="button" onClick={() => void sync()} disabled={syncing}><RefreshCw size={14} className={syncing ? "spin" : ""} />{syncing ? "Запускаем…" : "Обновить из Ozon"}</button></div>} />
+    <PageHeader eyebrow="Панель управления" title="Обзор магазина" description="«Перечитать данные» обновляет обзор из локальной базы и не запрашивает Ozon. «Синхронизировать с Ozon» загружает заказы и статусы, возвраты, отчёты о выкупах, начисления и списания." actions={<div className="toolbar"><button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Перечитать данные</button><button className="button" onClick={() => void sync()} disabled={syncing}><RefreshCw size={14} className={syncing ? "spin" : ""} />{syncing ? "Запускаем…" : "Синхронизировать с Ozon"}</button></div>} />
     {(error || syncError) && <div className="error-banner" role="alert"><AlertTriangle size={15} />{error || syncError}</div>}
     {syncMessage && <div className="success-banner" role="status">{syncMessage}</div>}
     {latestSyncNotice && <div className={`notice ${latestSyncNotice.tone === "warning" ? "critical" : ""}`} role={latestSyncNotice.tone === "warning" ? "alert" : "status"} style={{ marginBottom: 16 }}><RefreshCw size={15} /><span>{latestSyncNotice.message}</span></div>}
