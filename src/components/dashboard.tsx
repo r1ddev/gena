@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowDownRight, ArrowUpRight, Boxes, CircleDollarSign, C
 import { asRecord, displayValue, findRows, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { UnmatchedItems } from "./unmatched-items";
+import { OzonOrderLink } from "./ozon-order-link";
 import { returnsNeedingAction, unmatchedItemsNotice } from "./dashboard-summary";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
@@ -13,7 +14,7 @@ import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type Table
 type Overview = JsonRecord & { products?: unknown; recentOrders?: unknown; pendingReturns?: unknown; reconciliationErrors?: unknown; profitReconciliationIssues?: unknown };
 
 const dashboardOrderColumns: TableColumn<JsonRecord>[] = [
-  { key: "orderNumber", label: "Отправление", kind: "identifier", value: (row) => row.orderNumber ?? row.postingNumber ?? row.id },
+  { key: "orderNumber", label: "Отправление", kind: "identifier", value: (row) => row.orderNumber ?? row.postingNumber ?? row.externalId ?? row.id },
   { key: "orderDate", label: "Дата", kind: "date", value: (row) => row.deliveredAt ?? row.orderDate },
   { key: "status", label: "Статус", kind: "status" },
   { key: "amount", label: "Сумма", kind: "money", value: (row) => row.amount ?? row.accrualAmount },
@@ -156,7 +157,11 @@ export function Dashboard() {
 
           <section className="panel">
             <div className="panel-head"><div><h2>Последние заказы</h2><span className="small-note">Предварительные и признанные</span></div><Link href="/sales" className="button secondary small">Все заказы</Link></div>
-            {recentOrders.length ? <div className="table-wrap"><table><TableHead columns={dashboardOrderColumns} filters={recentOrderFilters} onFilter={(key, value) => setRecentOrderFilters((current) => ({ ...current, [key]: value }))} sort={recentOrderSort} onSort={updateRecentOrderSort} /><tbody>{visibleRecentOrders.length ? visibleRecentOrders.map((order, index) => <tr key={String(order.id ?? order.orderNumber ?? index)}><td className="table-primary">{String(order.orderNumber ?? order.postingNumber ?? order.id ?? "Заказ")}</td><td>{displayValue(order.deliveredAt ?? order.orderDate, "date")}</td><td><span className="badge">{displayValue(order.status, "status")}</span></td><td className="number">{displayValue(order.amount ?? order.accrualAmount, "money")}</td></tr>) : <TableEmptyRow colSpan={dashboardOrderColumns.length} message="По заданным условиям совпадений нет." onClear={() => setRecentOrderFilters({})} />}</tbody></table></div> : <div className="empty-state" style={{ minHeight: 135 }}><div><div className="empty-icon"><ShoppingBag size={19} /></div><div className="empty-title">Заказов пока нет</div><p className="empty-description">Обновите продажи на странице «Продажи», чтобы загрузить заказы.</p><Link href="/sales" className="button secondary small" style={{ marginTop: 12 }}>Открыть продажи</Link></div></div>}
+            {recentOrders.length ? <div className="table-wrap"><table><TableHead columns={dashboardOrderColumns} filters={recentOrderFilters} onFilter={(key, value) => setRecentOrderFilters((current) => ({ ...current, [key]: value }))} sort={recentOrderSort} onSort={updateRecentOrderSort} /><tbody>{visibleRecentOrders.length ? visibleRecentOrders.map((order, index) => {
+              const postingNumber = String(order.orderNumber ?? order.postingNumber ?? order.externalId ?? "");
+              const orderLabel = postingNumber || String(order.id ?? "Заказ");
+              return <tr key={String(order.id ?? postingNumber ?? index)}><td className="table-primary">{postingNumber ? <OzonOrderLink postingNumber={postingNumber} /> : orderLabel}</td><td>{displayValue(order.deliveredAt ?? order.orderDate, "date")}</td><td><span className="badge">{displayValue(order.status, "status")}</span></td><td className="number">{displayValue(order.amount ?? order.accrualAmount, "money")}</td></tr>;
+            }) : <TableEmptyRow colSpan={dashboardOrderColumns.length} message="По заданным условиям совпадений нет." onClear={() => setRecentOrderFilters({})} />}</tbody></table></div> : <div className="empty-state" style={{ minHeight: 135 }}><div><div className="empty-icon"><ShoppingBag size={19} /></div><div className="empty-title">Заказов пока нет</div><p className="empty-description">Обновите продажи на странице «Продажи», чтобы загрузить заказы.</p><Link href="/sales" className="button secondary small" style={{ marginTop: 12 }}>Открыть продажи</Link></div></div>}
           </section>
         </div>
 

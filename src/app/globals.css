@@ -110,6 +110,9 @@ td { padding: 12px 13px; border-top: 1px solid #edf0ed; color: #34413a; font-siz
 tbody tr:hover { background: #fcfdfc; }
 .table-primary { color: var(--ink); font-weight: 700; }
 .table-secondary { display: block; margin-top: 3px; color: #929c95; font-size: 10px; }
+.ozon-order-link { color: inherit; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+.ozon-order-link:hover { color: var(--green-dark); }
+.ozon-order-link:focus-visible { border-radius: 2px; outline: 2px solid rgba(23,139,99,.35); outline-offset: 2px; }
 .product-article-trigger { padding: 0; border: 0; border-radius: 2px; color: inherit; background: transparent; font: inherit; font-weight: inherit; text-align: inherit; text-decoration: underline dotted #bdc9c0; text-underline-offset: 2px; cursor: help; }
 .product-article-trigger:hover, .product-article-trigger:focus-visible { color: var(--green-dark); text-decoration-color: currentColor; }
 .product-article-trigger:focus-visible { outline: 2px solid #82c5a4; outline-offset: 2px; }

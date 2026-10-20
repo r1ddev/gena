@@ -8,6 +8,7 @@ import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
 import { notifyProductCatalogChanged, ProductArticle } from "./product-hover-card";
+import { OzonOrderLink } from "./ozon-order-link";
 
 export type FieldConfig = {
   name: string;
@@ -22,7 +23,7 @@ export type FieldConfig = {
   optionsFrom?: string;
 };
 
-export type ColumnConfig = { key: string; label: string; kind?: "identifier" | "money" | "quantity" | "date" | "status" | "number" | "time"; primary?: boolean; sortable?: boolean; filterable?: boolean };
+export type ColumnConfig = { key: string; label: string; kind?: "identifier" | "money" | "quantity" | "date" | "status" | "number" | "time"; primary?: boolean; sortable?: boolean; filterable?: boolean; linkToOzonPosting?: boolean };
 export type ResourceConfig = {
   title: string;
   eyebrow?: string;
@@ -412,6 +413,11 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
                 const label = column.key === "ozonSku" || (column.key === "sku" && row.kind === "ozon" && !productId) ? "SKU Ozon" : "Артикул";
                 const article = identifier ? <ProductArticle identifier={identifier} productId={productId} identifierLabel={label} fallback={row} /> : "—";
                 return <td key={column.key}>{column.primary ? <span className="table-primary">{article}</span> : article}</td>;
+              }
+              if (column.linkToOzonPosting) {
+                const postingNumber = stringValue(value);
+                const orderLink = postingNumber ? <OzonOrderLink postingNumber={postingNumber} /> : "—";
+                return <td key={column.key}>{column.primary ? <span className="table-primary">{orderLink}</span> : orderLink}</td>;
               }
               if (column.key === "article") {
                 const articles = orderArticleItems(row.items);

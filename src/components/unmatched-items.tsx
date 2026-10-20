@@ -7,6 +7,7 @@ import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
 import { notifyProductCatalogChanged, ProductArticle } from "./product-hover-card";
+import { OzonOrderLink } from "./ozon-order-link";
 
 type Option = { id: string; label: string };
 type DispositionView = "pending" | "ignored";
@@ -47,21 +48,38 @@ function money(value: unknown) {
   const amount = Number(value);
   return Number.isFinite(amount) ? `${amount < 0 ? "−" : amount > 0 ? "+" : ""}${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(Math.abs(amount))} ₽` : "";
 }
-function sourceDetails(row: JsonRecord) {
+function sourceDetailParts(row: JsonRecord) {
   const source = sourceInfoFor(row);
-  const posting = typeof source.postingNumber === "string" && source.postingNumber ? `Заказ ${source.postingNumber}` : "";
+  const orderNumbers = [
+    ...(typeof source.postingNumber === "string" && source.postingNumber ? [source.postingNumber] : []),
+    ...(Array.isArray(source.orderNumbers) ? source.orderNumbers.filter((value): value is string => typeof value === "string" && value.length > 0) : []),
+  ];
+  const postingNumbers = [...new Set(orderNumbers)];
   const amount = money(source.amount);
   const dateValue = typeof source.accrualDate === "string" ? source.accrualDate : "";
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateValue) ? dateValue.split("-").reverse().join(".") : dateValue;
   const quantity = source.quantity != null ? `${String(source.quantity)} шт.` : "";
   const destination = source.destination === "seller" ? "возврат тебе" : source.destination === "ozon" ? "возврат на склад Ozon" : "";
   const status = typeof source.status === "string" && source.status ? source.status : "";
-  return [posting, amount, quantity, destination, status, date].filter(Boolean).join(" · ") || "Источник указан Ozon";
+  return { postingNumbers, otherDetails: [amount, quantity, destination, status, date].filter(Boolean) };
+}
+function sourceDetailsText(row: JsonRecord) {
+  const { postingNumbers, otherDetails } = sourceDetailParts(row);
+  return [...postingNumbers.map((number) => `Заказ ${number}`), ...otherDetails].join(" · ") || "Источник указан Ozon";
+}
+function sourceDetails(row: JsonRecord) {
+  const { postingNumbers, otherDetails } = sourceDetailParts(row);
+  const parts = [
+    ...postingNumbers.map((postingNumber) => <span key={`posting-${postingNumber}`}>Заказ <OzonOrderLink postingNumber={postingNumber} /></span>),
+    ...otherDetails,
+  ];
+  if (!parts.length) return "Источник указан Ozon";
+  return <>{parts.map((part, index) => <Fragment key={index}>{index > 0 && " · "}{part}</Fragment>)}</>;
 }
 
 const unmatchedColumns: TableColumn<JsonRecord>[] = [
   { key: "article", label: "Артикул / SKU Ozon", value: (row) => [offerIdFor(row), ozonSkuFor(row)].filter(Boolean).join(" ") },
-  { key: "source", label: "Источник и сумма", value: (row) => `${sourceLabels[String(sourceInfoFor(row).kind ?? "other")] ?? sourceLabels.other} ${sourceDetails(row)}` },
+  { key: "source", label: "Источник и сумма", value: (row) => `${sourceLabels[String(sourceInfoFor(row).kind ?? "other")] ?? sourceLabels.other} ${sourceDetailsText(row)}` },
   { key: "firstSeenAt", label: "Впервые замечен", kind: "date" },
   { key: "action", label: "Действие", sortable: false, filterable: false },
 ];

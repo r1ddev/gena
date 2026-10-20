@@ -10,7 +10,7 @@ export default function SalesPage() {
     showSoldQuantity: true,
     fields: [],
     columns: [
-      { key: "externalId", label: "Отправление", kind: "identifier", primary: true }, { key: "orderDate", label: "Создан", kind: "date" },
+      { key: "externalId", label: "Отправление", kind: "identifier", primary: true, linkToOzonPosting: true }, { key: "orderDate", label: "Создан", kind: "date" },
       { key: "status", label: "Статус", kind: "status" },
       { key: "article", label: "Артикул" }, { key: "amount", label: "Денежный итог", kind: "money" },
     ],
