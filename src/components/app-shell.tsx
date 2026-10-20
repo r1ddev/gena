@@ -39,7 +39,6 @@ const navSections = [
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const today = new Intl.DateTimeFormat("ru-RU", { timeZone: "Europe/Moscow", weekday: "long", day: "numeric", month: "long" }).format(new Date());
 
   return (
     <div className="app-frame">
@@ -70,9 +69,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="topbar-left">
             <button className="mobile-menu" aria-label={mobileOpen ? "Закрыть меню" : "Открыть меню"} onClick={() => setMobileOpen((open) => !open)}>{mobileOpen ? <X size={17} /> : <Menu size={17} />}</button>
             <span className="topbar-label">Управление товарами, продажами и финансами</span>
-          </div>
-          <div className="topbar-right">
-            <span className="today">{today}</span>
           </div>
         </header>
         <main className="page-content">{children}</main>
