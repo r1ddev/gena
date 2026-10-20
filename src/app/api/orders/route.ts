@@ -1,4 +1,4 @@
-import { and, desc, eq, exists, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { appSettings, externalItems, financeAccruals, postingItems, postings, products, returns, syncJobs } from "@/db/schema";
 import { getOrderReturnStatesByPosting } from "@/domain/order-return-state";
@@ -22,21 +22,49 @@ export async function GET(request: Request) {
     const requestedPageNumber = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
     const pageSize = Number.isInteger(requestedPageSize) && requestedPageSize > 0 ? Math.min(requestedPageSize, 100) : 50;
     const query = (params.get("q") ?? "").trim().slice(0, 120);
+    const externalIdFilter = (params.get("filter_externalId") ?? "").trim().slice(0, 120);
+    const orderDateFilter = (params.get("filter_orderDate") ?? "").trim().slice(0, 40);
+    const statusFilter = (params.get("filter_status") ?? "").trim().slice(0, 80);
+    const articleFilter = (params.get("filter_article") ?? "").trim().slice(0, 120);
+    const amountFilter = (params.get("filter_amount") ?? "").trim().slice(0, 80);
+    const sortKey = params.get("sort") ?? "";
+    const direction = params.get("direction") === "asc" ? "asc" : "desc";
     const pattern = `%${query}%`;
-    const itemMatches = query ? exists(db.select({ id: postingItems.id }).from(postingItems).where(and(
+    const itemMatches = (value: string, includeTitle = false) => exists(db.select({ id: postingItems.id }).from(postingItems).where(and(
       eq(postingItems.postingId, postings.id),
-      or(ilike(postingItems.title, pattern), ilike(postingItems.offerId, pattern), ilike(postingItems.ozonSku, pattern),
-        exists(db.select({ id: products.id }).from(products).where(and(eq(products.id, postingItems.productId), ilike(products.sku, pattern)))),
-      ),
-    ))) : undefined;
-    const where = query ? or(
-      ilike(postings.externalId, pattern),
-      ilike(postings.orderNumber, pattern),
-      ilike(postings.status, pattern),
-      sql`${postings.orderDate}::text ILIKE ${pattern}`,
-      sql`${postings.deliveredAt}::text ILIKE ${pattern}`,
-      itemMatches,
-    ) : undefined;
+      includeTitle
+        ? or(ilike(postingItems.title, value), ilike(postingItems.offerId, value), ilike(postingItems.ozonSku, value),
+          exists(db.select({ id: products.id }).from(products).where(and(eq(products.id, postingItems.productId), ilike(products.sku, value)))),
+        )!
+        : or(ilike(postingItems.offerId, value), ilike(postingItems.ozonSku, value),
+        exists(db.select({ id: products.id }).from(products).where(and(eq(products.id, postingItems.productId), ilike(products.sku, value)))),
+      )!,
+    )));
+    const conditions: SQL[] = [];
+    if (query) conditions.push(or(
+      ilike(postings.externalId, pattern), ilike(postings.orderNumber, pattern), ilike(postings.status, pattern),
+      sql`${postings.orderDate}::text ILIKE ${pattern}`, sql`${postings.deliveredAt}::text ILIKE ${pattern}`, itemMatches(pattern, true),
+    )!);
+    if (externalIdFilter) {
+      const filter = `%${externalIdFilter}%`;
+      conditions.push(or(ilike(postings.externalId, filter), ilike(postings.orderNumber, filter))!);
+    }
+    if (orderDateFilter) conditions.push(sql`to_char(${postings.orderDate} AT TIME ZONE 'Europe/Moscow', 'YYYY-MM-DD') ILIKE ${`%${orderDateFilter}%`}`);
+    if (statusFilter) {
+      const normalized = statusFilter.toLocaleLowerCase("ru-RU");
+      const matchingStatuses = Object.entries(statusLabels).filter(([, label]) => label.toLocaleLowerCase("ru-RU").includes(normalized)).map(([status]) => status);
+      conditions.push(matchingStatuses.length ? inArray(sql`lower(${postings.status})`, matchingStatuses) : ilike(postings.status, `%${statusFilter}%`));
+    }
+    if (articleFilter) conditions.push(itemMatches(`%${articleFilter}%`));
+    const where = conditions.length ? and(...conditions) : undefined;
+    const orderBy = sortKey === "externalId"
+      ? [direction === "asc"
+        ? sql`CASE WHEN ${postings.externalId} ~ '^[0-9]+$' THEN ${postings.externalId}::numeric END ASC NULLS LAST`
+        : sql`CASE WHEN ${postings.externalId} ~ '^[0-9]+$' THEN ${postings.externalId}::numeric END DESC NULLS LAST`,
+      direction === "asc" ? asc(postings.externalId) : desc(postings.externalId), desc(postings.orderDate)]
+      : sortKey === "orderDate"
+        ? [direction === "asc" ? sql`${postings.orderDate} ASC NULLS LAST` : sql`${postings.orderDate} DESC NULLS LAST`, desc(postings.externalId)]
+        : [sql`${postings.orderDate} DESC NULLS LAST`, desc(postings.externalId)];
     const [countRows, soldItemRows, returnQuantityRows] = await Promise.all([
       db.select({ total: sql<number>`count(*)::int` }).from(postings).where(where),
       db.select({ postingNumber: postings.externalId, item: postingItems })
@@ -61,12 +89,57 @@ export async function GET(request: Request) {
     const soldQuantity = [...soldQuantityByItem].reduce((total, [key, quantity]) =>
       total + Math.max(0, quantity - Math.min(quantity, returnQuantityByItem.get(key) ?? 0)), 0);
     const summary = { soldQuantity };
-    const total = countRows[0]?.total ?? 0;
-    const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const page = Math.min(requestedPageNumber, totalPages);
-    const pageRows = await db.select().from(postings).where(where)
-      .orderBy(sql`${postings.orderDate} DESC NULLS LAST`, desc(postings.externalId))
-      .limit(pageSize).offset((page - 1) * pageSize);
+    let total = countRows[0]?.total ?? 0;
+    let pageRows: (typeof postings.$inferSelect)[];
+    let totalPages = Math.max(1, Math.ceil(total / pageSize));
+    let page = Math.min(requestedPageNumber, totalPages);
+    if (amountFilter || sortKey === "amount") {
+      const candidates = await db.select().from(postings).where(where).orderBy(...orderBy);
+      const candidateIds = candidates.map((posting) => posting.id);
+      const candidateExternalIds = candidates.map((posting) => posting.externalId);
+      const [candidateItems, candidateAccruals] = await Promise.all([
+        candidateIds.length
+          ? db.select({ item: postingItems }).from(postingItems).where(inArray(postingItems.postingId, candidateIds))
+          : Promise.resolve([]),
+        candidateExternalIds.length
+          ? db.select().from(financeAccruals).where(inArray(financeAccruals.postingNumber, candidateExternalIds))
+          : Promise.resolve([]),
+      ]);
+      const saleSkusByPosting = new Map<string, Set<string>>();
+      const amountCentsByPosting = new Map<string, number>();
+      for (const accrual of candidateAccruals) {
+        if (!accrual.postingNumber) continue;
+        amountCentsByPosting.set(accrual.postingNumber, (amountCentsByPosting.get(accrual.postingNumber) ?? 0) + Math.round(Number(accrual.amount) * 100));
+        const skus = financePostingSaleSkus(accrual.raw);
+        if (skus.length) saleSkusByPosting.set(accrual.postingNumber, new Set([...(saleSkusByPosting.get(accrual.postingNumber) ?? []), ...skus]));
+      }
+      const postingNumberById = new Map(candidates.map((posting) => [posting.id, posting.externalId]));
+      for (const { item } of candidateItems) {
+        const postingNumber = postingNumberById.get(item.postingId);
+        if (!postingNumber || (item.ozonSku && saleSkusByPosting.get(postingNumber)?.has(item.ozonSku))) continue;
+        amountCentsByPosting.set(postingNumber, (amountCentsByPosting.get(postingNumber) ?? 0) + Math.round(Number(item.marketplaceBuyoutAmount ?? 0) * 100));
+      }
+      const amountQuery = amountFilter.toLocaleLowerCase("ru-RU").replace(/[−–]/g, "-").replace(/\s+/g, "").replace("₽", "").replace(",", ".");
+      let matching = candidates.filter((posting) => {
+        if (!amountQuery) return true;
+        const amount = (amountCentsByPosting.get(posting.externalId) ?? 0) / 100;
+        return `${amount}|${amount.toFixed(2)}`.includes(amountQuery);
+      });
+      if (sortKey === "amount") {
+        matching = [...matching].sort((left, right) => {
+          const difference = (amountCentsByPosting.get(left.externalId) ?? 0) - (amountCentsByPosting.get(right.externalId) ?? 0);
+          return difference === 0 ? left.externalId.localeCompare(right.externalId, "ru-RU", { numeric: true }) : direction === "asc" ? difference : -difference;
+        });
+      }
+      total = matching.length;
+      totalPages = Math.max(1, Math.ceil(total / pageSize));
+      page = Math.min(requestedPageNumber, totalPages);
+      pageRows = matching.slice((page - 1) * pageSize, page * pageSize);
+    } else {
+      totalPages = Math.max(1, Math.ceil(total / pageSize));
+      page = Math.min(requestedPageNumber, totalPages);
+      pageRows = await db.select().from(postings).where(where).orderBy(...orderBy).limit(pageSize).offset((page - 1) * pageSize);
+    }
     const pagination = { page, pageSize, total, totalPages };
     if (!pageRows.length) return { items: [], pagination, summary };
 

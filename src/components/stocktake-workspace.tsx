@@ -1,11 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, ClipboardList, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { findRows, getId, localToday, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
+import { filterAndSortRows, TableHead, type TableColumn, type TableSort } from "./table-controls";
 
 type ProductOption = { id: string; label: string };
+type StocktakeTableRow = JsonRecord & { header: JsonRecord; line: JsonRecord; lineIndex: number; difference: number };
+
+const stocktakeColumns: TableColumn<StocktakeTableRow>[] = [
+  { key: "countedAt", label: "Дата", kind: "date" },
+  { key: "warehouseLabel", label: "Склад" },
+  { key: "product", label: "Товар", value: (row) => [row.title, row.sku, row.resolutionNote].filter(Boolean).join(" ") },
+  { key: "expectedQuantity", label: "Ожидалось", kind: "quantity" },
+  { key: "actualQuantity", label: "Фактически", kind: "quantity" },
+  { key: "difference", label: "Расхождение", kind: "quantity" },
+  { key: "resolutionStatus", label: "Решение" },
+];
 
 export function StocktakeWorkspace() {
   const [rows, setRows] = useState<JsonRecord[]>([]);
@@ -20,6 +32,37 @@ export function StocktakeWorkspace() {
   const [busyLine, setBusyLine] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [sort, setSort] = useState<TableSort>(null);
+
+  const tableRows = useMemo(() => rows.flatMap((row) => {
+    const linesForRow = Array.isArray(row.lines) ? row.lines.map((value) => value as JsonRecord) : [row];
+    return linesForRow.map((line, lineIndex): StocktakeTableRow => {
+      const expected = Number(line.expectedQuantity ?? 0);
+      const actual = Number(line.actualQuantity ?? 0);
+      const resolutionNote = String(line.resolutionNote ?? "");
+      const needsReview = resolutionNote.startsWith("НУЖНА СВЕРКА:");
+      const resolved = Boolean(line.resolvedAt);
+      return {
+        ...line,
+        id: getId(line) ?? `${getId(row) ?? "stocktake"}-${lineIndex}`,
+        header: row,
+        line,
+        lineIndex,
+        countedAt: row.countedAt ?? line.countedAt,
+        warehouseLabel: row.warehouse === "ozon" ? "Ozon" : "Мой склад",
+        title: line.title ?? row.title ?? "—",
+        sku: line.sku ?? row.sku ?? "",
+        difference: actual - expected,
+        resolutionStatus: needsReview ? `НУЖНА СВЕРКА ${resolutionNote}` : resolved ? "Разобрано" : "Ожидает разбора",
+      };
+    });
+  }), [rows]);
+  const visibleRows = useMemo(() => filterAndSortRows(tableRows, stocktakeColumns, filters, sort), [tableRows, filters, sort]);
+
+  function updateSort(key: string) {
+    setSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
+  }
 
   const refresh = useCallback(async () => {
     setLoading(true); setLoadError("");
@@ -79,10 +122,13 @@ export function StocktakeWorkspace() {
     </section>
 
     <section className="panel">
-      <div className="panel-head"><div><h2>История и расхождения</h2><span className="small-note">{loading ? "Обновляем…" : `${rows.length} пересчётов`}</span></div><RefreshCw size={16} color="#829087" /></div>
-      {loading ? <div className="panel-body"><div className="loading-line" /></div> : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={18} /></div><div className="empty-title">Не удалось загрузить историю</div><p className="empty-description">{loadError}</p></div></div> : rows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><ClipboardList size={18} /></div><div className="empty-title">Пока нет инвентаризаций</div><p className="empty-description">Создайте первый пересчёт выше.</p></div></div> : <div className="table-wrap"><table><thead><tr><th>Дата</th><th>Склад</th><th>Товар</th><th>Ожидалось</th><th>Фактически</th><th>Расхождение</th><th>Решение</th></tr></thead><tbody>{rows.flatMap((row, rowIndex) => {
-        const linesForRow = Array.isArray(row.lines) ? row.lines.map((value) => value as JsonRecord) : [row];
-        return linesForRow.map((line, index) => { const lineId = getId(line) ?? `${rowIndex}-${index}`; const expected = Number(line.expectedQuantity ?? 0); const actual = Number(line.actualQuantity ?? 0); const difference = actual - expected; const resolutionNote = String(line.resolutionNote ?? ""); const needsReview = resolutionNote.startsWith("НУЖНА СВЕРКА:"); const resolved = Boolean(line.resolvedAt); return <tr key={lineId}><td>{String(row.countedAt ?? line.countedAt ?? "—").slice(0, 10)}</td><td>{row.warehouse === "ozon" ? "Ozon" : "Мой склад"}</td><td><span className="table-primary">{String(line.title ?? row.title ?? "—")}</span><span className="table-secondary">{String(line.sku ?? row.sku ?? "")}</span>{needsReview && <span className="table-secondary" style={{ color: "#a64444" }}>{resolutionNote}</span>}</td><td className="number">{String(line.expectedQuantity ?? "—")}</td><td className="number">{String(line.actualQuantity ?? "—")}</td><td><span className={`badge ${difference === 0 ? "green" : "orange"}`}>{difference > 0 ? "+" : ""}{Number.isFinite(difference) ? difference : "—"}</span></td><td><div className="row-actions">{needsReview ? <span className="badge red">Пересоздайте инвентаризацию</span> : resolved ? <span className="badge green">Разобрано</span> : <button className="button secondary small" disabled={busyLine === lineId} onClick={() => void resolve(line)}>Принять факт</button>}{index === 0 && <button className="icon-button" aria-label="Удалить всю инвентаризацию" title="Удалить инвентаризацию" disabled={busy} onClick={() => void removeStocktake(row)}><Trash2 size={14} /></button>}</div></td></tr>; });
+      <div className="panel-head"><div><h2>История и расхождения</h2><span className="small-note">{loading ? "Загружаем…" : `${rows.length} пересчётов · ${visibleRows.length} строк`}</span></div><RefreshCw size={16} color="#829087" /></div>
+      {loading ? <div className="panel-body"><div className="loading-line" /></div> : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={18} /></div><div className="empty-title">Не удалось загрузить историю</div><p className="empty-description">{loadError}</p></div></div> : rows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><ClipboardList size={18} /></div><div className="empty-title">Пока нет инвентаризаций</div><p className="empty-description">Создайте первый пересчёт выше.</p></div></div> : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-title">Нет строк по этим фильтрам</div><button type="button" className="button secondary small" style={{ marginTop: 12 }} onClick={() => setFilters({})}>Очистить фильтры</button></div></div> : <div className="table-wrap"><table><TableHead columns={stocktakeColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{visibleRows.map((row) => {
+        const lineId = getId(row.line) ?? String(row.id);
+        const needsReview = String(row.resolutionStatus).startsWith("НУЖНА СВЕРКА");
+        const resolved = Boolean(row.line.resolvedAt);
+        const difference = Number(row.difference);
+        return <tr key={String(row.id)}><td>{String(row.countedAt ?? "—").slice(0, 10)}</td><td>{String(row.warehouseLabel)}</td><td><span className="table-primary">{String(row.title ?? "—")}</span><span className="table-secondary">{String(row.sku ?? "")}</span>{needsReview && <span className="table-secondary" style={{ color: "#a64444" }}>{String(row.resolutionNote)}</span>}</td><td className="number">{String(row.expectedQuantity ?? "—")}</td><td className="number">{String(row.actualQuantity ?? "—")}</td><td><span className={`badge ${difference === 0 ? "green" : "orange"}`}>{difference > 0 ? "+" : ""}{Number.isFinite(difference) ? difference : "—"}</span></td><td><div className="row-actions">{needsReview ? <span className="badge red">Пересоздайте инвентаризацию</span> : resolved ? <span className="badge green">Разобрано</span> : <button className="button secondary small" disabled={busyLine === lineId} onClick={() => void resolve(row.line)}>Принять факт</button>}{row.lineIndex === 0 && <button className="icon-button" aria-label="Удалить всю инвентаризацию" title="Удалить инвентаризацию" disabled={busy} onClick={() => void removeStocktake(row.header)}><Trash2 size={14} /></button>}</div></td></tr>;
       })}</tbody></table></div>}
     </section>
   </>;

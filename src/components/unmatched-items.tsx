@@ -1,9 +1,10 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Link2, Plus, XCircle } from "lucide-react";
 import { asRecord, findRows, getId, requestJson, type JsonRecord } from "./api";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
+import { filterAndSortRows, TableHead, type TableColumn, type TableSort } from "./table-controls";
 
 type Option = { id: string; label: string };
 const sourceLabels: Record<string, string> = {
@@ -59,6 +60,13 @@ function sourceDetails(row: JsonRecord) {
   return [posting, amount, quantity, destination, status, date].filter(Boolean).join(" · ") || "Источник указан Ozon";
 }
 
+const unmatchedColumns: TableColumn<JsonRecord>[] = [
+  { key: "article", label: "Артикул продавца / SKU Ozon", value: (row) => [...offerIdsFor(row), ozonSkuFor(row)].filter(Boolean).join(" ") },
+  { key: "source", label: "Источник и сумма", value: (row) => `${sourceLabels[String(sourceInfoFor(row).kind ?? "other")] ?? sourceLabels.other} ${sourceDetails(row)}` },
+  { key: "firstSeenAt", label: "Впервые замечен", kind: "date" },
+  { key: "action", label: "Действие", sortable: false, filterable: false },
+];
+
 export function UnmatchedItems() {
   const [rows, setRows] = useState<JsonRecord[]>([]);
   const [sourceCounts, setSourceCounts] = useState<Record<string, unknown>>({});
@@ -70,6 +78,13 @@ export function UnmatchedItems() {
   const [mode, setMode] = useState<Record<string, "map" | "create" | undefined>>({});
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [productDrafts, setProductDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [sort, setSort] = useState<TableSort>(null);
+  const visibleRows = useMemo(() => filterAndSortRows(rows, unmatchedColumns, filters, sort), [rows, filters, sort]);
+
+  function updateSort(key: string) {
+    setSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
+  }
 
   const refresh = useCallback(async () => {
     setLoading(true); setError("");
@@ -138,9 +153,9 @@ export function UnmatchedItems() {
   });
 
   return <section id="unmatched-ozon-items" className="panel" style={{ marginTop: 16 }}>
-    <div className="panel-head"><div><h2>Записи Ozon без связи с каталогом</h2><span className="small-note">Это не число разных товаров. В списке есть заказы, начисления, возвраты, списания и выкупы.</span>{sourceBreakdown.length > 0 && <span className="small-note" style={{ display: "block", marginTop: 4 }}>{sourceBreakdown.join(" · ")}</span>}</div><span className="badge orange">{rows.length}</span></div>
+    <div className="panel-head"><div><h2>Записи Ozon без связи с каталогом</h2><span className="small-note">Это не число разных товаров. В списке есть заказы, начисления, возвраты, списания и выкупы.</span>{sourceBreakdown.length > 0 && <span className="small-note" style={{ display: "block", marginTop: 4 }}>{sourceBreakdown.join(" · ")}</span>}</div><span className="badge orange">{visibleRows.length === rows.length ? rows.length : `${visibleRows.length} / ${rows.length}`}</span></div>
     {error && <div className="error-banner" role="alert" style={{ margin: "12px 18px 0" }}><AlertCircle size={14} />{error}</div>}{success && <div className="success-banner" role="status" style={{ margin: "12px 18px 0" }}><CheckCircle2 size={14} />{success}</div>}
-    {loading ? <div className="panel-body"><div className="loading-line" /></div> : rows.length === 0 && !error ? <div className="empty-state" style={{ minHeight: 130 }}><div><div className="empty-icon"><CheckCircle2 size={18} /></div><div className="empty-title">Нет записей без связи с каталогом</div><p className="empty-description">Такие записи появятся после синхронизации Ozon.</p></div></div> : <div className="table-wrap"><table><thead><tr><th>Артикул продавца / SKU Ozon</th><th>Источник и сумма</th><th>Впервые замечен</th><th>Действие</th></tr></thead><tbody>{rows.map((row, index) => {
+    {loading ? <div className="panel-body"><div className="loading-line" /></div> : rows.length === 0 && !error ? <div className="empty-state" style={{ minHeight: 130 }}><div><div className="empty-icon"><CheckCircle2 size={18} /></div><div className="empty-title">Нет записей без связи с каталогом</div><p className="empty-description">Такие записи появятся после синхронизации Ozon.</p></div></div> : visibleRows.length === 0 && !error ? <div className="empty-state"><div><div className="empty-title">Нет записей по этим фильтрам</div><button type="button" className="button secondary small" style={{ marginTop: 12 }} onClick={() => setFilters({})}>Очистить фильтры</button></div></div> : <div className="table-wrap"><table><TableHead columns={unmatchedColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{visibleRows.map((row, index) => {
       const id = getId(row) ?? String(index); const currentMode = mode[id]; const ozonSku = ozonSkuFor(row); const article = articleFor(row); const productName = nameFor(row);
       const offerIds = offerIdsFor(row);
       const defaults = { title: productName, offerId: article, ozonSku };

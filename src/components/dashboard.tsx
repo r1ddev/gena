@@ -1,15 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Boxes, CircleDollarSign, Clock3, ShoppingBag, TrendingUp, Wallet } from "lucide-react";
 import { asRecord, displayValue, findRows, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { UnmatchedItems } from "./unmatched-items";
 import { returnsNeedingAction, unmatchedItemsNotice } from "./dashboard-summary";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
+import { filterAndSortRows, TableHead, type TableColumn, type TableSort } from "./table-controls";
 
 type Overview = JsonRecord & { products?: unknown; recentOrders?: unknown; pendingReturns?: unknown; reconciliationErrors?: unknown; profitReconciliationIssues?: unknown };
+
+const dashboardOrderColumns: TableColumn<JsonRecord>[] = [
+  { key: "orderNumber", label: "Отправление", kind: "identifier", value: (row) => row.orderNumber ?? row.postingNumber ?? row.id },
+  { key: "orderDate", label: "Дата", kind: "date", value: (row) => row.deliveredAt ?? row.orderDate },
+  { key: "status", label: "Статус", kind: "status" },
+  { key: "amount", label: "Сумма", kind: "money", value: (row) => row.amount ?? row.accrualAmount },
+];
 
 function numeric(value: unknown): number { const result = Number(value ?? 0); return Number.isFinite(result) ? result : 0; }
 function metric(value: unknown) { return value === null || value === undefined ? "Не рассчитано" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(numeric(value)) + " ₽"; }
@@ -49,6 +57,8 @@ export function Dashboard() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [recentOrderFilters, setRecentOrderFilters] = useState<Record<string, string>>({});
+  const [recentOrderSort, setRecentOrderSort] = useState<TableSort>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true); setError("");
@@ -71,6 +81,7 @@ export function Dashboard() {
 
   const products = findRows(overview?.products);
   const recentOrders = findRows(overview?.recentOrders ?? overview?.recentPostings ?? overview?.postingRows);
+  const visibleRecentOrders = useMemo(() => filterAndSortRows(recentOrders.slice(0, 5), dashboardOrderColumns, recentOrderFilters, recentOrderSort), [recentOrders, recentOrderFilters, recentOrderSort]);
   const returnRows = findRows(overview?.returnRows ?? overview?.pendingReturns);
   const pendingReturns = returnsNeedingAction(returnRows);
   const stockSeller = overview?.sellerStockValue ?? overview?.sellerStock ?? overview?.myStockValue;
@@ -86,6 +97,10 @@ export function Dashboard() {
   const unrecognizedFinanceAmount = numeric(overview?.unrecognizedFinanceAmount);
   const unresolvedExternalItems = findRows(overview?.unresolvedExternalItems);
   const unmatchedNotice = unmatchedItemsNotice(unresolvedExternalItems.length, unrecognizedFinanceAmount);
+
+  function updateRecentOrderSort(key: string) {
+    setRecentOrderSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
+  }
 
   return <>
     <PageHeader eyebrow="Панель управления" title="Обзор магазина" description="Актуальные остатки, денежный баланс, прибыль и последние заказы." />
@@ -138,7 +153,7 @@ export function Dashboard() {
 
           <section className="panel">
             <div className="panel-head"><div><h2>Последние заказы</h2><span className="small-note">Предварительные и признанные</span></div><Link href="/sales" className="button secondary small">Все заказы</Link></div>
-            {recentOrders.length ? <div className="table-wrap"><table><thead><tr><th>Отправление</th><th>Дата</th><th>Статус</th><th>Сумма</th></tr></thead><tbody>{recentOrders.slice(0, 5).map((order, index) => <tr key={String(order.id ?? order.orderNumber ?? index)}><td className="table-primary">{String(order.orderNumber ?? order.postingNumber ?? order.id ?? "Заказ")}</td><td>{displayValue(order.deliveredAt ?? order.orderDate, "date")}</td><td><span className="badge">{displayValue(order.status, "status")}</span></td><td className="number">{displayValue(order.amount ?? order.accrualAmount, "money")}</td></tr>)}</tbody></table></div> : <div className="empty-state" style={{ minHeight: 135 }}><div><div className="empty-icon"><ShoppingBag size={19} /></div><div className="empty-title">Заказов пока нет</div><p className="empty-description">Обновите продажи на странице «Продажи», чтобы загрузить заказы.</p><Link href="/sales" className="button secondary small" style={{ marginTop: 12 }}>Открыть продажи</Link></div></div>}
+            {recentOrders.length ? visibleRecentOrders.length ? <div className="table-wrap"><table><TableHead columns={dashboardOrderColumns} filters={recentOrderFilters} onFilter={(key, value) => setRecentOrderFilters((current) => ({ ...current, [key]: value }))} sort={recentOrderSort} onSort={updateRecentOrderSort} /><tbody>{visibleRecentOrders.map((order, index) => <tr key={String(order.id ?? order.orderNumber ?? index)}><td className="table-primary">{String(order.orderNumber ?? order.postingNumber ?? order.id ?? "Заказ")}</td><td>{displayValue(order.deliveredAt ?? order.orderDate, "date")}</td><td><span className="badge">{displayValue(order.status, "status")}</span></td><td className="number">{displayValue(order.amount ?? order.accrualAmount, "money")}</td></tr>)}</tbody></table></div> : <div className="empty-state"><div><div className="empty-title">Нет заказов по этим фильтрам</div><button type="button" className="button secondary small" style={{ marginTop: 12 }} onClick={() => setRecentOrderFilters({})}>Очистить фильтры</button></div></div> : <div className="empty-state" style={{ minHeight: 135 }}><div><div className="empty-icon"><ShoppingBag size={19} /></div><div className="empty-title">Заказов пока нет</div><p className="empty-description">Обновите продажи на странице «Продажи», чтобы загрузить заказы.</p><Link href="/sales" className="button secondary small" style={{ marginTop: 12 }}>Открыть продажи</Link></div></div>}
           </section>
         </div>
 

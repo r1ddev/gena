@@ -5,6 +5,7 @@ import { AlertCircle, CheckCircle2, Package, Plus, Search, Trash2 } from "lucide
 import { asRecord, displayValue, findRows, getId, localToday, requestJson, stringValue, valueAt, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
+import { filterAndSortRows, TableHead, type TableSort } from "./table-controls";
 
 export type FieldConfig = {
   name: string;
@@ -19,7 +20,7 @@ export type FieldConfig = {
   optionsFrom?: string;
 };
 
-export type ColumnConfig = { key: string; label: string; kind?: "money" | "quantity" | "date" | "status"; primary?: boolean };
+export type ColumnConfig = { key: string; label: string; kind?: "identifier" | "money" | "quantity" | "date" | "status" | "number" | "time"; primary?: boolean; sortable?: boolean; filterable?: boolean };
 export type ResourceConfig = {
   title: string;
   eyebrow?: string;
@@ -124,6 +125,9 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const [success, setSuccess] = useState("");
   const [search, setSearch] = useState("");
   const [serverSearch, setServerSearch] = useState("");
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [serverFilters, setServerFilters] = useState<Record<string, string>>({});
+  const [sort, setSort] = useState<TableSort>(null);
   const requestSequence = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -135,6 +139,8 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       if (config.remotePageSize) {
         const params = new URLSearchParams({ page: String(page), pageSize: String(config.remotePageSize) });
         if (serverSearch) params.set("q", serverSearch);
+        for (const [key, value] of Object.entries(serverFilters)) if (value.trim()) params.set(`filter_${key}`, value.trim());
+        if (sort) { params.set("sort", sort.key); params.set("direction", sort.direction); }
         url += `${url.includes("?") ? "&" : "?"}${params.toString()}`;
       }
       const result = await requestJson(url);
@@ -154,21 +160,22 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       }
     }
     finally { if (sequence === requestSequence.current) setLoading(false); }
-  }, [config.collectionUrl, config.remotePageSize, page, serverSearch]);
+  }, [config.collectionUrl, config.remotePageSize, page, serverFilters, serverSearch, sort]);
 
   useEffect(() => { void refresh(); }, [refresh, refreshKey]);
   useEffect(() => {
     if (!config.remotePageSize) return;
-    if (search.trim() !== serverSearch) {
+    if (search.trim() !== serverSearch || JSON.stringify(filters) !== JSON.stringify(serverFilters)) {
       requestSequence.current++;
       setLoading(false);
     }
     const timeout = window.setTimeout(() => {
       setServerSearch(search.trim());
+      setServerFilters(filters);
       setPage(1);
     }, 250);
     return () => window.clearTimeout(timeout);
-  }, [config.remotePageSize, search, serverSearch]);
+  }, [config.remotePageSize, filters, search, serverFilters, serverSearch]);
   useEffect(() => {
     const refreshAfterSync = () => { void refresh(); };
     window.addEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
@@ -183,9 +190,26 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const visibleRows = useMemo(() => {
     if (config.remotePageSize) return rows;
     const query = search.trim().toLocaleLowerCase("ru-RU");
-    if (!query) return rows;
-    return rows.filter((row) => JSON.stringify(row).toLocaleLowerCase("ru-RU").includes(query));
-  }, [config.remotePageSize, rows, search]);
+    const filteredAndSorted = filterAndSortRows(rows, config.columns, filters, sort);
+    if (!query) return filteredAndSorted;
+    return filteredAndSorted.filter((row) => JSON.stringify(row).toLocaleLowerCase("ru-RU").includes(query));
+  }, [config.columns, config.remotePageSize, filters, rows, search, sort]);
+
+  function updateFilter(key: string, value: string) {
+    setFilters((current) => ({ ...current, [key]: value }));
+    if (config.remotePageSize) setPage(1);
+  }
+
+  function updateSort(key: string) {
+    setSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
+    if (config.remotePageSize) setPage(1);
+  }
+
+  function clearTableFilters() {
+    setFilters({});
+    setSearch("");
+    if (config.remotePageSize) setPage(1);
+  }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -229,12 +253,20 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Загружаем список…" : config.remotePageSize ? `${pagination?.total ?? 0} записей` : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder={config.remotePageSize ? "Поиск по заказам" : "Поиск"} value={search} onChange={(event) => setSearch(event.target.value)} /></div></div></div>
       {loading ? <div className="panel-body" aria-label="Загрузка списка"><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /></div>
         : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={20} /></div><div className="empty-title">Не удалось загрузить данные</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 13 }} onClick={() => void refresh()}>Повторить</button></div></div>
-          : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><Package size={20} /></div><div className="empty-title">{config.remotePageSize && serverSearch ? "Ничего не найдено" : config.emptyTitle ?? "Пока нет записей"}</div><p className="empty-description">{config.remotePageSize && serverSearch ? `По запросу «${serverSearch}» совпадений нет. Измените запрос или очистите поиск.` : config.emptyDescription ?? "Добавьте первую запись — она появится в этом списке, а связанные итоги обновятся автоматически."}</p></div></div>
-            : <div className="table-wrap"><table><thead><tr>{config.columns.map((column) => <th key={column.key}>{column.label}</th>)}{(config.deleteUrl || rowActions) && <th aria-label="Действия" />}</tr></thead><tbody>{visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
+          : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><Package size={20} /></div><div className="empty-title">{Boolean(search.trim()) || (config.remotePageSize && serverSearch) || Object.values(filters).some((value) => value.trim()) ? "Ничего не найдено" : config.emptyTitle ?? "Пока нет записей"}</div><p className="empty-description">{Boolean(search.trim()) || (config.remotePageSize && serverSearch) || Object.values(filters).some((value) => value.trim()) ? "По заданным условиям совпадений нет. Измените или очистите фильтры." : config.emptyDescription ?? "Добавьте первую запись — она появится в этом списке, а связанные итоги обновятся автоматически."}</p>{(Boolean(search.trim()) || (config.remotePageSize && serverSearch) || Object.values(filters).some((value) => value.trim())) && <button type="button" className="button secondary small" style={{ marginTop: 12 }} onClick={clearTableFilters}>Очистить фильтры</button>}</div></div>
+            : <div className="table-wrap"><table><TableHead columns={config.columns.map((column) => ({
+              ...column,
+              kind: column.kind ?? (column.key === "id" || column.key === "externalId" ? "identifier" : "text"),
+              value: column.key === "article" ? (row: JsonRecord) => orderArticleText(row.items)
+                : column.key === "status" ? (row: JsonRecord) => [row.status, row.returnState].filter(Boolean).join(" ")
+                  : column.key === "archived" ? (row: JsonRecord) => row.archived ? "В архиве" : "Активен"
+                    : (row: JsonRecord) => valueAt(row, column.key),
+            }))} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || rowActions ? ["Действия"] : []} /><tbody>{visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
               const value = valueAt(row, column.key);
-              if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, column.kind)}</span>{typeof row.sku === "string" && column.key !== "sku" && column.key !== "offerId" && <span className="table-secondary">{row.sku}</span>}</td>;
+              const displayKind = column.kind === "date" || column.kind === "money" || column.kind === "quantity" || column.kind === "status" ? column.kind : undefined;
+              if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, displayKind)}</span>{typeof row.sku === "string" && column.key !== "sku" && column.key !== "offerId" && <span className="table-secondary">{row.sku}</span>}</td>;
               if (column.key === "article") return <td key={column.key}>{orderArticleText(row.items)}</td>;
-              const rendered = column.key === "archived" ? (value ? "В архиве" : "Активен") : displayValue(value, column.kind);
+              const rendered = column.key === "archived" ? (value ? "В архиве" : "Активен") : displayValue(value, displayKind);
               return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") || column.key === "archived" ? <><span className={`badge ${column.key === "archived" && !value ? "green" : ""}`}>{rendered}</span>{column.key === "status" && typeof row.returnState === "string" && <span className="table-secondary">{row.returnState}</span>}</> : rendered}</td>;
             })}{(config.deleteUrl || rowActions) && <td><div className="row-actions">{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
       {pagination && pagination.totalPages > 1 && <nav className="pagination-controls" aria-label={`Страницы: ${config.title}`} aria-busy={loading}>
