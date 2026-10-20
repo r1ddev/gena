@@ -76,23 +76,14 @@ export async function GET(request: Request) {
     return {
       items: pageRows.map((posting) => {
         const items = itemsByPosting.get(posting.id) ?? [];
-        const allItemsAreMarketplaceBuyouts = items.length > 0 && items.every(({ item }) => item.isMarketplaceBuyout);
-        const someItemsAreMarketplaceBuyouts = items.some(({ item }) => item.isMarketplaceBuyout);
         const translatedStatus = statusLabels[posting.status.toLowerCase()] ?? posting.status;
-        const status = /cancel|отмен/i.test(posting.status)
-          ? translatedStatus
-          : allItemsAreMarketplaceBuyouts
-            ? `${translatedStatus} · Выкуп Ozon`
-            : someItemsAreMarketplaceBuyouts
-              ? `${translatedStatus} · Смешанный выкуп Ozon`
-              : translatedStatus;
         const buyoutCents = items.reduce((total, { item }) => {
           if (item.ozonSku && financeSaleSkuKeys.has(`${posting.externalId}\u0000${item.ozonSku}`)) return total;
           return total + Math.round(Number(item.marketplaceBuyoutAmount ?? 0) * 100);
         }, 0);
         return {
           ...posting,
-          status,
+          status: translatedStatus,
           returnState: returnStatesByPosting.get(posting.externalId) ?? null,
           items: items.map(({ item, productSku }) => ({
             title: item.title, sku: productSku, offerId: item.offerId, ozonSku: item.ozonSku, quantity: item.quantity, price: item.price, mapped: Boolean(item.productId), isMarketplaceBuyout: item.isMarketplaceBuyout,
