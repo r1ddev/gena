@@ -9,7 +9,10 @@ const supplySchema = z.object({
   suppliedAt: isoDate,
   shippingCost: nonNegativeDecimal,
   note: z.string().trim().max(2000).optional().default(""),
-  lines: z.array(z.object({ productId: z.string().uuid(), quantity: positiveDecimal })).min(1),
+  lines: z.array(z.object({
+    productId: z.string().uuid(),
+    quantity: positiveDecimal.refine((value) => Number.isInteger(Number(value)), "Количество должно быть целым числом."),
+  })).min(1),
 });
 
 export async function GET(request: Request) {
