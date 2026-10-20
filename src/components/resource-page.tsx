@@ -9,6 +9,7 @@ import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type Table
 import { ProductImageInput } from "./product-image-input";
 import { notifyProductCatalogChanged, ProductArticle } from "./product-hover-card";
 import { OzonOrderLink } from "./ozon-order-link";
+import { ConfirmationModal } from "./confirmation-modal";
 
 export type FieldConfig = {
   name: string;
@@ -169,6 +170,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [deletePrompt, setDeletePrompt] = useState<{ url: string; title: string; description: string } | null>(null);
   const [forceDeletePrompt, setForceDeletePrompt] = useState<{ url: string; title: string; blockers: { label: string; count: number }[] } | null>(null);
   const [search, setSearch] = useState("");
   const [serverSearch, setServerSearch] = useState("");
@@ -302,21 +304,31 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
 
   async function submitEdit(event: React.FormEvent<HTMLFormElement>) { await submitRecord(event, true); }
 
-  async function remove(row: JsonRecord) {
+  function remove(row: JsonRecord) {
     if (!config.deleteUrl) return;
     const url = config.deleteUrl(row);
     if (!url) return;
-    if (typeof window !== "undefined" && !window.confirm(config.deleteConfirm ?? "Удалить эту запись? Связанные остатки и итоги обновятся автоматически.")) return;
+    setDeletePrompt({
+      url,
+      title: String(row.title ?? row.sku ?? "запись"),
+      description: config.deleteConfirm ?? "Связанные остатки и итоги обновятся автоматически.",
+    });
+  }
+
+  async function confirmRemove() {
+    if (!deletePrompt) return;
+    const pendingDelete = deletePrompt;
+    setDeletePrompt(null);
     setBusy(true); setError(""); setSuccess("");
     try {
-      const response = asRecord(await requestJson(url, { method: "DELETE" }));
+      const response = asRecord(await requestJson(pendingDelete.url, { method: "DELETE" }));
       if (response?.requiresForceDelete === true) {
         const product = asRecord(response.product);
         const blockers = Array.isArray(response.blockers) ? response.blockers.flatMap((item) => {
           const blocker = asRecord(item);
           return typeof blocker?.label === "string" && Number(blocker.count) > 0 ? [{ label: blocker.label, count: Number(blocker.count) }] : [];
         }) : [];
-        setForceDeletePrompt({ url, title: stringValue(product?.title) ?? String(row.title ?? "товар"), blockers });
+        setForceDeletePrompt({ url: pendingDelete.url, title: stringValue(product?.title) ?? pendingDelete.title, blockers });
         return;
       }
       if (config.collectionUrl === "/api/products") notifyProductCatalogChanged();
@@ -381,6 +393,15 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
         </form>
       </section>
     </div>}
+    <ConfirmationModal
+      open={Boolean(deletePrompt)}
+      title="Удалить запись?"
+      description={deletePrompt?.description ?? ""}
+      confirmLabel="Удалить"
+      busy={busy}
+      onCancel={() => setDeletePrompt(null)}
+      onConfirm={() => void confirmRemove()}
+    />
     {forceDeletePrompt && <div className="product-edit-backdrop">
       <section className="panel delete-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="force-delete-title">
         <div className="panel-head"><h2 id="force-delete-title">У товара есть связанные записи</h2><button type="button" className="icon-button" aria-label="Закрыть" onClick={() => setForceDeletePrompt(null)} disabled={busy}><X size={15} /></button></div>

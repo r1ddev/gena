@@ -151,6 +151,11 @@ tbody tr:hover { background: #fcfdfc; }
 .product-edit-dialog { width: min(850px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
 .product-edit-dialog .form-actions { padding-top: 4px; }
 .delete-confirm-dialog { width: min(560px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
+.confirmation-dialog { width: min(500px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
+.confirmation-modal-heading { display: flex; align-items: center; gap: 9px; }
+.confirmation-modal-heading > svg { flex: 0 0 auto; color: var(--red); }
+.confirmation-modal-heading h2 { margin: 0; }
+.confirmation-modal-copy { margin: 0; color: #526057; font-size: 12px; line-height: 1.55; }
 .delete-confirm-copy { margin: 0 0 10px; color: #526057; font-size: 12px; line-height: 1.5; }
 .delete-blocker-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
 .delete-blocker-list li { display: flex; justify-content: space-between; gap: 14px; padding: 8px 2px; border-bottom: 1px solid #edf0ed; color: #59675e; font-size: 11px; }

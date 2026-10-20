@@ -6,6 +6,7 @@ import { asRecord, findRows, getId, localToday, requestJson, stringValue, type J
 import { ResourcePage } from "./resource-page";
 import { ProductArticle } from "./product-hover-card";
 import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { ConfirmationModal } from "./confirmation-modal";
 
 function formatPurchaseQuantity(value: unknown): string {
   const number = Number(value ?? 0);
@@ -144,6 +145,7 @@ export function PurchasesWorkspace() {
   const [lines, setLines] = useState<{ productId: string; quantity: string }[]>([]);
   const [note, setNote] = useState("");
   const [editingReceiptId, setEditingReceiptId] = useState("");
+  const [receiptDeleteId, setReceiptDeleteId] = useState("");
   const [historyPurchaseId, setHistoryPurchaseId] = useState("");
   const [historyFilters, setHistoryFilters] = useState<Record<string, string>>({});
   const [historySort, setHistorySort] = useState<TableSort>(null);
@@ -235,9 +237,16 @@ export function PurchasesWorkspace() {
     document.getElementById("receipt-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  async function deleteReceipt(receipt: JsonRecord) {
+  function deleteReceipt(receipt: JsonRecord) {
     const id = getId(receipt);
-    if (!id || !window.confirm("Удалить эту приёмку? Остаток и себестоимость пересчитаются без неё.")) return;
+    if (!id) return;
+    setReceiptDeleteId(id);
+  }
+
+  async function confirmDeleteReceipt() {
+    const id = receiptDeleteId;
+    if (!id) return;
+    setReceiptDeleteId("");
     setBusy(true); setError(""); setSuccess("");
     try {
       await requestJson(`/api/purchases/receipts?id=${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -338,5 +347,14 @@ export function PurchasesWorkspace() {
         </tr>)}</tbody>
       </table></div>
     </section>
+    <ConfirmationModal
+      open={Boolean(receiptDeleteId)}
+      title="Удалить приёмку?"
+      description="Остаток и себестоимость пересчитаются без неё."
+      confirmLabel="Удалить"
+      busy={busy}
+      onCancel={() => setReceiptDeleteId("")}
+      onConfirm={() => void confirmDeleteReceipt()}
+    />
   </>;
 }
