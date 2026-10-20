@@ -9,18 +9,41 @@ import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 import { ProductArticle } from "./product-hover-card";
 import { OzonOrderLink } from "./ozon-order-link";
+import { OzonReturnLink } from "./ozon-return-link";
 
-function returnLabel(value: unknown) {
-  const labels: Record<string, string> = { seller: "Мне", ozon: "На склад Ozon", unknown: "Не определено" };
-  return typeof value === "string" ? labels[value] ?? value : "—";
+function returnLabel(row: JsonRecord) {
+  if (row.destination === "seller") return "Мне";
+  if (row.destination === "ozon") return "На склад Ozon";
+  const status = String(row.status ?? "");
+  if (status === "WriteOff") return "Списан Ozon";
+  const raw = row.raw && typeof row.raw === "object" && !Array.isArray(row.raw) ? row.raw as JsonRecord : {};
+  if (String(raw.schema ?? "").toLowerCase() === "fbo") return "На стороне Ozon";
+  const target = raw.target_place && typeof raw.target_place === "object" && !Array.isArray(raw.target_place)
+    ? raw.target_place as JsonRecord
+    : {};
+  return String(target.name ?? target.address ?? "—");
+}
+
+function returnStatusLabel(value: unknown) {
+  const labels: Record<string, string> = {
+    WriteOff: "Списали товар",
+    PotentiallyLost: "Ищем товар",
+    WaitingShipment: "Ожидает отправки",
+    ReceivedBySeller: "Едет к вам",
+    MovingToSeller: "Едет к вам",
+    ReturningToSellerByCourier: "Едет к вам",
+    ReturnedToOzon: "Едет на склад Ozon",
+    MovingToOzon: "Едет на склад Ozon",
+  };
+  return typeof value === "string" ? labels[value] ?? value : "Ожидает подтверждения";
 }
 
 const returnColumns: TableColumn<JsonRecord>[] = [
   { key: "externalId", label: "Возврат", kind: "identifier", value: (row) => row.externalId ?? row.postingNumber ?? row.id },
   { key: "product", label: "Товар", value: (row) => [row.title ?? row.productName, row.offerId, row.sku, row.ozonSku].filter(Boolean).join(" ") },
   { key: "quantity", label: "Количество", kind: "quantity" },
-  { key: "destination", label: "Куда", value: (row) => returnLabel(row.destination) },
-  { key: "status", label: "Статус", value: (row) => [row.destination === "seller" && row.receivedBySellerAt ? "Получен" : row.status ?? "Ожидает подтверждения", row.profitReconciliationNeeded ? "Прибыль требует сверки" : ""].filter(Boolean).join(" ") },
+  { key: "destination", label: "Куда", value: returnLabel },
+  { key: "status", label: "Статус", value: (row) => [row.destination === "seller" && row.receivedBySellerAt ? "Получен" : returnStatusLabel(row.status), row.profitReconciliationNeeded ? "Прибыль требует сверки" : ""].filter(Boolean).join(" ") },
   { key: "returnedAt", label: "Дата", kind: "date", value: (row) => row.returnedAt ?? row.updatedAt },
   { key: "action", label: "Действие", sortable: false, filterable: false },
 ];
@@ -95,16 +118,30 @@ export function ReturnsWorkspace() {
     {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}{success && <div className="success-banner" role="status"><CheckCircle2 size={15} />{success}</div>}
     <section className="panel">
       <div className="panel-head"><div><h2>Возвраты, требующие действия</h2><span className="small-note">{loading ? "Загружаем возвраты…" : visibleRows.length === rows.length ? `${rows.length} записей` : `${visibleRows.length} из ${rows.length} записей`}</span></div><RotateCcw size={17} color="#178b63" /></div>
-      {loading && rows.length === 0 && !hasActiveFilters ? <div className="panel-body"><div className="loading-line" /></div> : loadError && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={18} /></div><div className="empty-title">Не удалось загрузить возвраты</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 12 }} onClick={() => void refresh()}>Повторить</button></div></div> : rows.length === 0 && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><RotateCcw size={18} /></div><div className="empty-title">Возвратов, требующих действия, пока нет</div><p className="empty-description">Здесь появятся возвраты, направленные вам, и возвраты с неопределённым местом. Возврат на склад Ozon виден в состоянии заказа и не меняет остаток.</p></div></div> : <div className="table-wrap"><table><TableHead columns={returnColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{loadError ? <TableEmptyRow colSpan={returnColumns.length} message={loadError} /> : loading && hasActiveFilters ? <TableEmptyRow colSpan={returnColumns.length} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={returnColumns.length} message="По заданным условиям совпадений нет." onClear={() => setFilters({})} /> : visibleRows.map((row, index) => {
+      {loading && rows.length === 0 && !hasActiveFilters ? <div className="panel-body"><div className="loading-line" /></div> : loadError && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={18} /></div><div className="empty-title">Не удалось загрузить возвраты</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 12 }} onClick={() => void refresh()}>Повторить</button></div></div> : rows.length === 0 && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><RotateCcw size={18} /></div><div className="empty-title">Возвратов, требующих действия, пока нет</div><p className="empty-description">Здесь появятся возвраты, которые нужно получить или проверить.</p></div></div> : <div className="table-wrap"><table><TableHead columns={returnColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{loadError ? <TableEmptyRow colSpan={returnColumns.length} message={loadError} /> : loading && hasActiveFilters ? <TableEmptyRow colSpan={returnColumns.length} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={returnColumns.length} message="По заданным условиям совпадений нет." onClear={() => setFilters({})} /> : visibleRows.map((row, index) => {
         const id = getId(row) ?? String(index); const destination = row.destination;
         const sellerDone = destination === "seller" && Boolean(row.receivedBySellerAt);
         const postingMatched = row.postingMatched === true;
         const isEditingPosting = editingPosting[id] === true;
         const postingNumber = String(row.postingNumber ?? "");
         const profitNeedsReconciliation = row.profitReconciliationNeeded === true || (!postingMatched && sellerDone);
-        const article = String(row.offerId ?? row.sku ?? row.ozonSku ?? "");
-        const articleLabel = row.offerId || row.productId ? "Артикул" : "SKU Ozon";
-        return <tr key={id}><td className="table-primary">{String(row.externalId ?? row.postingNumber ?? id)}</td><td><span className="table-primary">{String(row.title ?? row.productName ?? "—")}</span>{article && <span className="table-secondary"><ProductArticle identifier={article} productId={typeof row.productId === "string" ? row.productId : null} identifierLabel={articleLabel} fallback={row} /></span>}</td><td className="number">{String(row.quantity ?? "—")}</td><td>{returnLabel(destination)}</td><td><span className={`badge ${sellerDone ? "green" : "orange"}`}>{sellerDone ? "Получен" : String(row.status ?? "Ожидает подтверждения")}</span>{profitNeedsReconciliation && <span className="badge orange" style={{ marginTop: 5 }}>Прибыль требует сверки</span>}</td><td>{String(row.returnedAt ?? row.updatedAt ?? "—").slice(0, 10)}</td><td><div className="row-actions">{!sellerDone && <button className="button secondary small" disabled={busyId === id} onClick={() => void markReceived(row)}>Получил я</button>}{postingMatched && !isEditingPosting ? <><span className="table-secondary">Отправление <OzonOrderLink postingNumber={postingNumber} /></span><button className="button secondary small" disabled={busyId === id} onClick={() => editPosting(row)}>Изменить связь</button></> : <><input aria-label="Номер отправления Ozon" placeholder={postingNumber ? `Текущий номер: ${postingNumber}` : "Номер отправления"} value={postingNumbers[id] ?? ""} onChange={(event) => setPostingNumbers((current) => ({ ...current, [id]: event.target.value }))} style={{ minWidth: 150, minHeight: 30, padding: "5px 8px", border: "1px solid #dfe5e0", borderRadius: 7, fontSize: 11 }} /><button className="button secondary small" disabled={busyId === id} onClick={() => void linkPosting(row)}>{postingNumber ? "Сохранить связь" : "Связать заказ"}</button>{isEditingPosting && postingMatched && <button className="button secondary small" disabled={busyId === id} onClick={() => setEditingPosting((current) => ({ ...current, [id]: false }))}>Отмена</button>}</>}</div></td></tr>;
+        const returnId = String(row.externalId ?? "");
+        const sellerArticle = String(row.offerId || "");
+        const ozonSku = String(row.ozonSku || "");
+        const productId = typeof row.productId === "string" ? row.productId : null;
+        return <tr key={id}>
+          <td className="table-primary"><OzonReturnLink returnId={returnId}>{returnId || String(row.postingNumber ?? id)}</OzonReturnLink></td>
+          <td>
+            <span className="table-primary">{String(row.title ?? row.productName ?? "—")}</span>
+            {sellerArticle && <span className="table-secondary">Артикул: <ProductArticle identifier={sellerArticle} productId={productId} identifierLabel="Артикул" fallback={row} /></span>}
+            {ozonSku && <span className="table-secondary">SKU Ozon: <ProductArticle identifier={ozonSku} productId={productId} identifierLabel="SKU Ozon" fallback={row} /></span>}
+          </td>
+          <td className="number">{String(row.quantity ?? "—")}</td>
+          <td>{returnLabel(row)}</td>
+          <td><span className={`badge ${sellerDone ? "green" : "orange"}`}>{sellerDone ? "Получен" : returnStatusLabel(row.status)}</span>{profitNeedsReconciliation && <span className="badge orange" style={{ marginTop: 5 }}>Прибыль требует сверки</span>}</td>
+          <td>{String(row.returnedAt ?? row.updatedAt ?? "—").slice(0, 10)}</td>
+          <td><div className="row-actions">{!sellerDone && <button className="button secondary small" disabled={busyId === id} onClick={() => void markReceived(row)}>Получил я</button>}{postingMatched && !isEditingPosting ? <><span className="table-secondary">Отправление <OzonOrderLink postingNumber={postingNumber} /></span><button className="button secondary small" disabled={busyId === id} onClick={() => editPosting(row)}>Изменить связь</button></> : <><input aria-label="Номер отправления Ozon" placeholder={postingNumber ? `Текущий номер: ${postingNumber}` : "Номер отправления"} value={postingNumbers[id] ?? ""} onChange={(event) => setPostingNumbers((current) => ({ ...current, [id]: event.target.value }))} style={{ minWidth: 150, minHeight: 30, padding: "5px 8px", border: "1px solid #dfe5e0", borderRadius: 7, fontSize: 11 }} /><button className="button secondary small" disabled={busyId === id} onClick={() => void linkPosting(row)}>{postingNumber ? "Сохранить связь" : "Связать заказ"}</button>{isEditingPosting && postingMatched && <button className="button secondary small" disabled={busyId === id} onClick={() => setEditingPosting((current) => ({ ...current, [id]: false }))}>Отмена</button>}</>}</div></td>
+        </tr>;
       })}</tbody></table></div>}
     </section>
   </>;

@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { postingItems, postings, products, returns } from "@/db/schema";
+import { externalItems, postingItems, postings, productLinks, products, returns } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, timestampValue } from "../_lib/validation";
@@ -26,6 +26,29 @@ export async function GET(request: Request) {
     const reconciliationIds = new Set(accounting.profitReconciliationIssues.map((issue) => issue.externalId).filter(Boolean));
     const sellerReturns = rows.filter((row) => row.destination !== "ozon");
     const postingNumbers = [...new Set(sellerReturns.map((row) => row.postingNumber).filter((value): value is string => Boolean(value)))];
+    const productData = (row: (typeof sellerReturns)[number]) =>
+      row.raw.product && typeof row.raw.product === "object" && !Array.isArray(row.raw.product)
+        ? row.raw.product as Record<string, unknown>
+        : {};
+    const sellerReturnProducts = sellerReturns.map((row) => {
+      const product = productData(row);
+      return {
+        offerId: row.offerId || String(product.offer_id ?? ""),
+        ozonSku: row.ozonSku || String(product.sku ?? ""),
+      };
+    });
+    const skus = [...new Set(sellerReturnProducts.map((product) => product.ozonSku).filter(Boolean))];
+    const [orderProducts, catalogLinks, externalProducts] = await Promise.all([
+      skus.length ? db.select({ offerId: postingItems.offerId, ozonSku: postingItems.ozonSku }).from(postingItems).where(inArray(postingItems.ozonSku, skus)) : Promise.resolve([]),
+      skus.length ? db.select({ offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks).where(inArray(productLinks.ozonSku, skus)) : Promise.resolve([]),
+      skus.length ? db.select({ offerId: externalItems.offerId, ozonSku: externalItems.ozonSku }).from(externalItems).where(inArray(externalItems.ozonSku, skus)) : Promise.resolve([]),
+    ]);
+    const offersBySku = new Map<string, Set<string>>();
+    for (const row of [...sellerReturnProducts, ...orderProducts, ...catalogLinks, ...externalProducts]) {
+      if (!row.ozonSku || !row.offerId) continue;
+      offersBySku.set(row.ozonSku, new Set([...(offersBySku.get(row.ozonSku) ?? []), row.offerId]));
+    }
+    const uniqueOfferBySku = new Map([...offersBySku].flatMap(([sku, offers]) => offers.size === 1 ? [[sku, [...offers][0]] as const] : []));
     const linkedItems = postingNumbers.length
       ? await db.select({ postingNumber: postings.externalId, productId: postingItems.productId }).from(postings)
         .innerJoin(postingItems, eq(postingItems.postingId, postings.id)).where(inArray(postings.externalId, postingNumbers))
@@ -34,7 +57,21 @@ export async function GET(request: Request) {
     const productById = new Map(catalog.map((product) => [product.id, product]));
     return { items: sellerReturns.map((row) => {
       const product = productById.get(row.productId ?? "");
-      return { ...row, postingMatched: Boolean(row.postingNumber && row.productId && validLinks.has(`${row.postingNumber}\u0000${row.productId}`)), profitReconciliationNeeded: reconciliationIds.has(row.externalId), title: product?.title ?? "Товар не сопоставлен", sku: product?.sku ?? row.ozonSku, orderNumber: row.postingNumber ?? "", returnedAt: row.returnedAt?.toISOString() ?? null };
+      const rawProduct = productData(row);
+      const ozonTitle = typeof rawProduct.name === "string" ? rawProduct.name : "";
+      const ozonSku = row.ozonSku || String(rawProduct.sku ?? "");
+      const sellerArticle = row.offerId || String(rawProduct.offer_id ?? "") || uniqueOfferBySku.get(ozonSku) || product?.sku || "";
+      return {
+        ...row,
+        offerId: sellerArticle,
+        ozonSku,
+        postingMatched: Boolean(row.postingNumber && row.productId && validLinks.has(`${row.postingNumber}\u0000${row.productId}`)),
+        profitReconciliationNeeded: reconciliationIds.has(row.externalId),
+        title: product?.title || ozonTitle || "Товар не сопоставлен",
+        sku: product?.sku ?? sellerArticle,
+        orderNumber: row.postingNumber ?? "",
+        returnedAt: row.returnedAt?.toISOString() ?? null,
+      };
     }) };
   });
 }
