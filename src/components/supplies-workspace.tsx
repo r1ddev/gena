@@ -19,8 +19,8 @@ function SupplyEntryForm({ onSaved }: { onSaved: () => void }) {
 
   useEffect(() => { requestJson("/api/products").then((value) => setProducts(findRows(value).map((row) => {
     const id = getId(row); if (!id) return null;
-    const title = String(row.title ?? "Товар"); const sku = typeof row.sku === "string" ? row.sku : "";
-    return { id, label: sku ? `${title} · ${sku}` : title };
+    const article = typeof row.offerId === "string" && row.offerId ? row.offerId : typeof row.sku === "string" ? row.sku : "Артикул не указан";
+    return { id, label: article };
   }).filter((row): row is ProductOption => row !== null))).catch(() => setProducts([])); }, []);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
