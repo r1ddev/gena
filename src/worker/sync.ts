@@ -274,7 +274,7 @@ async function importReturns(credentials: OzonCredentials, from: Date, to: Date,
           old?.manualReconciliationFields.includes("postingNumber") ?? false,
         );
         const returnedAtValue = item.logistic?.return_date;
-        const status = asString(item.visual?.status?.sys_name, asString(item.visual?.status?.display_name, "unknown"));
+        const status = asString(item.visual?.status?.display_name, asString(item.visual?.status?.sys_name, "unknown"));
         await db.insert(returns).values({
           externalId: id,
           postingNumber,

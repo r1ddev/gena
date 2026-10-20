@@ -11,7 +11,6 @@ describe("getOrderReturnStatesByPosting", () => {
       productId: "product-1",
       destination: "seller",
       receivedBySellerAt: null,
-      availableAtOzon: null,
     }]);
 
     expect(states.get("posting-number-1")).toBe("Возврат едет ко мне · получение не отмечено");
@@ -23,7 +22,6 @@ describe("getOrderReturnStatesByPosting", () => {
       productId: "different-product",
       destination: "seller",
       receivedBySellerAt: null,
-      availableAtOzon: null,
     }]);
 
     expect(states.has("posting-number-1")).toBe(false);
@@ -36,7 +34,6 @@ describe("getOrderReturnStatesByPosting", () => {
       destination: "ozon",
       status: "Не выкуплен",
       receivedBySellerAt: null,
-      availableAtOzon: new Date("2026-10-20T12:00:00Z"),
     }]);
 
     expect(states.get("posting-number-1")).toBe("Возврат на Ozon · Не выкуплен");

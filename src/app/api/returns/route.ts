@@ -24,14 +24,15 @@ export async function GET(request: Request) {
       getAccountingSnapshot(),
     ]);
     const reconciliationIds = new Set(accounting.profitReconciliationIssues.map((issue) => issue.externalId).filter(Boolean));
-    const postingNumbers = [...new Set(rows.map((row) => row.postingNumber).filter((value): value is string => Boolean(value)))];
+    const sellerReturns = rows.filter((row) => row.destination !== "ozon");
+    const postingNumbers = [...new Set(sellerReturns.map((row) => row.postingNumber).filter((value): value is string => Boolean(value)))];
     const linkedItems = postingNumbers.length
       ? await db.select({ postingNumber: postings.externalId, productId: postingItems.productId }).from(postings)
         .innerJoin(postingItems, eq(postingItems.postingId, postings.id)).where(inArray(postings.externalId, postingNumbers))
       : [];
     const validLinks = new Set(linkedItems.filter((item) => item.productId).map((item) => `${item.postingNumber}\u0000${item.productId}`));
     const productById = new Map(catalog.map((product) => [product.id, product]));
-    return { items: rows.map((row) => {
+    return { items: sellerReturns.map((row) => {
       const product = productById.get(row.productId ?? "");
       return { ...row, postingMatched: Boolean(row.postingNumber && row.productId && validLinks.has(`${row.postingNumber}\u0000${row.productId}`)), profitReconciliationNeeded: reconciliationIds.has(row.externalId), title: product?.title ?? "Товар не сопоставлен", sku: product?.sku ?? row.ozonSku, orderNumber: row.postingNumber ?? "", returnedAt: row.returnedAt?.toISOString() ?? null };
     }) };

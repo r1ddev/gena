@@ -6,7 +6,7 @@ import { AlertTriangle, ArrowDownRight, ArrowUpRight, Boxes, CircleDollarSign, C
 import { asRecord, displayValue, findRows, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { UnmatchedItems } from "./unmatched-items";
-import { latestOzonSyncNotice, unmatchedItemsNotice } from "./dashboard-summary";
+import { latestOzonSyncNotice, returnsNeedingAction, unmatchedItemsNotice } from "./dashboard-summary";
 
 type Overview = JsonRecord & { products?: unknown; recentOrders?: unknown; pendingReturns?: unknown; reconciliationErrors?: unknown; profitReconciliationIssues?: unknown };
 
@@ -102,7 +102,7 @@ export function Dashboard() {
   const products = findRows(overview?.products);
   const recentOrders = findRows(overview?.recentOrders ?? overview?.recentPostings ?? overview?.postingRows);
   const returnRows = findRows(overview?.returnRows ?? overview?.pendingReturns);
-  const pendingReturns = returnRows.filter((row) => row.destination === "unknown" || (row.destination === "seller" && !row.receivedBySellerAt) || (row.destination === "ozon" && !row.availableAtOzon));
+  const pendingReturns = returnsNeedingAction(returnRows);
   const stockSeller = overview?.sellerStockValue ?? overview?.sellerStock ?? overview?.myStockValue;
   const stockOzon = overview?.ozonStockValue ?? overview?.ozonStock;
   const sellerQuantity = stockSeller === undefined ? products.reduce((total, product) => total + numeric(product.sellerStock), 0) : numeric(stockSeller);

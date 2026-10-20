@@ -271,7 +271,8 @@ describe("calculateAccounting", () => {
   it("does not restore an Ozon return for a posting that was never delivered", () => {
     const result = calculateAccounting(
       base({
-        receipts: [{ productId: "p1", quantity: "1", unitCost: "50" }],
+        receipts: [{ productId: "p1", quantity: "10", unitCost: "50" }],
+        supplies: [{ productId: "p1", quantity: "10", shippingCost: "0" }],
         postings: [{ id: "cancelled", status: "cancelled", deliveredAt: null, isMarketplaceBuyout: false }],
         postingItems: [{ postingId: "cancelled", productId: "p1", quantity: "1", price: "300" }],
         returns: [{ postingId: "cancelled", productId: "p1", quantity: "1", destination: "ozon", receivedBySellerAt: null, availableAtOzon: "2026-10-20T10:00:00Z" }],
@@ -279,7 +280,7 @@ describe("calculateAccounting", () => {
       new Date("2026-10-20T12:00:00Z"),
     );
 
-    expect(result.products[0].ozonStock).toBe("0.000");
+    expect(result.products[0].ozonStock).toBe("10.000");
   });
 
   it("does not move stock again when a delivered order is returned to Ozon", () => {

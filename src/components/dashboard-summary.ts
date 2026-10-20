@@ -10,6 +10,10 @@ export function unmatchedItemsNotice(unmatchedItemCount: number, excludedFinance
   };
 }
 
+export function returnsNeedingAction<T extends { destination?: unknown; receivedBySellerAt?: unknown }>(rows: T[]) {
+  return rows.filter((row) => row.destination === "unknown" || (row.destination === "seller" && !row.receivedBySellerAt));
+}
+
 export function latestOzonSyncNotice(jobValue: unknown) {
   if (!jobValue || typeof jobValue !== "object" || Array.isArray(jobValue)) return null;
   const job = jobValue as Record<string, unknown>;

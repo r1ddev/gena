@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { latestOzonSyncNotice, unmatchedItemsNotice } from "./dashboard-summary";
+import { latestOzonSyncNotice, returnsNeedingAction, unmatchedItemsNotice } from "./dashboard-summary";
+
+describe("returnsNeedingAction", () => {
+  it("does not count returns to Ozon as inventory actions", () => {
+    expect(returnsNeedingAction([
+      { id: "ozon-return", destination: "ozon", receivedBySellerAt: null },
+      { id: "seller-return", destination: "seller", receivedBySellerAt: null },
+      { id: "unknown-return", destination: "unknown", receivedBySellerAt: null },
+      { id: "received-return", destination: "seller", receivedBySellerAt: "2026-10-20T10:00:00Z" },
+    ]).map((row) => row.id)).toEqual(["seller-return", "unknown-return"]);
+  });
+});
 
 describe("unmatchedItemsNotice", () => {
   it("keeps unresolved Ozon items visible with the amount excluded from the balance", () => {
