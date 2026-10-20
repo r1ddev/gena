@@ -14,6 +14,7 @@ export default function ExpensesPage() {
       { name: "note", label: "Комментарий", type: "textarea", wide: true },
     ],
     columns: [{ key: "spentAt", label: "Дата", kind: "date" }, { key: "description", label: "Что", primary: true }, { key: "note", label: "Комментарий" }, { key: "amount", label: "Сумма", kind: "money" }],
+    editUrl: (row) => typeof row.id === "string" ? `/api/expenses?id=${encodeURIComponent(row.id)}` : null,
     deleteUrl: (row) => typeof row.id === "string" ? `/api/expenses?id=${encodeURIComponent(row.id)}` : null,
     emptyDescription: "Добавьте расход. Удаление ошибочной записи убирает её влияние из баланса и расчёта себестоимости.",
   }} />;

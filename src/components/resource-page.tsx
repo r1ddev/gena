@@ -291,7 +291,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       if (config.collectionUrl === "/api/products") notifyProductCatalogChanged();
       setFormValues({}); setProductImage(null); setFormOpen(false);
       if (editing) closeEdit();
-      setSuccess(editing ? "Товар сохранён." : "Запись добавлена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh();
+      setSuccess(editing ? "Изменения сохранены." : "Запись добавлена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось сохранить запись"); }
     finally { setBusy(false); }
   }
@@ -331,7 +331,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     </section>}
     {editingRow && <div className="product-edit-backdrop">
       <section className="panel product-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="product-edit-title">
-        <div className="panel-head"><div><h2 id="product-edit-title">Редактирование товара</h2><span className="small-note">Поля со звёздочкой обязательны</span></div><button type="button" className="icon-button" aria-label="Закрыть редактирование" onClick={closeEdit}><X size={15} /></button></div>
+        <div className="panel-head"><div><h2 id="product-edit-title">Редактирование записи</h2><span className="small-note">Поля со звёздочкой обязательны</span></div><button type="button" className="icon-button" aria-label="Закрыть редактирование" onClick={closeEdit}><X size={15} /></button></div>
         <form className="panel-body" onSubmit={submitEdit}>
           {error && <div className="error-banner" role="alert"><AlertCircle size={16} />{error}</div>}
           <div className="form-grid">{config.fields.map((field) => <Field key={field.name} config={field} value={editingValues[field.name] ?? ""} productOptions={productOptions} onChange={(value) => setEditingValues((current) => ({ ...current, [field.name]: value }))} />)}</div>
@@ -384,7 +384,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
               if (column.key === "article") return <td key={column.key}>{orderArticleText(row.items)}</td>;
               const rendered = displayValue(value, displayKind);
               return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") ? <><span className="badge">{rendered}</span>{column.key === "status" && typeof row.returnState === "string" && <span className="table-secondary">{row.returnState}</span>}</> : rendered}</td>;
-            })}{(config.deleteUrl || config.editUrl || rowActions) && <td><div className="row-actions">{config.editUrl?.(row) && <button type="button" className="icon-button" aria-label={`Редактировать товар ${index + 1}`} onClick={() => openEdit(row)} disabled={busy}><Pencil size={14} /></button>}{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
+            })}{(config.deleteUrl || config.editUrl || rowActions) && <td><div className="row-actions">{config.editUrl?.(row) && <button type="button" className="icon-button" aria-label={`Редактировать запись ${index + 1}`} onClick={() => openEdit(row)} disabled={busy}><Pencil size={14} /></button>}{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
       {pagination && pagination.totalPages > 1 && <nav className="pagination-controls" aria-label={`Страницы: ${config.title}`} aria-busy={loading}>
         {pageItems(pagination.page, pagination.totalPages).map((item, index) => item === "ellipsis"
           ? <span className="pagination-ellipsis" key={`ellipsis-${index}`} aria-hidden="true">…</span>

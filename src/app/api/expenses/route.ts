@@ -25,6 +25,18 @@ export async function POST(request: Request) {
   } catch (error) { return errorResponse(error); }
 }
 
+export async function PATCH(request: Request) {
+  try {
+    assertLocalMutation(request);
+    const id = new URL(request.url).searchParams.get("id");
+    if (!id || !z.string().uuid().safeParse(id).success) throw new Error("Не указан корректный идентификатор расхода.");
+    const body = await parseBody(request, expenseSchema);
+    const [item] = await db.update(expenses).set(body).where(eq(expenses.id, id)).returning();
+    if (!item) throw new Error("Запись расхода не найдена.");
+    return Response.json({ item });
+  } catch (error) { return errorResponse(error); }
+}
+
 export async function DELETE(request: Request) {
   try {
     assertLocalMutation(request);
