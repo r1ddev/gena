@@ -6,7 +6,7 @@ import { findRows, getId, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { OzonSyncButton } from "./ozon-sync-button";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
-import { filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 
 function returnLabel(value: unknown) {
   const labels: Record<string, string> = { seller: "Мне", ozon: "На склад Ozon", unknown: "Не определено" };
@@ -39,7 +39,7 @@ export function ReturnsWorkspace() {
   const hasActiveFilters = Object.values(filters).some((value) => value.trim());
 
   function updateSort(key: string) {
-    setSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
+    setSort((current) => cycleTableSort(current, key));
   }
 
   const refresh = useCallback(async () => {

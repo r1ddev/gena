@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Link2, Plus, XCircle } from "lucide-react";
 import { asRecord, findRows, getId, requestJson, type JsonRecord } from "./api";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
-import { filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
 
 type Option = { id: string; label: string };
@@ -82,7 +82,7 @@ export function UnmatchedItems() {
   const hasActiveFilters = Object.values(filters).some((value) => value.trim());
 
   function updateSort(key: string) {
-    setSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
+    setSort((current) => cycleTableSort(current, key));
   }
 
   const refresh = useCallback(async () => {

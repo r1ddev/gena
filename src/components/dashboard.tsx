@@ -8,7 +8,7 @@ import { PageHeader } from "./page-header";
 import { UnmatchedItems } from "./unmatched-items";
 import { returnsNeedingAction, unmatchedItemsNotice } from "./dashboard-summary";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
-import { filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 
 type Overview = JsonRecord & { products?: unknown; recentOrders?: unknown; pendingReturns?: unknown; reconciliationErrors?: unknown; profitReconciliationIssues?: unknown };
 
@@ -99,7 +99,7 @@ export function Dashboard() {
   const unmatchedNotice = unmatchedItemsNotice(unresolvedExternalItems.length, unrecognizedFinanceAmount);
 
   function updateRecentOrderSort(key: string) {
-    setRecentOrderSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
+    setRecentOrderSort((current) => cycleTableSort(current, key));
   }
 
   return <>

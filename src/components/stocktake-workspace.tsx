@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, ClipboardList, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { findRows, getId, localToday, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
-import { filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 
 type ProductOption = { id: string; label: string };
 type StocktakeTableRow = JsonRecord & { header: JsonRecord; line: JsonRecord; lineIndex: number; difference: number };
@@ -62,7 +62,7 @@ export function StocktakeWorkspace() {
   const hasActiveFilters = Object.values(filters).some((value) => value.trim());
 
   function updateSort(key: string) {
-    setSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
+    setSort((current) => cycleTableSort(current, key));
   }
 
   const refresh = useCallback(async () => {

@@ -5,7 +5,7 @@ import { AlertCircle, CheckCircle2, Package, Pencil, Plus, Search, Trash2, X } f
 import { asRecord, displayValue, findRows, getId, localToday, requestJson, stringValue, valueAt, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
-import { filterAndSortRows, TableEmptyRow, TableHead, type TableSort } from "./table-controls";
+import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
 
 export type FieldConfig = {
@@ -208,7 +208,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   }
 
   function updateSort(key: string) {
-    setSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
+    setSort((current) => cycleTableSort(current, key));
     if (config.remotePageSize) setPage(1);
   }
 

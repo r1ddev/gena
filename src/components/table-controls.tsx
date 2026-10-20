@@ -13,6 +13,12 @@ export type TableColumn<Row> = {
 
 export type TableSort = { key: string; direction: "asc" | "desc" } | null;
 
+export function cycleTableSort(current: TableSort, key: string): TableSort {
+  if (current?.key !== key) return { key, direction: "desc" };
+  if (current.direction === "desc") return { key, direction: "asc" };
+  return null;
+}
+
 export function columnIsSortable<Row>(column: TableColumn<Row>) {
   return column.sortable ?? ["identifier", "date", "time", "number", "money", "quantity"].includes(column.kind ?? "");
 }
@@ -88,9 +94,10 @@ export function TableHead<Row>({
       const sortable = columnIsSortable(column);
       const active = sort?.key === column.key;
       const sortState = active ? sort.direction === "asc" ? "ascending" : "descending" : "none";
+      const nextSortLabel = active ? sort.direction === "desc" ? "по возрастанию" : "сбросить сортировку" : "по убыванию";
       return <th key={column.key} scope="col" aria-sort={sortable ? sortState : undefined}>
         {sortable
-          ? <button type="button" className="table-sort-button" onClick={() => onSort(column.key)} aria-label={`Сортировать по полю «${column.label}» ${active && sort.direction === "asc" ? "по убыванию" : "по возрастанию"}`}>
+          ? <button type="button" className="table-sort-button" onClick={() => onSort(column.key)} aria-label={`Сортировать по полю «${column.label}» ${nextSortLabel}`}>
             {column.label}<span className="table-sort-indicator" aria-hidden="true">{active ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span>
           </button>
           : <span>{column.label}</span>}
