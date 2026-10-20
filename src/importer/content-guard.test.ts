@@ -62,4 +62,10 @@ describe("findChangedAppliedRow", () => {
       [unchanged],
     )).toBeUndefined();
   });
+
+  it("detects a removed row in an overlapping renamed workbook", () => {
+    const first = { id: "first", sheetName: "Purchases", rowNumber: 2, rowType: "purchases", data: { cells: { sku: "A-1" } } };
+    const removed = { id: "removed", sheetName: "Purchases", rowNumber: 3, rowType: "purchases", data: { cells: { sku: "B-2" } } };
+    expect(findChangedAppliedRow([first], [first, removed])).toEqual(removed);
+  });
 });
