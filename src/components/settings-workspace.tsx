@@ -51,7 +51,8 @@ export function SettingsWorkspace() {
     setSyncing(true); setError(""); setSuccess("");
     try {
       const response = asRecord(await requestJson("/api/sync", { method: "POST", body: JSON.stringify({ kind: "full" }) }));
-      setSuccess(typeof response?.message === "string" ? response.message : "Синхронизация поставлена в очередь. Результат появится на главной.");
+      const queueMessage = typeof response?.message === "string" ? response.message : "Синхронизация поставлена в очередь.";
+      setSuccess(`${queueMessage} Статус и итог можно посмотреть на главной странице.`);
     }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось запустить синхронизацию"); }
     finally { setSyncing(false); }
