@@ -4,12 +4,12 @@ import { z } from "zod";
 import { db } from "@/db";
 import { products, purchaseReceiptLines, purchaseReceipts, purchases, purchaseStatusEnum } from "@/db/schema";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
-import { isoDate, nonNegativeDecimal, positiveDecimal } from "../_lib/validation";
+import { isoDate, nonNegativeDecimal, positiveInteger } from "../_lib/validation";
 
 const purchaseSchema = z.object({
   productId: z.string().uuid(),
   purchasedAt: isoDate,
-  orderedQuantity: positiveDecimal,
+  orderedQuantity: positiveInteger,
   amountPaid: nonNegativeDecimal,
   note: z.string().trim().max(2000).optional().default(""),
 });

@@ -3,12 +3,12 @@ import { z } from "zod";
 import { db } from "@/db";
 import { manualWriteoffs, ozonWriteoffs, products } from "@/db/schema";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
-import { isoDate, positiveDecimal } from "../_lib/validation";
+import { isoDate, positiveInteger } from "../_lib/validation";
 
 const writeoffSchema = z.object({
   productId: z.string().uuid(),
   writtenOffAt: isoDate,
-  quantity: positiveDecimal,
+  quantity: positiveInteger,
   note: z.string().trim().max(2000).optional().default(""),
 });
 

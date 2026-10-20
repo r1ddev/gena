@@ -14,3 +14,7 @@ export const nonNegativeDecimal = z.union([z.string().trim(), z.number().finite(
 export const positiveDecimal = z.union([z.string().trim(), z.number().finite()])
   .transform(String)
   .refine((value) => Number.isFinite(Number(value)) && Number(value) > 0, "Значение должно быть больше нуля.");
+
+export const nonNegativeInteger = nonNegativeDecimal.refine((value) => Number.isInteger(Number(value)), "Количество должно быть целым числом.");
+
+export const positiveInteger = positiveDecimal.refine((value) => Number.isInteger(Number(value)), "Количество должно быть целым числом.");

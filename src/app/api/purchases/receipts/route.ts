@@ -3,11 +3,11 @@ import { z } from "zod";
 import { db } from "@/db";
 import { products, purchaseReceiptLines, purchaseReceipts, purchases } from "@/db/schema";
 import { assertLocalMutation, errorResponse, parseBody } from "../../_lib/http";
-import { isoDate, positiveDecimal } from "../../_lib/validation";
+import { isoDate, positiveInteger } from "../../_lib/validation";
 
 const linesSchema = z.array(z.object({
   productId: z.string().uuid(),
-  quantity: positiveDecimal,
+  quantity: positiveInteger,
 })).min(1, "Добавьте хотя бы один фактически полученный товар.").refine(
   (lines) => new Set(lines.map((line) => line.productId)).size === lines.length,
   "Один товар должен быть одной строкой приёмки.",

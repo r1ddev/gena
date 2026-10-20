@@ -10,7 +10,7 @@ export default function WriteoffsPage() {
     fields: [
       { name: "productId", label: "Товар *", type: "select", optionsFrom: "/api/products", required: true },
       { name: "writtenOffAt", label: "Дата списания *", type: "date", required: true },
-      { name: "quantity", label: "Количество *", type: "number", step: "0.001", required: true },
+      { name: "quantity", label: "Количество *", type: "number", step: "1", min: "1", required: true },
       { name: "note", label: "Причина или комментарий", type: "textarea", wide: true },
     ],
     columns: [

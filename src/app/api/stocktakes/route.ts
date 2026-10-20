@@ -4,13 +4,13 @@ import { db } from "@/db";
 import { products, stockAdjustments, stocktakeLines, stocktakes } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
-import { isoDate, nonNegativeDecimal } from "../_lib/validation";
+import { isoDate, nonNegativeInteger } from "../_lib/validation";
 
 const stocktakeSchema = z.object({
   warehouse: z.enum(["seller", "ozon"]),
   countedAt: isoDate,
   note: z.string().trim().max(2000).optional().default(""),
-  lines: z.array(z.object({ productId: z.string().uuid(), actualQuantity: nonNegativeDecimal })).min(1),
+  lines: z.array(z.object({ productId: z.string().uuid(), actualQuantity: nonNegativeInteger })).min(1),
 });
 const resolutionSchema = z.object({ resolutionNote: z.string().trim().max(2000).optional().default("") });
 

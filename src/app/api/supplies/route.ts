@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { products, supplies, supplyLines } from "@/db/schema";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
-import { isoDate, nonNegativeDecimal, positiveDecimal } from "../_lib/validation";
+import { isoDate, nonNegativeDecimal, positiveInteger } from "../_lib/validation";
 
 const supplySchema = z.object({
   suppliedAt: isoDate,
@@ -11,7 +11,7 @@ const supplySchema = z.object({
   note: z.string().trim().max(2000).optional().default(""),
   lines: z.array(z.object({
     productId: z.string().uuid(),
-    quantity: positiveDecimal.refine((value) => Number.isInteger(Number(value)), "Количество должно быть целым числом."),
+    quantity: positiveInteger,
   })).min(1),
 });
 

@@ -198,8 +198,8 @@ export function PurchasesWorkspace() {
       setError("Выберите закупку из списка.");
       return;
     }
-    if (lines.length === 0 || lines.some((line) => !line.productId || !line.quantity || Number(line.quantity) <= 0)) {
-      setError("Укажите фактически полученные товары и их количество.");
+    if (lines.length === 0 || lines.some((line) => !line.productId || !line.quantity || !Number.isInteger(Number(line.quantity)) || Number(line.quantity) <= 0)) {
+      setError("Укажите фактически полученные товары и целое количество штук.");
       return;
     }
     setBusy(true); setError(""); setSuccess("");
@@ -259,7 +259,7 @@ export function PurchasesWorkspace() {
       fields: [
         { name: "productId", label: "Товар *", type: "select", optionsFrom: "/api/products", required: true },
         { name: "purchasedAt", label: "Дата закупки *", type: "date", required: true },
-        { name: "orderedQuantity", label: "Заказано, шт. *", type: "number", step: "0.001", min: "0.001", required: true },
+        { name: "orderedQuantity", label: "Заказано, шт. *", type: "number", step: "1", min: "1", required: true },
         { name: "amountPaid", label: "Оплачено, ₽ *", type: "number", step: "0.01", required: true },
         { name: "note", label: "Комментарий", type: "textarea", wide: true },
       ],
@@ -295,7 +295,7 @@ export function PurchasesWorkspace() {
             <div className="field"><label htmlFor={`receipt-product-${index}`}>Товар *</label><select id={`receipt-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, productId: event.target.value } : item))}>
               <option value="">Выберите артикул…</option>{catalog.map((product) => <option key={String(product.id)} value={String(product.id)}>{String(product.sku ?? "Артикул не указан")} · {String(product.title ?? "Товар")}</option>)}
             </select></div>
-            <div className="field"><label htmlFor={`receipt-quantity-${index}`}>Количество, шт. *</label><input id={`receipt-quantity-${index}`} type="number" min="0.001" step="0.001" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: event.target.value } : item))} /></div>
+            <div className="field"><label htmlFor={`receipt-quantity-${index}`}>Количество, шт. *</label><input id={`receipt-quantity-${index}`} type="number" min="1" step="1" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: event.target.value } : item))} /></div>
             <button type="button" className="icon-button receipt-line-remove" aria-label="Убрать товар из приёмки" disabled={lines.length <= 1} onClick={() => setLines((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={15} /></button>
           </div>)}
           <p className="form-help">Приёмка сразу меняет остаток. Средняя себестоимость начнёт учитывать закупку только после завершения и рассчитается по всему фактически принятому количеству.</p>
