@@ -228,7 +228,7 @@ describe("calculateAccounting", () => {
     expect(result.preliminaryOrders).toMatchObject({ count: 1, grossAmount: "300.00" });
   });
 
-  it("adds returned stock only after the seller receives it or Ozon makes it sellable", () => {
+  it("adds a seller return to the seller stock only after it is received", () => {
     const result = calculateAccounting(
       base({
         receipts: [{ productId: "p1", quantity: "1", unitCost: "50" }],
@@ -306,12 +306,13 @@ describe("calculateAccounting", () => {
         postings: [{ id: "post-1", status: "delivered", deliveredAt: "2026-09-10T10:00:00Z", isMarketplaceBuyout: false }],
         postingItems: [{ postingId: "post-1", productId: "p1", quantity: "1", price: "300" }],
         financeAccruals: [{ postingId: "post-1", amount: "300" }],
-        returns: [{ externalId: "return-overage", postingId: "post-1", productId: "p1", quantity: "2", destination: "ozon", receivedBySellerAt: null, availableAtOzon: "2026-10-01T10:00:00Z" }],
+        returns: [{ externalId: "return-overage", postingId: "post-1", productId: "p1", quantity: "2", destination: "seller", receivedBySellerAt: "2026-10-01T10:00:00Z", availableAtOzon: null }],
       }),
       new Date("2026-10-20T12:00:00Z"),
     );
 
-    expect(result.products[0].ozonStock).toBe("1.000");
+    expect(result.products[0].sellerStock).toBe("1.000");
+    expect(result.products[0].ozonStock).toBe("0.000");
     expect(result.profitReconciliationIssues).toEqual([
       { externalId: "return-overage", productId: "p1", sku: "BAG-1" },
     ]);

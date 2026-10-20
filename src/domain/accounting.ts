@@ -232,9 +232,8 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
   const returnedQuantityByPostingProduct = new Map<string, Decimal>();
   const profitReconciliationIssues: AccountingResult["profitReconciliationIssues"] = [];
   for (const returned of input.returns) {
-    if (!returned.productId) continue;
-    if (returned.destination === "unknown") continue;
-    const restockedAt = returned.destination === "seller" ? returned.receivedBySellerAt : returned.availableAtOzon;
+    if (!returned.productId || returned.destination !== "seller") continue;
+    const restockedAt = returned.receivedBySellerAt;
     if (!restockedAt || !isEffectiveAt(restockedAt, now)) continue;
     if (!returned.postingId) {
       stockEvent(returned.productId, returned.destination, restockedAt, d(returned.quantity));
@@ -259,7 +258,7 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
       });
     }
     if (!acceptedQuantity.gt(0)) continue;
-    stockEvent(returned.productId, returned.destination, restockedAt, acceptedQuantity);
+    stockEvent(returned.productId, "seller", restockedAt, acceptedQuantity);
     returnedQuantityByPostingProduct.set(key, alreadyRestocked.plus(acceptedQuantity));
   }
 
