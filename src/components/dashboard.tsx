@@ -97,7 +97,7 @@ export function Dashboard() {
     {error && <div className="error-banner" role="alert"><AlertTriangle size={15} />{error}</div>}
     {unmatchedNotice && <section className="notice" style={{ marginBottom: 16 }} aria-live="polite">
       <AlertTriangle size={16} />
-      <span><strong>{unmatchedNotice.count} записей товаров Ozon требуют решения.</strong> Свяжите их с каталогом, создайте товары или сохраните выбор «Игнорировать». {unmatchedNotice.excludedFinanceAmount !== 0 && <>Пока начисления на {metric(Math.abs(unmatchedNotice.excludedFinanceAmount))} не входят в расчёт баланса и прибыли.</>}</span>
+      <span><strong>{unmatchedNotice.count} записей Ozon без связи с каталогом.</strong> Это не число разных товаров: сюда попадают позиции заказов, начисления, возвраты, списания и выкупы. Источник, номер заказа и сумма (если есть) указаны в списке ниже. {unmatchedNotice.excludedFinanceAmount !== 0 && <>Пока начисления на {metric(Math.abs(unmatchedNotice.excludedFinanceAmount))} не входят в расчёт баланса и прибыли.</>}</span>
       <Link href={unmatchedNotice.href} className="button secondary small">Открыть список</Link>
     </section>}
 

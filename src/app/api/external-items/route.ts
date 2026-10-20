@@ -1,10 +1,48 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { externalItems, financeAccruals, ozonWriteoffs, postingItems, productLinks, products, returns } from "@/db/schema";
+import { externalItems, financeAccruals, ozonWriteoffs, postingItems, postings, productLinks, products, returns } from "@/db/schema";
 import { externalItemIgnorePlan, externalProductKey } from "@/ozon/external-product";
-import { financeAccrualRowContainsSku } from "@/ozon/finance";
+import { financeAccrualRowContainsSku, financeRowContainsSku } from "@/ozon/finance";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+
+function sourceKind(raw: Record<string, unknown>, hasOrderRow: boolean) {
+  if (Array.isArray(raw.fees) || raw.item_fees) return "finance";
+  if ("target_place" in raw || "return_clearing_id" in raw) return "return";
+  if ("compensation_price" in raw || "dispose_reason" in raw) return "writeoff";
+  if ("digital_codes" in raw) return "buyout";
+  if (hasOrderRow || "seller_price_per_instance" in raw || ("offer_id" in raw && "name" in raw && "price" in raw)) return "order";
+  if ("is_marketplace_buyout" in raw) return "buyout";
+  return "other";
+}
+
+function recordOf(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function feeFacts(raw: Record<string, unknown>, sku: string) {
+  const rows = Array.isArray(raw.fees)
+    ? raw.fees
+    : Array.isArray(recordOf(raw.item_fees).fees)
+      ? recordOf(raw.item_fees).fees as unknown[]
+      : [];
+  const matchingRows = rows.flatMap((candidate) => {
+    const row = recordOf(candidate);
+    if (row.sku !== undefined && String(row.sku) !== sku) return [];
+    return Array.isArray(row.fees) ? row.fees : [row];
+  });
+  const typeAmounts: Record<string, number> = {};
+  const amount = matchingRows.reduce((total, candidate) => {
+    const fee = recordOf(candidate);
+    const accrued = recordOf(fee.accrued);
+    const value = Number(accrued.amount ?? fee.accrued ?? 0);
+    if (!Number.isFinite(value)) return total;
+    const typeId = String(fee.type_id ?? "unknown");
+    typeAmounts[typeId] = Math.round(((typeAmounts[typeId] ?? 0) + value) * 100) / 100;
+    return total + value;
+  }, 0);
+  return { amount: Math.round(amount * 100) / 100, typeAmounts };
+}
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("map"), productId: z.string().uuid() }),
@@ -20,7 +58,64 @@ export async function GET(request: Request) {
       : await db.select().from(externalItems).where(eq(externalItems.disposition, "pending")).orderBy(desc(externalItems.lastSeenAt));
     const catalog = await db.select().from(products);
     const byId = new Map(catalog.map((product) => [product.id, product]));
-    return { items: items.map((item) => ({ ...item, productTitle: item.productId ? byId.get(item.productId)?.title ?? "" : "" })) };
+    const externalKeys = [...new Set(items.map((item) => item.externalKey))];
+    const skus = [...new Set(items.map((item) => item.ozonSku).filter(Boolean))];
+    const [orderRows, returnRows, writeoffRows, itemAccruals] = await Promise.all([
+      externalKeys.length
+        ? db.select({ externalKey: postingItems.externalKey, postingNumber: postings.externalId })
+          .from(postingItems).innerJoin(postings, eq(postingItems.postingId, postings.id)).where(inArray(postingItems.externalKey, externalKeys))
+        : Promise.resolve([]),
+      externalKeys.length
+        ? db.select({ externalKey: returns.externalKey, postingNumber: returns.postingNumber, status: returns.status, destination: returns.destination })
+          .from(returns).where(inArray(returns.externalKey, externalKeys))
+        : Promise.resolve([]),
+      externalKeys.length
+        ? db.select({ externalKey: ozonWriteoffs.externalKey, amount: ozonWriteoffs.compensationAmount })
+          .from(ozonWriteoffs).where(inArray(ozonWriteoffs.externalKey, externalKeys))
+        : Promise.resolve([]),
+      skus.length
+        ? db.select().from(financeAccruals).where(eq(financeAccruals.accruedCategory, "ITEM"))
+        : Promise.resolve([]),
+    ]);
+    const orderNumbersByKey = new Map<string, string[]>();
+    for (const row of orderRows) orderNumbersByKey.set(row.externalKey, [...(orderNumbersByKey.get(row.externalKey) ?? []), row.postingNumber]);
+    const returnsByKey = new Map(returnRows.map((row) => [row.externalKey, row]));
+    const writeoffsByKey = new Map(writeoffRows.map((row) => [row.externalKey, row]));
+    const sourceCounts: Record<string, number> = {};
+    const enriched = items.map((item) => {
+      const raw = item.raw as Record<string, unknown>;
+      const orderNumbers = orderNumbersByKey.get(item.externalKey) ?? [];
+      const kind = sourceKind(raw, orderNumbers.length > 0);
+      sourceCounts[kind] = (sourceCounts[kind] ?? 0) + 1;
+      const returnRow = returnsByKey.get(item.externalKey);
+      const writeoffRow = writeoffsByKey.get(item.externalKey);
+      const matchingAccruals = kind === "finance"
+        ? itemAccruals.filter((row) => financeAccrualRowContainsSku(row.externalKey, row.raw, item.ozonSku))
+        : [];
+      const candidateAccruals = matchingAccruals.filter((row) => {
+        const facts = feeFacts(raw, item.ozonSku);
+        const expectedAmount = facts.typeAmounts[row.typeId];
+        return expectedAmount === undefined || Math.round(Number(row.amount) * 100) === Math.round(expectedAmount * 100);
+      }).sort((left, right) => right.accrualDate.localeCompare(left.accrualDate));
+      const ref = (value: unknown) => typeof value === "string" && value ? value : "";
+      let details: Record<string, unknown> = { kind, orderNumbers };
+      if (kind === "finance") {
+        const facts = feeFacts(raw, item.ozonSku);
+        const postingNumber = ref(raw.unit_number) || candidateAccruals.find((row) => row.postingNumber)?.postingNumber || "";
+        const accrualDate = ref(raw.accrual_date) || candidateAccruals[0]?.accrualDate || "";
+        details = { ...details, amount: facts.amount, postingNumber, accrualDate, typeId: ref(raw.type_id) || candidateAccruals[0]?.typeId || "" };
+      } else if (kind === "return") {
+        details = { ...details, postingNumber: ref(raw.posting_number) || returnRow?.postingNumber || "", status: returnRow?.status ?? "", destination: returnRow?.destination ?? "" };
+      } else if (kind === "writeoff") {
+        details = { ...details, postingNumber: ref(raw.posting_number), amount: writeoffRow?.amount ?? raw.compensation_price ?? null, date: raw.date ?? null };
+      } else if (kind === "buyout") {
+        details = { ...details, postingNumber: ref(raw.posting_number), amount: raw.amount ?? raw.buyout_price ?? null };
+      } else if (kind === "order") {
+        details = { ...details, postingNumber: orderNumbers[0] ?? ref(raw.posting_number), quantity: raw.quantity ?? null, amount: raw.price ?? raw.seller_price_per_instance ?? null };
+      }
+      return { ...item, productTitle: item.productId ? byId.get(item.productId)?.title ?? "" : "", sourceInfo: details };
+    });
+    return { items: enriched, sourceCounts };
   });
 }
 

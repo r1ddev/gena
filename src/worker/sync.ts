@@ -378,7 +378,7 @@ async function importDailyAccruals(credentials: OzonCredentials, from: Date, to:
           const sku = asString(itemFee.sku);
           const fees = itemFee.fees ?? [];
           const external = sku
-            ? await resolveExternalProduct({ sku, name: `Ozon SKU ${sku}` }, itemFee as JsonRecord)
+            ? await resolveExternalProduct({ sku, name: `Ozon SKU ${sku}` }, accrual)
             : { productId: null };
           for (const feeGroup of groupFinanceItemFees(fees)) {
             financeRows.push({
