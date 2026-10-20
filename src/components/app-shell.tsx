@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import {
   Archive, ArrowLeftRight, Banknote, Boxes, Calculator, ChartNoAxesCombined,
-  ChevronRight, CircleDollarSign, ClipboardList, FileUp, LayoutDashboard,
+  ChevronRight, CircleDollarSign, ClipboardList, LayoutDashboard,
   Menu, Package, PackageCheck, RotateCcw, Settings2, ShoppingCart, Truck,
   Wallet, X,
 } from "lucide-react";
@@ -28,7 +28,6 @@ const navSections = [
       { href: "/returns", label: "Возвраты", icon: RotateCcw },
       { href: "/writeoffs", label: "Списания", icon: ArrowLeftRight },
       { href: "/stocktake", label: "Инвентаризация", icon: ClipboardList },
-      { href: "/import", label: "Перенос данных", icon: FileUp },
     ],
   },
   {

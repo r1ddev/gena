@@ -6,9 +6,9 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      // Keep thresholds on the deterministic business rules and import parser;
+      // Keep thresholds on deterministic accounting rules;
       // database adapters and framework route handlers are covered by smoke tests.
-      include: ["src/domain/accounting.ts", "src/importer/workbook.ts"],
+      include: ["src/domain/accounting.ts"],
       thresholds: { lines: 80, functions: 80, branches: 75, statements: 80 },
     },
   },
