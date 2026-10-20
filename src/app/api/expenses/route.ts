@@ -7,7 +7,7 @@ import { isoDate, nonNegativeDecimal } from "../_lib/validation";
 
 const expenseSchema = z.object({
   spentAt: isoDate,
-  category: z.string().trim().min(1).max(120),
+  description: z.string().trim().min(1).max(120),
   amount: nonNegativeDecimal,
   note: z.string().trim().max(2000).optional().default(""),
 });

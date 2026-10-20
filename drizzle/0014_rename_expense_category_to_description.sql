@@ -1,0 +1,1 @@
+ALTER TABLE "expenses" RENAME COLUMN "category" TO "description";

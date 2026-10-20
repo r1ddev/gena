@@ -140,7 +140,7 @@ export const expenses = pgTable(
   {
     id: id(),
     spentAt: date("spent_at").notNull(),
-    category: text("category").notNull(),
+    description: text("description").notNull(),
     amount: money("amount"),
     note: text("note").notNull().default(""),
     sourceKey: text("source_key").unique(),

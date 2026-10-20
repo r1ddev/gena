@@ -99,6 +99,13 @@
       "when": 1792524054598,
       "tag": "0013_require_article_and_ozon_sku",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792525661605,
+      "tag": "0014_rename_expense_category_to_description",
+      "breakpoints": true
     }
   ]
 }
