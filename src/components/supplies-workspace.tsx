@@ -11,7 +11,7 @@ function productOptions(value: unknown): ProductOption[] {
   return findRows(value).flatMap((row) => {
     const id = getId(row);
     if (!id) return [];
-    const article = typeof row.offerId === "string" && row.offerId ? row.offerId : typeof row.sku === "string" ? row.sku : "Артикул не указан";
+    const article = typeof row.sku === "string" && row.sku ? row.sku : typeof row.offerId === "string" && row.offerId ? row.offerId : "Артикул не указан";
     return [{ id, label: article }];
   });
 }
@@ -46,7 +46,7 @@ function SupplyEntryForm({ products, onSaved }: { products: ProductOption[]; onS
       </div>
       <div className="form-help" style={{ marginBottom: 8, color: "#5f6d64", fontWeight: 700 }}>Состав поставки</div>
       <div className="line-items">{lines.map((line, index) => <div className="line-item" key={index}>
-        <div className="field"><label htmlFor={`supply-product-${index}`}>Товар *</label><select id={`supply-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, productId: event.target.value } : item))}><option value="">Выберите товар…</option>{products.map((product) => <option value={product.id} key={product.id}>{product.label}</option>)}</select></div>
+        <div className="field"><label htmlFor={`supply-product-${index}`}>Артикул *</label><select id={`supply-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, productId: event.target.value } : item))}><option value="">Выберите артикул…</option>{products.map((product) => <option value={product.id} key={product.id}>{product.label}</option>)}</select></div>
         <div className="field"><label htmlFor={`supply-quantity-${index}`}>Количество, шт. *</label><input id={`supply-quantity-${index}`} type="number" min="1" step="1" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, quantity: event.target.value } : item))} /></div>
         <button type="button" className="icon-button" aria-label="Удалить товар из поставки" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((_, row) => row !== index))}><Trash2 size={14} /></button>
       </div>)}</div>
@@ -101,7 +101,7 @@ function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: Json
         </div>
         <div className="form-help" style={{ marginBottom: 8, color: "#5f6d64", fontWeight: 700 }}>Состав поставки</div>
         <div className="line-items">{lines.map((line, index) => <div className="line-item" key={index}>
-          <div className="field"><label htmlFor={`edit-supply-product-${index}`}>Товар *</label><select id={`edit-supply-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, productId: event.target.value } : item))}><option value="">Выберите артикул…</option>{products.filter((product) => product.id === line.productId || !lines.some((other, row) => row !== index && other.productId === product.id)).map((product) => <option value={product.id} key={product.id}>{product.label}</option>)}</select></div>
+          <div className="field"><label htmlFor={`edit-supply-product-${index}`}>Артикул *</label><select id={`edit-supply-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, productId: event.target.value } : item))}><option value="">Выберите артикул…</option>{products.filter((product) => product.id === line.productId || !lines.some((other, row) => row !== index && other.productId === product.id)).map((product) => <option value={product.id} key={product.id}>{product.label}</option>)}</select></div>
           <div className="field"><label htmlFor={`edit-supply-quantity-${index}`}>Количество, шт. *</label><input id={`edit-supply-quantity-${index}`} type="number" min="1" step="1" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, quantity: event.target.value } : item))} /></div>
           <button type="button" className="icon-button" aria-label="Удалить товар из поставки" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((_, row) => row !== index))}><Trash2 size={14} /></button>
         </div>)}</div>
@@ -124,7 +124,7 @@ export function SuppliesWorkspace() {
     description: "Создавайте поставки вручную после оформления заявки в Ozon. Сервис не ждёт приёмки: складской остаток перемещается сразу.",
     collectionUrl: "/api/supplies", createUrl: "/api/supplies", hideCreate: true,
     fields: [], columns: [
-      { key: "suppliedAt", label: "Дата", kind: "date" }, { key: "products", label: "Состав", primary: true },
+      { key: "suppliedAt", label: "Дата", kind: "date" }, { key: "articles", label: "Артикулы", primary: true },
       { key: "quantity", label: "Единиц", kind: "quantity" }, { key: "shippingCost", label: "Доставка", kind: "money" }, { key: "note", label: "Комментарий" },
     ],
     deleteUrl: (row: JsonRecord) => typeof row.id === "string" ? `/api/supplies?id=${encodeURIComponent(row.id)}` : null,

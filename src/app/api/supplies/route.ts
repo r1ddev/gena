@@ -35,10 +35,13 @@ export async function GET(request: Request) {
         ...supply,
         lines: matching.map((line) => ({
           ...line,
-          title: productById.get(line.productId)?.title ?? "Товар удалён",
           sku: productById.get(line.productId)?.sku ?? "",
         })),
-        products: matching.map((line) => productById.get(line.productId)?.title ?? "Товар удалён").join(", "),
+        articles: matching.map((line) => {
+          const article = productById.get(line.productId)?.sku || "Артикул не указан";
+          const quantity = Number(line.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 0 });
+          return `${article} × ${quantity}`;
+        }).join(", "),
         quantity: matching.reduce((sum, line) => sum + Number(line.quantity), 0),
       };
     }) };
