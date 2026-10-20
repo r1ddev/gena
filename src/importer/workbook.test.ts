@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
 import { classifyImportSheet, getImportCellValue, getImportedProductCategory, getSupplyShippingCost, normalizeImportHeader, parseImportBuffer, parseImportDate, parseImportMoney } from "./workbook";
+import { makeStableImportRowKeys } from "./source-key";
 
 describe("workbook import helpers", () => {
   it("finds legacy values using the actual sheet labels after normalization", () => {
@@ -107,6 +108,19 @@ describe("workbook import helpers", () => {
     expect(parseImportMoney("1 234,50 ₽")).toBe(1234.5);
     expect(parseImportDate("20.10.2026")).toBe("2026-10-20");
     expect(parseImportDate("2026-10-20T11:30:00Z")).toBe("2026-10-20");
+  });
+
+  it("keeps CSV row identities when the same file is renamed", async () => {
+    const content = Buffer.from("SKU,Наименование\nA-1,Сумка", "utf8");
+    const first = await parseImportBuffer(content, "items.csv");
+    const renamed = await parseImportBuffer(content, "renamed-items.csv");
+
+    expect(first.rows[0].sheetName).toBe("CSV");
+    expect(renamed.rows[0].sheetName).toBe("CSV");
+    const toStableRows = (rows: typeof first.rows) => rows.map(({ type, ...row }, index) => ({ ...row, rowType: type, id: String(index) }));
+    const firstKeys = makeStableImportRowKeys(toStableRows(first.rows));
+    const renamedKeys = makeStableImportRowKeys(toStableRows(renamed.rows));
+    expect([...renamedKeys.values()]).toEqual([...firstKeys.values()]);
   });
 
   it("parses BOM, comma CSV, escaped quotes, multiline fields, and skips blank rows", async () => {

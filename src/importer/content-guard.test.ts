@@ -63,6 +63,15 @@ describe("findChangedAppliedRow", () => {
     )).toBeUndefined();
   });
 
+  it("allows previously applied rows to be reordered", () => {
+    const first = { id: "first", sheetName: "Purchases", rowNumber: 12, rowType: "purchases", data: { cells: { amount: "100" } } };
+    const second = { id: "second", sheetName: "Purchases", rowNumber: 13, rowType: "purchases", data: { cells: { amount: "200" } } };
+    expect(findChangedAppliedRow(
+      [{ ...second, rowNumber: 12 }, { ...first, rowNumber: 13 }],
+      [{ ...first, batchId: "batch-1" }, { ...second, batchId: "batch-1" }],
+    )).toBeUndefined();
+  });
+
   it("detects a removed row in an overlapping renamed workbook", () => {
     const first = { id: "first", sheetName: "Purchases", rowNumber: 2, rowType: "purchases", data: { cells: { sku: "A-1" } } };
     const removed = { id: "removed", sheetName: "Purchases", rowNumber: 3, rowType: "purchases", data: { cells: { sku: "B-2" } } };
