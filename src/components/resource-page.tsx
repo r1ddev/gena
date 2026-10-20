@@ -168,6 +168,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [forceDeletePrompt, setForceDeletePrompt] = useState<{ url: string; title: string; blockers: { label: string; count: number }[] } | null>(null);
   const [search, setSearch] = useState("");
   const [serverSearch, setServerSearch] = useState("");
   const [filters, setFilters] = useState<Record<string, string>>({});
@@ -306,8 +307,40 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     if (!url) return;
     if (typeof window !== "undefined" && !window.confirm(config.deleteConfirm ?? "Удалить эту запись? Связанные остатки и итоги обновятся автоматически.")) return;
     setBusy(true); setError(""); setSuccess("");
-    try { await requestJson(url, { method: "DELETE" }); if (config.collectionUrl === "/api/products") notifyProductCatalogChanged(); setSuccess(config.deleteSuccess ?? "Запись удалена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh(); }
+    try {
+      const response = asRecord(await requestJson(url, { method: "DELETE" }));
+      if (response?.requiresForceDelete === true) {
+        const product = asRecord(response.product);
+        const blockers = Array.isArray(response.blockers) ? response.blockers.flatMap((item) => {
+          const blocker = asRecord(item);
+          return typeof blocker?.label === "string" && Number(blocker.count) > 0 ? [{ label: blocker.label, count: Number(blocker.count) }] : [];
+        }) : [];
+        setForceDeletePrompt({ url, title: stringValue(product?.title) ?? String(row.title ?? "товар"), blockers });
+        return;
+      }
+      if (config.collectionUrl === "/api/products") notifyProductCatalogChanged();
+      setSuccess(response?.reassignmentPending === true
+        ? "Товар удалён из каталога. Связанные записи сохранены в списке перераспределения."
+        : config.deleteSuccess ?? "Запись удалена. Связанные итоги обновлены автоматически.");
+      onMutation?.(); await refresh();
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось удалить запись"); }
+    finally { setBusy(false); }
+  }
+
+  async function forceDelete() {
+    if (!forceDeletePrompt) return;
+    setBusy(true); setError(""); setSuccess("");
+    try {
+      const url = `${forceDeletePrompt.url}${forceDeletePrompt.url.includes("?") ? "&" : "?"}force=true`;
+      const response = asRecord(await requestJson(url, { method: "DELETE" }));
+      setForceDeletePrompt(null);
+      if (config.collectionUrl === "/api/products") notifyProductCatalogChanged();
+      setSuccess(response?.reassignmentPending === true
+        ? "Товар удалён из каталога. Связанные записи сохранены в списке перераспределения."
+        : config.deleteSuccess ?? "Запись удалена. Связанные итоги обновлены автоматически.");
+      onMutation?.(); await refresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось удалить запись"); }
     finally { setBusy(false); }
   }
 
@@ -345,6 +378,17 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
           {config.help && <p className="form-help">{config.help}</p>}
           <div className="form-actions"><button type="button" className="button secondary" onClick={closeEdit}>Отмена</button><button className="button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></div>
         </form>
+      </section>
+    </div>}
+    {forceDeletePrompt && <div className="product-edit-backdrop">
+      <section className="panel delete-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="force-delete-title">
+        <div className="panel-head"><h2 id="force-delete-title">У товара есть связанные записи</h2><button type="button" className="icon-button" aria-label="Закрыть" onClick={() => setForceDeletePrompt(null)} disabled={busy}><X size={15} /></button></div>
+        <div className="panel-body">
+          <p className="delete-confirm-copy"><strong>{forceDeletePrompt.title}</strong> связан с такими операциями:</p>
+          <ul className="delete-blocker-list">{forceDeletePrompt.blockers.map((blocker) => <li key={blocker.label}><span>{blocker.label}</span><strong>{new Intl.NumberFormat("ru-RU").format(blocker.count)}</strong></li>)}</ul>
+          <p className="form-help">При принудительном удалении товар исчезнет из каталога. Операции сохранятся и появятся в списке перераспределения, где их можно привязать к товару или создать товар заново.</p>
+          <div className="form-actions"><button type="button" className="button secondary" onClick={() => setForceDeletePrompt(null)} disabled={busy}>Отмена</button><button type="button" className="button danger" onClick={() => void forceDelete()} disabled={busy}><Trash2 size={14} />{busy ? "Удаляем…" : "Удалить принудительно"}</button></div>
+        </div>
       </section>
     </div>}
     {beforeTable}

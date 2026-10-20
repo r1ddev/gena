@@ -18,6 +18,7 @@ const navSections = [
     links: [
       { href: "/", label: "Обзор", icon: LayoutDashboard },
       { href: "/catalog", label: "Каталог", icon: Boxes },
+      { href: "/reassignments", label: "Распределить операции", icon: PackageCheck },
       { href: "/purchases", label: "Закупки", icon: ShoppingCart },
       { href: "/supplies", label: "Поставки на Ozon", icon: Truck },
       { href: "/expenses", label: "Расходы", icon: Wallet },

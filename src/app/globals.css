@@ -140,6 +140,19 @@ tbody tr:hover { background: #fcfdfc; }
 .product-edit-backdrop { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(15, 29, 21, .42); }
 .product-edit-dialog { width: min(850px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
 .product-edit-dialog .form-actions { padding-top: 4px; }
+.delete-confirm-dialog { width: min(560px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
+.delete-confirm-copy { margin: 0 0 10px; color: #526057; font-size: 12px; line-height: 1.5; }
+.delete-blocker-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.delete-blocker-list li { display: flex; justify-content: space-between; gap: 14px; padding: 8px 2px; border-bottom: 1px solid #edf0ed; color: #59675e; font-size: 11px; }
+.delete-blocker-list strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.reassignment-list { display: grid; }
+.reassignment-item { display: grid; gap: 12px; padding: 16px 18px; border-bottom: 1px solid #edf0ed; }
+.reassignment-item:last-child { border-bottom: 0; }
+.reassignment-product { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.reassignment-product img, .reassignment-image-placeholder { display: grid; width: 48px; height: 48px; flex: 0 0 auto; place-items: center; object-fit: cover; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #f6f8f6; font-size: 9px; }
+.reassignment-product h3 { margin: 0; font-size: 13px; }
+.reassignment-references, .reassignment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reassignment-actions select { min-width: min(340px, 100%); min-height: 36px; flex: 1 1 240px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: white; font-size: 11px; }
 .form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; }
 .field { display: grid; gap: 6px; min-width: 0; }
 .field.wide { grid-column: span 2; }

@@ -8,7 +8,7 @@ export default function CatalogPage() {
     description: "Список товаров с артикулами и SKU Ozon.",
     collectionUrl: "/api/products", createUrl: "/api/products", createLabel: "Добавить товар",
     deleteUrl: (row) => typeof row.id === "string" ? `/api/products/${encodeURIComponent(row.id)}` : null,
-    deleteConfirm: "Удалить товар из каталога? Если к нему привязаны операции, сервис сохранит их и откажет в удалении.",
+    deleteConfirm: "Удалить товар из каталога? Если есть связанные операции, перед удалением покажу их список и предложу перераспределить.",
     deleteSuccess: "Товар удалён из каталога.",
     editUrl: (row) => typeof row.id === "string" ? `/api/products/${encodeURIComponent(row.id)}` : null,
     imageUpload: true,

@@ -32,14 +32,20 @@ export const products = pgTable(
   "products",
   {
     id: id(),
-    sku: text("sku").notNull().unique(),
+    sku: text("sku").notNull(),
     title: text("title").notNull(),
     category: text("category").notNull().default("Без категории"),
     archived: boolean("archived").notNull().default(false),
+    reassignmentPending: boolean("reassignment_pending").notNull().default(false),
+    reassignmentOfferId: text("reassignment_offer_id").notNull().default(""),
+    reassignmentOzonSku: text("reassignment_ozon_sku").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("products_archived_title_idx").on(table.archived, table.title)],
+  (table) => [
+    uniqueIndex("products_sku_active_unique_idx").on(table.sku).where(sql`${table.reassignmentPending} = false`),
+    index("products_archived_title_idx").on(table.archived, table.title),
+  ],
 );
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });

@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     const imageProductIds = new Set(imageRows.map(({ productId }) => productId));
     const linkByProductId = new Map(links.map((link) => [link.productId, link]));
     return {
-      items: snapshot.products.map(({ archived: _archived, ...product }) => {
+      items: snapshot.products.filter((product) => !product.reassignmentPending).map(({ archived: _archived, reassignmentPending: _reassignmentPending, reassignmentOfferId: _reassignmentOfferId, reassignmentOzonSku: _reassignmentOzonSku, ...product }) => {
         const link = linkByProductId.get(product.id);
         return {
           ...product,

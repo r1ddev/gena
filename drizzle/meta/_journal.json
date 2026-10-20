@@ -120,6 +120,13 @@
       "when": 1792533623457,
       "tag": "0016_purchase_completion_status",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792536788374,
+      "tag": "0017_product_reassignment_queue",
+      "breakpoints": true
     }
   ]
 }
