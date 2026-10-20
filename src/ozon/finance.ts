@@ -2,6 +2,14 @@ type OzonFinanceRow = Record<string, unknown>;
 
 type BuyoutLine = { offerId: string; ozonSku: string | null };
 
+const ozonBuyoutEarliestDate = Date.parse("2025-01-01T00:00:00.000Z");
+
+export function supportedOzonBuyoutRange(from: Date, to: Date) {
+  const rangeFrom = new Date(Math.max(from.getTime(), ozonBuyoutEarliestDate));
+  if (!Number.isFinite(rangeFrom.getTime()) || !Number.isFinite(to.getTime()) || rangeFrom > to) return null;
+  return { from: rangeFrom, to: new Date(to) };
+}
+
 export function matchBuyoutLines<T extends BuyoutLine>(lines: T[], reportProduct: { sku: string; offerId: string }): T[] {
   if (reportProduct.sku) return lines.filter((line) => line.ozonSku === reportProduct.sku);
   if (!reportProduct.offerId) return [];

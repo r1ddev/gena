@@ -15,7 +15,7 @@ import {
 } from "@/db/schema";
 import { decryptSecret } from "@/security/secrets";
 import { ozonPost } from "@/ozon/client";
-import { financeAccrualPostingNumber, groupFinanceItemFees, matchBuyoutLines, staleOzonAccrualKeys } from "@/ozon/finance";
+import { financeAccrualPostingNumber, groupFinanceItemFees, matchBuyoutLines, staleOzonAccrualKeys, supportedOzonBuyoutRange } from "@/ozon/finance";
 import { observeBuyerHandoffAt } from "@/ozon/postings";
 import { chooseReturnPostingNumber } from "@/ozon/returns";
 import { chooseExternalProductRecord, dispositionAfterProductLink, exactProductLinkForOffer, externalProductKey, resolveExternalProductLink } from "@/ozon/external-product";
@@ -426,8 +426,10 @@ async function importDailyAccruals(credentials: OzonCredentials, from: Date, to:
 async function importBuyoutReports(credentials: OzonCredentials, from: Date, to: Date, progress: (label: string) => Promise<void>) {
   let reports = 0;
   let productsFound = 0;
-  for (let current = new Date(from); current <= to;) {
-    const rangeEnd = new Date(Math.min(addDays(current, 30).getTime(), to.getTime()));
+  const supportedRange = supportedOzonBuyoutRange(from, to);
+  if (!supportedRange) return 0;
+  for (let current = supportedRange.from; current <= supportedRange.to;) {
+    const rangeEnd = new Date(Math.min(addDays(current, 30).getTime(), supportedRange.to.getTime()));
     const response = await ozonPost<{ products?: JsonRecord[] }>(
       "/v1/finance/products/buyout",
       { date_from: dateOnly(current), date_to: dateOnly(rangeEnd) },
