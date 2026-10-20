@@ -146,6 +146,10 @@ function hasCompleteProductMapping(posting: AccountingInput["postings"][number],
   return hasAccountablePostingItems(postingItems);
 }
 
+export function isPostingRecognized(posting: PostingInput, items: PostingItemInput[], now = new Date()) {
+  return hasCompleteProductMapping(posting, items) && isRecognized(posting, items.filter(isAccountableItem), now);
+}
+
 export function calculateAccounting(input: AccountingInput, now = new Date()): AccountingResult {
   const productById = new Map(input.products.map((product) => [product.id, product]));
   const postingById = new Map(input.postings.map((posting) => [posting.id, posting]));

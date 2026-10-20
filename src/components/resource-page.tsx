@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Package, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { asRecord, displayValue, findRows, getId, localToday, requestJson, valueAt, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
@@ -30,6 +30,7 @@ export type ResourceConfig = {
   hideCreate?: boolean;
   fields: FieldConfig[];
   columns: ColumnConfig[];
+  remotePageSize?: number;
   emptyTitle?: string;
   emptyDescription?: string;
   hideRefresh?: boolean;
@@ -82,6 +83,8 @@ function productOptionsFrom(value: unknown) {
 
 export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActions, onMutation }: { config: ResourceConfig; actions?: React.ReactNode; beforeTable?: React.ReactNode; refreshKey?: string | number; rowActions?: (row: JsonRecord, refresh: () => Promise<void>) => React.ReactNode; onMutation?: () => void }) {
   const [rows, setRows] = useState<JsonRecord[]>([]);
+  const [pagination, setPagination] = useState<{ page: number; pageSize: number; total: number; totalPages: number } | null>(null);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -91,16 +94,50 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [search, setSearch] = useState("");
+  const [serverSearch, setServerSearch] = useState("");
+  const requestSequence = useRef(0);
 
   const refresh = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     setLoadError("");
-    try { setRows(findRows(await requestJson(config.collectionUrl))); }
-    catch (reason) { setRows([]); setLoadError(reason instanceof Error ? reason.message : "Не удалось загрузить список"); }
-    finally { setLoading(false); }
-  }, [config.collectionUrl]);
+    try {
+      let url = config.collectionUrl;
+      if (config.remotePageSize) {
+        const params = new URLSearchParams({ page: String(page), pageSize: String(config.remotePageSize) });
+        if (serverSearch) params.set("q", serverSearch);
+        url += `${url.includes("?") ? "&" : "?"}${params.toString()}`;
+      }
+      const result = await requestJson(url);
+      if (sequence !== requestSequence.current) return;
+      setRows(findRows(result));
+      const remotePage = asRecord(asRecord(result)?.pagination);
+      if (remotePage && typeof remotePage.page === "number" && typeof remotePage.pageSize === "number" && typeof remotePage.total === "number" && typeof remotePage.totalPages === "number") {
+        setPagination({ page: remotePage.page, pageSize: remotePage.pageSize, total: remotePage.total, totalPages: remotePage.totalPages });
+        if (remotePage.page !== page) setPage(remotePage.page);
+      } else setPagination(null);
+    }
+    catch (reason) {
+      if (sequence === requestSequence.current) {
+        setRows([]); setPagination(null); setLoadError(reason instanceof Error ? reason.message : "Не удалось загрузить список");
+      }
+    }
+    finally { if (sequence === requestSequence.current) setLoading(false); }
+  }, [config.collectionUrl, config.remotePageSize, page, serverSearch]);
 
   useEffect(() => { void refresh(); }, [refresh, refreshKey]);
+  useEffect(() => {
+    if (!config.remotePageSize) return;
+    if (search.trim() !== serverSearch) {
+      requestSequence.current++;
+      setLoading(false);
+    }
+    const timeout = window.setTimeout(() => {
+      setServerSearch(search.trim());
+      setPage(1);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [config.remotePageSize, search, serverSearch]);
   useEffect(() => {
     const refreshAfterSync = () => { void refresh(); };
     window.addEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
@@ -113,10 +150,11 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   }, [config.fields]);
 
   const visibleRows = useMemo(() => {
+    if (config.remotePageSize) return rows;
     const query = search.trim().toLocaleLowerCase("ru-RU");
     if (!query) return rows;
     return rows.filter((row) => JSON.stringify(row).toLocaleLowerCase("ru-RU").includes(query));
-  }, [rows, search]);
+  }, [config.remotePageSize, rows, search]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -156,16 +194,21 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     </section>}
     {beforeTable}
     <section className="panel">
-      <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Загружаем список…" : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder="Поиск" value={search} onChange={(event) => setSearch(event.target.value)} /></div>{!config.hideRefresh && <button className="button secondary small" title="Обновляет список записей." onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Обновить список</button>}</div></div>
+      <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Загружаем список…" : config.remotePageSize ? `${pagination?.total ?? 0} записей` : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder={config.remotePageSize ? "Поиск по заказам" : "Поиск"} value={search} onChange={(event) => setSearch(event.target.value)} /></div>{!config.hideRefresh && <button className="button secondary small" title="Обновляет список записей." onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Обновить список</button>}</div></div>
       {loading ? <div className="panel-body" aria-label="Загрузка списка"><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /></div>
         : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={20} /></div><div className="empty-title">Не удалось загрузить данные</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 13 }} onClick={() => void refresh()}>Повторить</button></div></div>
-          : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><Package size={20} /></div><div className="empty-title">{config.emptyTitle ?? "Пока нет записей"}</div><p className="empty-description">{config.emptyDescription ?? "Добавьте первую запись — она появится в этом списке, а связанные итоги обновятся автоматически."}</p></div></div>
+          : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><Package size={20} /></div><div className="empty-title">{config.remotePageSize && serverSearch ? "Ничего не найдено" : config.emptyTitle ?? "Пока нет записей"}</div><p className="empty-description">{config.remotePageSize && serverSearch ? `По запросу «${serverSearch}» совпадений нет. Измените запрос или очистите поиск.` : config.emptyDescription ?? "Добавьте первую запись — она появится в этом списке, а связанные итоги обновятся автоматически."}</p></div></div>
             : <div className="table-wrap"><table><thead><tr>{config.columns.map((column) => <th key={column.key}>{column.label}</th>)}{(config.deleteUrl || rowActions) && <th aria-label="Действия" />}</tr></thead><tbody>{visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
               const value = valueAt(row, column.key);
               if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, column.kind)}</span>{typeof row.sku === "string" && column.key !== "sku" && <span className="table-secondary">{row.sku}</span>}</td>;
               const rendered = column.key === "archived" ? (value ? "В архиве" : "Активен") : displayValue(value, column.kind);
               return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") || column.key === "archived" ? <span className={`badge ${column.key === "archived" && !value ? "green" : ""}`}>{rendered}</span> : rendered}</td>;
             })}{(config.deleteUrl || rowActions) && <td><div className="row-actions">{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
+      {!loading && pagination && pagination.totalPages > 1 && <nav className="pagination-controls" aria-label={`Страницы: ${config.title}`}>
+        <button className="button secondary small" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || pagination.page <= 1}>Назад</button>
+        <span>Страница {pagination.page} из {pagination.totalPages}</span>
+        <button className="button secondary small" onClick={() => setPage((current) => Math.min(pagination.totalPages, current + 1))} disabled={loading || pagination.page >= pagination.totalPages}>Дальше</button>
+      </nav>}
     </section>
   </>;
 }
