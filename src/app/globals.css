@@ -85,7 +85,13 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .notice.critical { border-color: #f0d8d8; color: #8b4141; background: #fff8f8; }
 .notice svg { flex: 0 0 auto; margin-top: 1px; }
 .table-wrap { width: 100%; overflow-x: auto; }
-.pagination-controls { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 16px 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.pagination-controls { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 16px 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.pagination-page { display: inline-flex; min-width: 34px; height: 34px; align-items: center; justify-content: center; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: white; cursor: pointer; font: inherit; }
+.pagination-page:hover:not([aria-disabled="true"]) { border-color: #a7d5bd; background: #f4fbf7; }
+.pagination-page.active { border-color: var(--green); color: white; background: var(--green); font-weight: 700; }
+.pagination-page[aria-disabled="true"] { cursor: default; }
+.pagination-ellipsis { min-width: 26px; color: var(--muted); text-align: center; }
+.pagination-page:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 table { width: 100%; border-collapse: collapse; text-align: left; }
 th { padding: 10px 13px; color: #849089; background: #fafbfa; font-size: 10px; font-weight: 700; letter-spacing: .35px; text-transform: uppercase; white-space: nowrap; }
 td { padding: 12px 13px; border-top: 1px solid #edf0ed; color: #34413a; font-size: 12px; vertical-align: middle; }

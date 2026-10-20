@@ -81,6 +81,17 @@ function productOptionsFrom(value: unknown) {
   }).filter((option): option is { value: string; label: string } => option !== null);
 }
 
+type PageItem = number | "ellipsis";
+
+function pageItems(currentPage: number, totalPages: number): PageItem[] {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1);
+  if (currentPage <= 4) return [1, 2, 3, 4, 5, "ellipsis", totalPages];
+  if (currentPage >= totalPages - 3) {
+    return [1, "ellipsis", totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  }
+  return [1, "ellipsis", currentPage - 1, currentPage, currentPage + 1, "ellipsis", totalPages];
+}
+
 export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActions, onMutation }: { config: ResourceConfig; actions?: React.ReactNode; beforeTable?: React.ReactNode; refreshKey?: string | number; rowActions?: (row: JsonRecord, refresh: () => Promise<void>) => React.ReactNode; onMutation?: () => void }) {
   const [rows, setRows] = useState<JsonRecord[]>([]);
   const [pagination, setPagination] = useState<{ page: number; pageSize: number; total: number; totalPages: number } | null>(null);
@@ -204,10 +215,18 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
               const rendered = column.key === "archived" ? (value ? "В архиве" : "Активен") : displayValue(value, column.kind);
               return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") || column.key === "archived" ? <span className={`badge ${column.key === "archived" && !value ? "green" : ""}`}>{rendered}</span> : rendered}</td>;
             })}{(config.deleteUrl || rowActions) && <td><div className="row-actions">{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
-      {!loading && pagination && pagination.totalPages > 1 && <nav className="pagination-controls" aria-label={`Страницы: ${config.title}`}>
-        <button className="button secondary small" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || pagination.page <= 1}>Назад</button>
-        <span>Страница {pagination.page} из {pagination.totalPages}</span>
-        <button className="button secondary small" onClick={() => setPage((current) => Math.min(pagination.totalPages, current + 1))} disabled={loading || pagination.page >= pagination.totalPages}>Дальше</button>
+      {pagination && pagination.totalPages > 1 && <nav className="pagination-controls" aria-label={`Страницы: ${config.title}`} aria-busy={loading}>
+        {pageItems(pagination.page, pagination.totalPages).map((item, index) => item === "ellipsis"
+          ? <span className="pagination-ellipsis" key={`ellipsis-${index}`} aria-hidden="true">…</span>
+          : <button
+            className={`pagination-page ${pagination.page === item ? "active" : ""}`}
+            key={item}
+            type="button"
+            aria-label={`Страница ${item}`}
+            aria-current={pagination.page === item ? "page" : undefined}
+            aria-disabled={loading || pagination.page === item}
+            onClick={() => { if (!loading && pagination.page !== item) setPage(item); }}
+          >{item}</button>)}
       </nav>}
     </section>
   </>;
