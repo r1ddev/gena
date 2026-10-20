@@ -60,7 +60,7 @@ export async function GET(request: Request) {
     const byId = new Map(catalog.map((product) => [product.id, product]));
     const externalKeys = [...new Set(items.map((item) => item.externalKey))];
     const skus = [...new Set(items.map((item) => item.ozonSku).filter(Boolean))];
-    const [orderRows, returnRows, writeoffRows, itemAccruals] = await Promise.all([
+    const [orderRows, returnRows, writeoffRows, itemAccruals, relatedItems] = await Promise.all([
       externalKeys.length
         ? db.select({ externalKey: postingItems.externalKey, postingNumber: postings.externalId })
           .from(postingItems).innerJoin(postings, eq(postingItems.postingId, postings.id)).where(inArray(postingItems.externalKey, externalKeys))
@@ -76,7 +76,18 @@ export async function GET(request: Request) {
       skus.length
         ? db.select().from(financeAccruals).where(eq(financeAccruals.accruedCategory, "ITEM"))
         : Promise.resolve([]),
+      skus.length
+        ? db.select({ ozonSku: externalItems.ozonSku, offerId: externalItems.offerId })
+          .from(externalItems).where(inArray(externalItems.ozonSku, skus))
+        : Promise.resolve([]),
     ]);
+    const offerIdsBySku = new Map<string, Set<string>>();
+    for (const item of relatedItems) {
+      if (!item.ozonSku || !item.offerId) continue;
+      const offerIds = offerIdsBySku.get(item.ozonSku) ?? new Set<string>();
+      offerIds.add(item.offerId);
+      offerIdsBySku.set(item.ozonSku, offerIds);
+    }
     const orderNumbersByKey = new Map<string, string[]>();
     for (const row of orderRows) orderNumbersByKey.set(row.externalKey, [...(orderNumbersByKey.get(row.externalKey) ?? []), row.postingNumber]);
     const returnsByKey = new Map(returnRows.map((row) => [row.externalKey, row]));
@@ -113,7 +124,7 @@ export async function GET(request: Request) {
       } else if (kind === "order") {
         details = { ...details, postingNumber: orderNumbers[0] ?? ref(raw.posting_number), quantity: raw.quantity ?? null, amount: raw.price ?? raw.seller_price_per_instance ?? null };
       }
-      return { ...item, productTitle: item.productId ? byId.get(item.productId)?.title ?? "" : "", sourceInfo: details };
+      return { ...item, productTitle: item.productId ? byId.get(item.productId)?.title ?? "" : "", relatedOfferIds: [...(offerIdsBySku.get(item.ozonSku) ?? [])], sourceInfo: details };
     });
     return { items: enriched, sourceCounts };
   });
