@@ -1,0 +1,62 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gena}
+      POSTGRES_USER: ${POSTGRES_USER:-gena}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run npm run start:local to create a local .env file}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gena} -d ${POSTGRES_DB:-gena}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    command: ["npm", "run", "db:migrate"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gena}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-gena}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Run npm run start:local to create a local .env file}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build: .
+    command: ["node", "server.js"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gena}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-gena}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Run npm run start:local to create a local .env file}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["npm", "run", "worker"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gena}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-gena}
+      POSTGRES_DB: ${POSTGRES_DB:-gena}
+      POSTGRES_USER: ${POSTGRES_USER:-gena}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run npm run start:local to create a local .env file}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Run npm run start:local to create a local .env file}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
+      SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:-24}
+      APP_PORT: ${APP_PORT:-3000}
+      BACKUP_DIR: /app/data/backups
+    volumes:
+      - ./data/backups:/app/data/backups
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped

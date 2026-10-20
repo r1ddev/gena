@@ -12,6 +12,7 @@ export type AccountingInput = {
     id: string;
     status: string;
     deliveredAt: string | null;
+    marketplaceBuyoutAt?: string | null;
     isMarketplaceBuyout: boolean;
     accountingEnabled?: boolean;
   }[];
@@ -85,14 +86,20 @@ const money = (value: Decimal) => value.toDecimalPlaces(2).toFixed(2);
 const units = (value: Decimal) => value.toDecimalPlaces(3).toFixed(3);
 const dayMs = 24 * 60 * 60 * 1000;
 
-function isDelivered(posting: AccountingInput["postings"][number]) {
-  return Boolean(posting.deliveredAt);
+function isDelivered(posting: AccountingInput["postings"][number], asOf: Date) {
+  return Boolean(posting.deliveredAt) && Date.parse(posting.deliveredAt!) <= asOf.getTime();
 }
 
 function isRecognized(posting: AccountingInput["postings"][number], now: Date) {
-  if (!isDelivered(posting)) return false;
-  if (posting.isMarketplaceBuyout) return true;
+  if (posting.isMarketplaceBuyout) {
+    return Boolean(posting.marketplaceBuyoutAt) && Date.parse(posting.marketplaceBuyoutAt!) <= now.getTime();
+  }
+  if (!isDelivered(posting, now)) return false;
   return now.getTime() >= new Date(posting.deliveredAt!).getTime() + 21 * dayMs;
+}
+
+function isAccountedSale(posting: AccountingInput["postings"][number], asOf: Date) {
+  return isDelivered(posting, asOf) || posting.isMarketplaceBuyout;
 }
 
 function isCancelled(posting: AccountingInput["postings"][number]) {
@@ -156,23 +163,27 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
   const stockEvents: StockEvent[] = [];
   const stockEvent = (productId: string | null, warehouse: "seller" | "ozon", at: string | null | undefined, value: Decimal, kind: "delta" | "count" = "delta") => {
     if (!productId) return;
-    const eventTime = at ?? "1970-01-01T00:00:00.000Z";
-    const countedAt = kind === "count" && /^\d{4}-\d{2}-\d{2}$/.test(eventTime) ? `${eventTime}T23:59:59.999Z` : eventTime;
+    if (!at || !Number.isFinite(Date.parse(at))) return;
+    const eventTime = at;
+    const dateOnlyCount = kind === "count" && /^\d{4}-\d{2}-\d{2}$/.test(eventTime);
+    const countedAt = dateOnlyCount ? `${eventTime}T23:59:59.999Z` : eventTime;
+    if (dateOnlyCount ? eventTime > now.toISOString().slice(0, 10) : Date.parse(countedAt) > now.getTime()) return;
     stockEvents.push({ productId, warehouse, at: countedAt, ...(kind === "count" ? { actual: value } : { delta: value }) });
   };
 
-  for (const receipt of input.receipts) stockEvent(receipt.productId, "seller", receipt.receivedAt, d(receipt.quantity));
+  for (const receipt of input.receipts) stockEvent(receipt.productId, "seller", receipt.receivedAt ?? now.toISOString(), d(receipt.quantity));
   for (const supply of input.supplies) {
-    stockEvent(supply.productId, "seller", supply.suppliedAt, d(supply.quantity).negated());
-    stockEvent(supply.productId, "ozon", supply.suppliedAt, d(supply.quantity));
+    const suppliedAt = supply.suppliedAt ?? now.toISOString();
+    stockEvent(supply.productId, "seller", suppliedAt, d(supply.quantity).negated());
+    stockEvent(supply.productId, "ozon", suppliedAt, d(supply.quantity));
   }
 
   const returnedQuantityByPostingProduct = new Map<string, Decimal>();
   for (const posting of input.postings) {
-    if (!mappablePostingIds.has(posting.id) || !isDelivered(posting)) continue;
+    if (!mappablePostingIds.has(posting.id) || !isAccountedSale(posting, now)) continue;
     for (const item of input.postingItems.filter((candidate) => candidate.postingId === posting.id)) {
       if (item.movementEnabled === false) continue;
-      stockEvent(item.productId, "ozon", posting.deliveredAt, d(item.quantity).negated());
+      stockEvent(item.productId, "ozon", posting.deliveredAt ?? posting.marketplaceBuyoutAt, d(item.quantity).negated());
     }
   }
 
@@ -188,8 +199,10 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
     }
   }
 
-  for (const writeoff of input.manualWriteoffs) stockEvent(writeoff.productId, "seller", writeoff.writtenOffAt, d(writeoff.quantity).negated());
-  for (const writeoff of input.ozonWriteoffs) stockEvent(writeoff.productId, "ozon", writeoff.occurredAt, d(writeoff.quantity).negated());
+  for (const writeoff of input.manualWriteoffs) stockEvent(writeoff.productId, "seller", writeoff.writtenOffAt ?? now.toISOString(), d(writeoff.quantity).negated());
+  for (const writeoff of input.ozonWriteoffs) {
+    if (writeoff.occurredAt) stockEvent(writeoff.productId, "ozon", writeoff.occurredAt, d(writeoff.quantity).negated());
+  }
   for (const adjustment of input.stockAdjustments) stockEvent(adjustment.productId, adjustment.warehouse, adjustment.countedAt, d(adjustment.actualQuantity), "count");
 
   stockEvents.sort((left, right) => Date.parse(left.at) - Date.parse(right.at) || Number("actual" in left) - Number("actual" in right));
@@ -205,18 +218,23 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
   let previewGross = new Decimal(0);
   let previewProfit = new Decimal(0);
   for (const posting of input.postings) {
-    if (!mappablePostingIds.has(posting.id) || !isDelivered(posting)) continue;
+    if (!mappablePostingIds.has(posting.id) || !isAccountedSale(posting, now)) continue;
     const items = input.postingItems.filter((candidate) => candidate.postingId === posting.id && candidate.productId);
     if (isRecognized(posting, now)) {
+      const quantityByProduct = new Map<string, Decimal>();
       for (const item of items) {
-        const returned = returnedQuantityByPostingProduct.get(`${posting.id}:${item.productId}`) ?? new Decimal(0);
-        const soldQuantity = item.movementEnabled === false ? new Decimal(0) : Decimal.max(0, d(item.quantity).minus(returned));
-        const averageCost = averageByProduct.get(item.productId!) ?? new Decimal(0);
-        const landedCost = landedByProduct.get(item.productId!) ?? new Decimal(0);
+        if (item.movementEnabled === false) continue;
+        quantityByProduct.set(item.productId!, (quantityByProduct.get(item.productId!) ?? new Decimal(0)).plus(d(item.quantity)));
+      }
+      for (const [productId, quantity] of quantityByProduct) {
+        const returned = returnedQuantityByPostingProduct.get(`${posting.id}:${productId}`) ?? new Decimal(0);
+        const soldQuantity = Decimal.max(0, quantity.minus(returned));
+        const averageCost = averageByProduct.get(productId) ?? new Decimal(0);
+        const landedCost = landedByProduct.get(productId) ?? new Decimal(0);
         soldPurchaseCost = soldPurchaseCost.plus(soldQuantity.times(averageCost));
         soldSharedCosts = soldSharedCosts.plus(soldQuantity.times(landedCost.minus(averageCost)));
       }
-    } else if (!posting.isMarketplaceBuyout) {
+    } else if (isDelivered(posting, now) && !posting.isMarketplaceBuyout) {
       previewCount += 1;
       for (const item of items) {
         const quantity = d(item.quantity);

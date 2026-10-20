@@ -1,162 +1,72 @@
-# Анализ процесса и план MVP
+# Product analysis and MVP plan
 
-**Статус:** проектный документ для обсуждения. Описывает назначение продукта, согласованные правила и невыбранные технические решения.
+**Status:** implementation baseline for the first local MVP. The application and its main flows are implemented. The Ozon connection and migration still need verification against the owner’s live account and current data export.
 
-## 1. Назначение продукта
+## 1. Product goal
 
-Сервис объединяет управленческий учёт продаж, закупок и запасов одного продавца Ozon FBO. Его главная задача — показывать, откуда взялись остатки, расчётный денежный баланс и прибыль, а также пересчитывать их из текущих исходных записей после исправления или удаления операции.
+Gena is a local, open-source accounting service for one Ozon FBO seller and one Ozon account. It replaces manual operational tracking with a catalog, stock movements, purchases, expenses, sales, returns, writeoffs, reconciliation, and transparent money and profit calculations.
 
-Сервис не управляет карточками, ценами, поставками или заказами на стороне Ozon. Поставки на склад Ozon вводятся вручную в сервисе и в кабинете продавца. Интеграция Ozon в первой версии нужна для чтения заказов, статусов, возвратов, начислений и финансовых данных, необходимых для выкупов и списаний.
+The service is the source of truth for the catalog, purchases and receipts, manual supplies, expenses, seller writeoffs, and inventory resolutions. Ozon supplies marketplace orders, statuses, returns, and financial records through its API. The service does not create or edit marketplace cards, prices, orders, or supplies.
 
-## 2. Область продукта
+## 2. Product scope
 
-Первая версия покрывает основные операции продавца FBO:
-
-| Область | Поведение сервиса |
+| Area | MVP behavior |
 | --- | --- |
-| Каталог | Универсальные категории, внутренние SKU, связи с идентификаторами Ozon, архивирование без потери истории |
-| Закупки | Заказанные количества, частичные приёмки и ожидаемый остаток поставщику |
-| Запасы | Раздельный учёт склада продавца и склада Ozon на основе операций движения |
-| Поставки | Ручное создание и удаление перемещения, стоимость доставки учитывается один раз |
-| Заказы и финансы | Синхронизация статусов и возвратов, отдельное признание предварительных продаж и финансовых начислений |
-| Списания и сверки | Отдельные списания Ozon и продавца, индивидуальный разбор расхождений инвентаризации |
-| Аналитика | Производные остатки, себестоимость, денежный баланс и прибыль с расшифровкой |
+| Catalog | Universal product categories and internal SKUs; links to Ozon identifiers; archive without losing history |
+| Purchases | Ordered quantity and money recorded immediately; partial receipts add only received quantity to stock and average purchase cost |
+| Stock | Separate seller and Ozon balances derived from dated operations |
+| Supplies | Created manually; immediately transfer stock to Ozon; delivery cost affects cash and the shared expense coefficient once |
+| Orders | Ozon FBO statuses are synchronized; delivery moves stock out of Ozon; unknown product IDs wait for a saved mapping decision |
+| Returns | Seller stock changes after actual receipt; Ozon stock changes after the item becomes available for sale |
+| Financial records | Order-level marketplace charges, marketplace buyouts, and writeoff compensation are imported and shown by source |
+| Expenses and writeoffs | General expenses, Ozon writeoffs, and seller losses are separate operation types |
+| Inventory | Counted quantities are recorded separately; each discrepancy is resolved individually |
+| Import | `.xlsx` and `.csv` files can be previewed and applied with a row-level issues report |
+| Scenario calculator | Nominal profit is isolated from actual balances and profit |
+| Local operations | Docker Compose, local PostgreSQL data, daily backups, and restore workflow |
 
-Ключевые требования к поведению продукта:
+## 3. Accounting rules
 
-- Заказанное и фактически полученное количество — разные состояния. Только приёмка меняет остаток и среднюю закупочную себестоимость.
-- Место и момент возврата определяют складское движение; статус возврата сам по себе не подтверждает физическое получение продавцом.
-- Тип финансовой операции определяется данными Ozon и связями с отправлением, а не знаком суммы.
-- Исходные операции хранятся отдельно от производных итогов; повторная синхронизация не создаёт повторных эффектов.
-- Исторические данные переносятся с предварительным просмотром и отчётом; неоднозначные записи не получают автоматический финансовый или складской эффект.
+- Current stock, average purchase cost, landed cost, cash balance, and profit are calculated from source operations when requested. Removing a source row from PostgreSQL must change the next result.
+- Only received purchase quantity enters inventory and average purchase cost. The entered purchase payment affects cash immediately, including for goods that have not arrived.
+- Ordinary delivered orders are preliminary for 21 days from the delivery event. Before that deadline, their amount and expected profit appear separately. They enter the main calculation after the deadline, and later Ozon returns or adjustments update the result.
+- The Ozon status “Delivered” means the goods were handed to the buyer. When Ozon does not provide a delivery timestamp, the service records when it first observes this status during synchronization.
+- Marketplace buyouts are a separate transaction type and are recognized from Ozon’s financial buyout report, without waiting 21 days.
+- Ozon delivery reduces Ozon stock. A return to the seller increases seller stock only when physically received. A return to Ozon increases its stock when Ozon makes the item sellable again.
+- Ozon writeoff reduces Ozon stock and records any confirmed compensation as marketplace revenue, once. Seller loss reduces seller stock and profit by the item’s landed cost, without a second cash deduction.
+- General expenses and supply delivery costs are distributed through the agreed shared cost coefficient. Ozon order-level charges stay attached to their financial records. Every source amount affects a balance once.
+- Inventory discrepancies are never silently written off; each is explicitly resolved. Negative stock remains visible as a reconciliation error.
+- The nominal profit calculator never changes actual operations or totals.
 
-Подход к миграции данных и предварительный аудит методов Ozon API описаны в [документе о миграции и Ozon API](data-import-and-ozon-api-audit.md). Точные форматы и соответствия для переноса выбираются отдельно перед реализацией миграции.
+The calculation inputs and deletion/recalculation cases are documented in [accounting-data-model-and-recalculation.md](accounting-data-model-and-recalculation.md).
 
-Предлагаемая модель исходных операций, производных итогов и сценарии их пересчёта описаны в [модели учётных данных и перерасчёта](accounting-data-model-and-recalculation.md). Она отделяет уже согласованные правила от вопросов, которые нельзя кодировать до решения владельца.
+## 4. Technical implementation
 
-## 3. Базовая модель учёта
+- **Application:** TypeScript, React, and Next.js. Next.js serves both the interface and server routes; the browser never connects directly to PostgreSQL.
+- **Database access:** Drizzle ORM with versioned SQL migrations; PostgreSQL stores primary operations and raw Ozon/import records.
+- **Background work:** a separate worker container performs manual and daily Ozon synchronization and creates backups.
+- **Local runtime:** Docker Compose starts PostgreSQL, a migration job, the web application, and the worker. The web port is bound to the local loopback interface; PostgreSQL is not published to the host network.
+- **Secrets and backups:** the Ozon API key is encrypted in PostgreSQL. Daily local backups retain the database, encryption key, and connection settings; 30 daily backup folders are kept.
+- **Import:** `.xlsx` and `.csv` parsing produces a preview and row issues. Applying an import is transactional and uses file-content based identities to avoid duplicate operations.
+- **Derived values:** totals are not stored as independent balance or stock fields. They are recalculated from current source records.
 
-### 3.1. Первичные записи и вычисляемые итоги
+## 5. Implementation status and remaining verification
 
-Источниками расчётов должны быть текущие первичные записи сервиса и нормализованные факты, загруженные из Ozon. Например: карточки товаров, закупки, приёмки, ручные поставки, общие расходы, доставленные заказы, строки удержаний, возвраты, компенсации и списания.
+### Implemented
 
-Остаток по каждому месту хранения, средняя и полная себестоимость, денежный баланс, прибыль и графики вычисляются из этих записей. Удаление первичной строки непосредственно из базы должно исключить её влияние при следующем запросе итогов. Любая оптимизация с сохранением промежуточных сумм допустима только как восстанавливаемый кэш, который можно пересобрать из оставшихся записей.
+- Local container setup and PostgreSQL migrations.
+- Catalog, purchases and partial receipts, manual supplies, expenses, seller writeoffs, and inventory reconciliation.
+- Derived stock, cost, cash and profit views, plus separate preliminary sales and nominal profit.
+- Import preview and apply for `.xlsx` and `.csv` files.
+- Ozon FBO posting, return, daily finance, buyout report, and decommission report adapters; manual and scheduled sync entry points.
+- Encrypted settings, local daily backups, and a database replacement restore workflow.
 
-Практическое следствие для модели данных: не хранить независимо редактируемые поля вроде `current_balance` или `current_stock` как источник истины. Нужны устойчивые идентификаторы первичных и внешних операций, чёткие даты событий, тип операции и ссылки на связанные сущности. Повторный импорт одной внешней операции должен обновлять её, а не создавать ещё одну.
+### Still required before calling the service verified for daily use
 
-### 3.2. Остатки
+1. Test import preview and reconciliation against a current export of the owner’s data. The current export has not yet been supplied for this implementation run.
+2. Enter the owner’s Ozon credentials and verify the actual API responses, permissions, rate limits, and initial history range. No authorized live Ozon request has been made.
+3. Confirm how buyout report amounts, daily finance accruals, and confirmed writeoff compensation reconcile, so the same transaction is neither omitted nor counted twice.
+4. Verify the Ozon signal that means a returned item is again available for sale on its warehouse.
+5. Compare the imported history and live Ozon data with the resulting balances and show all unresolved rows and differences.
 
-Сервис показывает как минимум два места хранения: склад продавца и склад Ozon. Остатки получаются из событий движения:
-
-- подтверждённая приёмка увеличивает склад продавца;
-- созданная вручную поставка уменьшает склад продавца и увеличивает склад Ozon;
-- доставка заказа покупателю уменьшает склад Ozon;
-- возврат на Ozon восстанавливает остаток при готовности товара к продаже;
-- возврат продавцу перемещает единицу со склада Ozon на склад продавца только после подтверждения фактического получения;
-- списание или ручная потеря уменьшают соответствующее место хранения;
-- результат инвентаризации не создаёт движения автоматически, пока владелец не выбрал действие по конкретному расхождению.
-
-Отрицательный остаток разрешён как результат исправления или удаления истории, но должен быть видимым сигналом для сверки.
-
-### 3.3. Деньги и прибыль
-
-Показатели разделяются, потому что отвечают на разные вопросы.
-
-- **Расчётный денежный баланс** показывает внесённые затраты и признанные начисления/удержания Ozon. Закупка, общий расход и доставка поставки уменьшают его при внесении. Он не равен реальным деньгам на банковском счёте.
-- **Подтверждённая прибыль** показывает признанные продажи и компенсации за вычетом комиссий Ozon и полной себестоимости проданного или списанного товара. Она не должна повторно вычитать закупку как денежное движение.
-- **Предварительные продажи и ожидаемая прибыль** видны отдельно до признания обычной продажи по правилу 21 дня. Они не складываются с подтверждёнными итогами.
-- **Сценарный расчёт** показывает возможный результат выбранных цены и параметров, но не меняет фактические показатели.
-
-Общие расходы распределяются в себестоимость по согласованному общему коэффициенту: `(общие расходы + доставка поставок) / стоимость фактически полученных закупок`. Комиссии и логистика Ozon по конкретному заказу учитываются отдельно. Каждая сумма должна повлиять на денежный баланс и прибыль по соответствующему правилу, но не дублироваться.
-
-Проверочный пример из согласованных правил: покупка 2 единиц по 50 ₽ даёт денежный баланс −100 ₽ и нулевую прибыль. Продажа одной за 300 ₽ без комиссий даёт баланс +200 ₽ и прибыль +250 ₽. Влияние потери второй единицы на прибыль остаётся открытым решением; такая потеря уменьшает остаток склада продавца и не создаёт повторного денежного расхода.
-
-### 3.4. Границы источников истины
-
-| Данные | Источник истины |
-| --- | --- |
-| Каталог, закупки и приёмки, ручные поставки, расходы, ручные списания и решения по сверке | Сервис |
-| Заказы и их статусы, доступные комиссии и логистика, возвраты, компенсации и финансовый отчёт о выкупах | Кандидаты методов и известные смены версий собраны в [аудите Ozon API](data-import-and-ozon-api-audit.md); точные поля необходимо повторно сверить с официальной схемой и ответами кабинета перед реализацией |
-| Правила признания, места хранения, коэффициент затрат и вычисляемые итоги | Сервис согласно ТЗ |
-
-Синхронизация должна быть идемпотентной и сохранять выбор владельца для неизвестных артикулов: привязать к существующему товару, создать товар или игнорировать. Импортированный статус не должен автоматически создавать повторный складской или денежный эффект при каждом запуске.
-
-## 4. Выбранная архитектура MVP
-
-**Стек:** TypeScript, React, Next.js, PostgreSQL и Drizzle ORM. Next.js обслуживает интерфейс и серверную часть приложения; отдельный API-сервер не нужен. Браузер обращается только к серверу Next.js и никогда не подключается к PostgreSQL напрямую.
-
-1. **Веб-приложение:** Next.js App Router с React-интерфейсом для обзора, каталога, закупок/приёмок, поставок, операций Ozon, расходов/списаний, сверок, импорта, настроек и сценарного калькулятора.
-2. **Серверные сценарии:** TypeScript-модули проверяют и записывают ручные операции, запускают импорт, обрабатывают сопоставления и подтверждение возврата продавцу. Они используются серверной частью Next.js и фоновым worker-ом.
-3. **Расчёты и доступ к данным:** Drizzle ORM связывает TypeScript-код с PostgreSQL. Балансы, остатки, себестоимость и прибыль рассчитываются запросами по первичным операциям при чтении; в MVP эти итоговые значения не сохраняются и не кэшируются. Поэтому физическое удаление операции из БД меняет результат следующего расчёта.
-4. **Денежные и количественные значения:** PostgreSQL `numeric` используется для сумм и расчётов, где важна точность; количества товара хранятся целыми числами. Денежные значения нельзя преобразовывать в неточные двоичные числа JavaScript для вычислений.
-5. **Схема и миграции:** описание таблиц ведётся в Drizzle, изменения поставляются версионированными SQL-миграциями. Применение миграций не должно перезаписывать пользовательскую историю.
-6. **Интеграция Ozon:** отдельный TypeScript-адаптер обрабатывает запросы, пагинацию, ограничения частоты, ошибки и преобразование ответов в нормализованные факты.
-7. **Фоновый worker:** отдельный контейнер из той же кодовой базы выполняет ежедневную синхронизацию и запрошенные вручную фоновые задачи. Состояние запусков и ошибок сохраняется в PostgreSQL.
-8. **Контейнеры и локальные данные:** Docker Compose запускает веб-приложение, worker и PostgreSQL. Каталог БД и папка резервных копий находятся в локальных постоянных хранилищах. Веб-порт публикуется только на loopback-интерфейсе компьютера; порт PostgreSQL наружу не публикуется.
-
-Архитектура рассчитана на одного владельца и один кабинет Ozon. Отдельный сетевой API-сервис, брокер сообщений и многопользовательская инфраструктура для MVP не вводятся.
-
-## 5. Этапы MVP
-
-### Этап 0 — уточнение миграции и интеграции
-
-- Определить формат исторических данных и подготовить карту переноса из исходных записей в сущности сервиса.
-- Составить предварительный отчёт о записях, которые будут перенесены, пропущены или требуют решения владельца.
-- Проверить кандидаты методов из [аудита Ozon API](data-import-and-ozon-api-audit.md) по актуальной официальной схеме и реальным ответам кабинета; отдельно разрешить описанное расхождение `type_id` / `accrual_id`.
-- Утвердить способ сопоставления исторических событий с данными Ozon и правило исключения дублей.
-- Определить тестовые сценарии перерасчёта и повторного импорта.
-
-Предлагаемые сущности и сценарии перерасчёта, включая физическое удаление исходной записи, собраны в [модели учётных данных](accounting-data-model-and-recalculation.md). Этап 0 завершается после проверки миграционного формата, контрактов API и ответов кабинета.
-
-**Результат:** одобренная схема данных, спецификация интеграции и план безопасного импорта.
-
-### Этап 1 — локальная основа и ручные операции
-
-- Запуск Next.js, фонового worker-а и PostgreSQL через Docker Compose с сохраняемыми локальными данными.
-- Миграции PostgreSQL под управлением Drizzle.
-- Универсальный каталог и сопоставление SKU/идентификаторов Ozon.
-- Закупки, частичные приёмки, поставки на Ozon, расходы и ручные списания.
-- Вычисление остатков, средней закупочной и полной себестоимости, расчётного денежного баланса и прибыли.
-- Экран расшифровки итогов и ошибок сверки.
-- Ежедневная локальная резервная копия, хранение 30 дней и проверенное восстановление.
-
-**Результат:** сервис уже заменяет ручной учёт товара и расходов без подключения к Ozon.
-
-### Этап 2 — интеграция Ozon и текущие операции
-
-- Настройки кабинета и безопасное локальное хранение Client ID/API-ключа.
-- Ручной запуск и ежедневная синхронизация заказов FBO, статусов и возвратов.
-- Предварительные продажи до 21-го дня; отдельное признание после срока.
-- Финансовые строки по заказу, выкупы маркетплейсом по финансовому отчёту и компенсации списаний.
-- Очередь неизвестных артикулов и сохранение решения по каждому ID.
-- Повторное обновление без дублей, с обработкой поздних возвратов и корректировок.
-
-**Результат:** актуальные продажи и возвраты отражаются в расчётах с объяснимой связью с ответом Ozon.
-
-### Этап 3 — перенос истории и контроль
-
-- Импорт каталога и истории операций с предварительным просмотром и отчётом ошибок.
-- Поиск дубликатов между импортированной историей и API Ozon.
-- Сопоставление итогов по товарам и периодам, список расхождений без скрытого автосписания.
-- Доработка обзора, графиков, инвентаризации и сценарного калькулятора по результатам реального переноса.
-
-**Результат:** переход с прежнего учёта с понятным отчётом о перенесённых, пропущенных и требующих решения записях.
-
-## 6. Основные риски и способы проверки
-
-| Риск | Последствие | Проверка / защита |
-| --- | --- | --- |
-| API меняет поля или не возвращает нужный финансовый факт | Неверное признание продажи, возврата или компенсации | Проверить текущую официальную спецификацию и реальные ответы до фиксации контрактов интеграции; сохранять внешний ID источника |
-| Повторная или частичная синхронизация | Дубли выручки, комиссии или движения товара | Стабильный ключ внешней операции и тесты повторного импорта/обновления статуса |
-| Возврат и исходная доставка учитываются как два движения | Завышенный остаток | Модель возврата должна ссылаться на доставленную позицию; склад назначения и момент восстановления различаются |
-| Ошибочная трактовка отрицательной суммы | Потерянная продажа или неверный тип операции | Определять тип по признакам и финансовым данным Ozon, не по знаку суммы |
-| Общие расходы учтены и как отдельное списание прибыли, и в себестоимости | Заниженная прибыль | Хранить категории затрат и проверять на эталонных примерах, что одна сумма не применяется дважды |
-| Удаление записи оставляет устаревший итог | Баланс или остаток не соответствует данным | Итоги не хранятся отдельно; приёмочный сценарий напрямую удаляет исходную строку и проверяет следующий расчёт |
-| Неясная классификация исторического списания/возврата | Мигрированные цифры будут выглядеть точными, но иметь неверный смысл | Сначала импортировать неоднозначные записи в очередь проверки и показать расшифровку без финансового эффекта до решения |
-
-## 7. Вопросы, которые остаются владельцу
-
-1. После аудита выгрузки истории — какой способ импорта удобнее: единый файл импорта с предварительным просмотром или отдельные файлы для каждой группы данных?
-2. Для старых строк со свободными комментариями как сопоставлять операции: автоматическая классификация только очевидных значений и очередь остального на ручную проверку (предлагаемый безопасный вариант) или полностью ручная классификация?
-
-Эти решения нужны до реализации соответствующих частей, но не меняют уже подтверждённые правила учёта из [ТЗ](ozon-accounting-requirements.md).
+The current API method map and contract notes are in [data-import-and-ozon-api-audit.md](data-import-and-ozon-api-audit.md). These checks require account data; they are not substitutes for the implemented local application.

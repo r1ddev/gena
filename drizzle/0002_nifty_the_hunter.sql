@@ -1,0 +1,1 @@
+ALTER TABLE "ozon_postings" ADD COLUMN "marketplace_buyout_at" timestamp with time zone;
