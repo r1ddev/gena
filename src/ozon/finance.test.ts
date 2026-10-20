@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { financeAccrualPostingNumber, financeAccrualRowContainsSku, financeRowContainsSku, groupFinanceItemFees, isOzonWriteoffCompensation, matchBuyoutLines, postingContainsMarketplaceBuyout, staleOzonAccrualKeys } from "./finance";
+import { financeAccrualPostingNumber, financeAccrualRowContainsSku, financeRowContainsSku, groupFinanceItemFees, isOzonWriteoffCompensation, matchBuyoutLines, postingContainsMarketplaceBuyout, staleOzonAccrualKeys, supportedOzonBuyoutRange } from "./finance";
+
+describe("supportedOzonBuyoutRange", () => {
+  it("clamps the first report date to Ozon's supported start date", () => {
+    expect(supportedOzonBuyoutRange(new Date("2022-01-01T00:00:00Z"), new Date("2026-10-20T00:00:00Z"))).toEqual({
+      from: new Date("2025-01-01T00:00:00Z"),
+      to: new Date("2026-10-20T00:00:00Z"),
+    });
+  });
+
+  it("preserves a range that is already supported", () => {
+    expect(supportedOzonBuyoutRange(new Date("2026-02-01T00:00:00Z"), new Date("2026-03-01T00:00:00Z"))).toEqual({
+      from: new Date("2026-02-01T00:00:00Z"),
+      to: new Date("2026-03-01T00:00:00Z"),
+    });
+  });
+
+  it("returns no range when the end date predates Ozon's supported period", () => {
+    expect(supportedOzonBuyoutRange(new Date("2022-01-01T00:00:00Z"), new Date("2024-12-31T00:00:00Z"))).toBeNull();
+  });
+});
 
 describe("isOzonWriteoffCompensation", () => {
   it("recognizes compensation type IDs from both accrual and item fee payloads", () => {
