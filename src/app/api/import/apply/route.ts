@@ -1,9 +1,9 @@
-import { and, eq, like, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, like, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { expenses, financeAccruals, importBatches, importRows, manualWriteoffs, postingItems, postings, productLinks, products, purchaseReceipts, purchases, returns, stocktakeLines, stocktakes, supplies, supplyLines } from "@/db/schema";
-import { makeImportSourceKey } from "@/importer/source-key";
-import { findChangedAppliedBatch, findPreviouslyAppliedBatch } from "@/importer/content-guard";
+import { makeImportSourceKey, makeStableImportRowKeys } from "@/importer/source-key";
+import { findChangedAppliedBatch, findChangedAppliedRow, findPreviouslyAppliedBatch } from "@/importer/content-guard";
 import { getImportCellValue, getImportedProductCategory, getSupplyShippingCost, normalizeImportHeader, parseImportDate, parseImportMoney } from "@/importer/workbook";
 import { summarizeImportIssues } from "@/importer/issue-summary";
 import { getImportedReceivedQuantity, shouldDeleteImportedReceipt } from "@/importer/purchases";
@@ -27,8 +27,10 @@ function cell(data: StoredRow, aliases: string[]) {
 
 function valueAt(data: StoredRow, index: number) { return data.values?.[index] ?? null; }
 function text(value: unknown) { return value === null || value === undefined ? "" : String(value).trim(); }
-function sourceKey(row: typeof importRows.$inferSelect, sourceNamespace: string, suffix = "") {
-  return makeImportSourceKey(sourceNamespace, `row:${row.sheetName}:${row.rowNumber}${suffix ? `:${suffix}` : ""}`);
+function sourceKey(row: typeof importRows.$inferSelect, stableRowKeys: Map<string, string>, suffix = "") {
+  const stableRowKey = stableRowKeys.get(row.id);
+  if (!stableRowKey) throw new Error("Не удалось построить стабильный ключ строки переноса.");
+  return makeImportSourceKey("legacy-workbook-row-v2", `${stableRowKey}${suffix ? `:${suffix}` : ""}`);
 }
 function dateValue(data: StoredRow, aliases: string[]) { return parseImportDate(cell(data, aliases)); }
 function quantityValue(value: unknown, fallback = 0) { return parseImportMoney(value) ?? fallback; }
@@ -70,7 +72,9 @@ export async function POST(request: Request) {
       const [batch] = await tx.select().from(importBatches).where(eq(importBatches.id, batchId)).limit(1);
       if (!batch) throw new Error("Пакет переноса не найден.");
       if (batch.status !== "preview") throw new Error("Этот пакет уже обработан; повторный перенос заблокирован.");
-      const sourceNamespace = batch.contentHash ?? batch.id;
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('import:apply', 0))`);
+      const rows = await tx.select().from(importRows).where(eq(importRows.batchId, batchId)).orderBy(importRows.sheetName, importRows.rowNumber);
+      const stableRowKeys = makeStableImportRowKeys(rows);
       if (batch.contentHash) {
         const appliedBatches = await tx.select({ id: importBatches.id, contentHash: importBatches.contentHash, status: importBatches.status })
           .from(importBatches)
@@ -82,8 +86,16 @@ export async function POST(request: Request) {
           .where(and(sql`lower(${importBatches.fileName}) = ${batch.fileName.trim().toLocaleLowerCase()}`, eq(importBatches.status, "applied"), ne(importBatches.id, batch.id)));
         const changed = findChangedAppliedBatch(batch, changedFileBatches);
         if (changed) throw new Error("Файл с таким именем уже переносился с другим содержимым. Повтор заблокирован: сначала требуется сверить обе версии, чтобы не изменить чужую строку и не задвоить операции.");
+        const appliedBatchRows = await tx.select({ id: importBatches.id }).from(importBatches).where(eq(importBatches.status, "applied"));
+        if (appliedBatchRows.length) {
+          const appliedRows = await tx.select({ id: importRows.id, sheetName: importRows.sheetName, rowNumber: importRows.rowNumber, rowType: importRows.rowType, data: importRows.data })
+            .from(importRows)
+            .where(inArray(importRows.batchId, appliedBatchRows.map((applied) => applied.id)));
+          if (findChangedAppliedRow(rows, appliedRows)) {
+            throw new Error("Найдена изменённая строка на том же листе и месте, что в ранее перенесённом файле. Похоже на исправленную или переименованную версию; импорт остановлен, чтобы не задвоить или не заменить операцию.");
+          }
+        }
       }
-      const rows = await tx.select().from(importRows).where(eq(importRows.batchId, batchId)).orderBy(importRows.sheetName, importRows.rowNumber);
       const imported: Record<string, number> = {};
       const issues: { sheet: string; row: number; message: string }[] = [];
       const addImported = (type: string) => { imported[type] = (imported[type] ?? 0) + 1; };
@@ -133,11 +145,11 @@ export async function POST(request: Request) {
           orderedQuantity: String(quantity),
           amountPaid: String(paid),
           note: text(cell(data, ["примечание", "комментарий", "источник", "ссылка"])) .slice(0, 2000),
-          sourceKey: sourceKey(row, sourceNamespace),
+          sourceKey: sourceKey(row, stableRowKeys),
         }).onConflictDoUpdate({ target: purchases.sourceKey, set: { productId: product.id, purchasedAt, orderedQuantity: String(quantity), amountPaid: String(paid) } }).returning();
         const receivedQuantity = getImportedReceivedQuantity(data.cells, quantity);
         const receiptAt = dateValue(data, ["дата получения", "дата приемки", "дата приёмки", "received date"]);
-        const receiptSourceKey = sourceKey(row, sourceNamespace, "receipt");
+        const receiptSourceKey = sourceKey(row, stableRowKeys, "receipt");
         if (shouldDeleteImportedReceipt(receivedQuantity)) {
           await tx.delete(purchaseReceipts).where(eq(purchaseReceipts.sourceKey, receiptSourceKey));
         }
@@ -162,7 +174,7 @@ export async function POST(request: Request) {
         if (!spentAt) { await addIssue(row, "Дата расхода не найдена; строка не перенесена, чтобы не назначать вымышленную дату."); continue; }
         const category = text(cell(data, ["категория", "статья", "название расхода", "что", "комментарий", "расход"])).slice(0, 120) || "Импортированный расход";
         const note = text(cell(data, ["примечание", "комментарий", "описание", "ссылка"])).slice(0, 2000);
-        await tx.insert(expenses).values({ spentAt, category, amount: String(amount), note, sourceKey: sourceKey(row, sourceNamespace) })
+        await tx.insert(expenses).values({ spentAt, category, amount: String(amount), note, sourceKey: sourceKey(row, stableRowKeys) })
           .onConflictDoUpdate({ target: expenses.sourceKey, set: { spentAt, category, amount: String(amount), note } });
         addImported("expenses");
       }
@@ -195,7 +207,7 @@ export async function POST(request: Request) {
           for (const row of group.rows) await addIssue(row, "Дата поставки не найдена; операция не перенесена, чтобы не назначать вымышленную дату.");
           continue;
         }
-        const src = makeImportSourceKey(sourceNamespace, `supply:${key}`);
+        const src = makeImportSourceKey("legacy-workbook-supply-v2", `supply:${key}`);
         const [supply] = await tx.insert(supplies).values({ suppliedAt: group.at, shippingCost: String(group.shippingCost), note: group.note.slice(0, 2000), sourceKey: src })
           .onConflictDoUpdate({ target: supplies.sourceKey, set: { suppliedAt: group.at, shippingCost: String(group.shippingCost), note: group.note.slice(0, 2000) } }).returning();
         await tx.delete(supplyLines).where(and(eq(supplyLines.supplyId, supply.id), like(supplyLines.sourceKey, "import:%")));
@@ -217,7 +229,7 @@ export async function POST(request: Request) {
         if (!product || quantity <= 0) { await addIssue(row, !product ? "Товар списания не найден в каталоге." : "Не найдено количество списания."); continue; }
         const writtenOffAt = dateValue(data, ["дата списания", "дата", "date"]);
         if (!writtenOffAt) { await addIssue(row, "Дата списания не найдена; строка не перенесена, чтобы не назначать вымышленную дату."); continue; }
-        await tx.insert(manualWriteoffs).values({ productId: product.id, writtenOffAt, quantity: String(quantity), note: reason.slice(0, 2000), sourceKey: sourceKey(row, sourceNamespace) })
+        await tx.insert(manualWriteoffs).values({ productId: product.id, writtenOffAt, quantity: String(quantity), note: reason.slice(0, 2000), sourceKey: sourceKey(row, stableRowKeys) })
           .onConflictDoUpdate({ target: manualWriteoffs.sourceKey, set: { productId: product.id, writtenOffAt, quantity: String(quantity), note: reason.slice(0, 2000) } });
         addImported("writeoffs");
       }
@@ -238,7 +250,7 @@ export async function POST(request: Request) {
         if (amountIssue === "missing") { await addIssue(row, "У доставленного заказа нет суммы продажи; строка не перенесена, чтобы не списывать себестоимость без выручки."); continue; }
         if (!orderDate && !deliveredAt) { await addIssue(row, "Дата заказа не найдена; строка не перенесена, чтобы не назначать вымышленную дату."); continue; }
         if (isDeliveredSaleStatus(status) && !deliveredAt) { await addIssue(row, "Дата передачи покупателю не найдена; доставленный заказ не перенесён, чтобы не начать 21-дневный срок с неверной даты."); continue; }
-        saleSources.push({ row, data, orderId: orderId || `legacy:${row.sheetName}:${row.rowNumber}`, productSku: sku, status, quantity, amount, orderDate: orderDate ?? deliveredAt, deliveredAt });
+        saleSources.push({ row, data, orderId: orderId || `legacy:${stableRowKeys.get(row.id)}`, productSku: sku, status, quantity, amount, orderDate: orderDate ?? deliveredAt, deliveredAt });
       }
       const saleGroups = new Map<string, SaleSource[]>();
       for (const sale of saleSources) saleGroups.set(sale.orderId, [...(saleGroups.get(sale.orderId) ?? []), sale]);
@@ -289,12 +301,12 @@ export async function POST(request: Request) {
         const previousItems = await tx.select().from(postingItems).where(eq(postingItems.postingId, posting.id));
         await tx.delete(postingItems).where(and(eq(postingItems.postingId, posting.id), like(postingItems.sourceKey, "import:%")));
         for (const { sale, productId } of mappedLines) {
-          const rowKey = sourceKey(sale.row, sourceNamespace);
+          const rowKey = sourceKey(sale.row, stableRowKeys);
           const previousItem = previousItems.find((item) => item.offerId === sale.productSku);
           const isMarketplaceBuyout = isMarketplaceBuyoutStatus(sale.status) || previousItem?.isMarketplaceBuyout === true;
           await tx.insert(postingItems).values({
             postingId: posting.id,
-            externalKey: `legacy:${sale.row.sheetName}:${sale.row.rowNumber}`.slice(0, 240),
+            externalKey: `legacy:${stableRowKeys.get(sale.row.id)}`.slice(0, 240),
             sourceKey: `${rowKey}:sale-line`,
             productId,
             offerId: sale.productSku,
@@ -335,11 +347,11 @@ export async function POST(request: Request) {
         const key = `${row.sheetName}:${warehouse}:${countedAt}`;
         const group = stocktakeGroups.get(key) ?? { first: row, warehouse, countedAt, lines: [] };
         const expected = quantityValue(cell(data, ["ожидаемый остаток", "расчетный остаток", "расчётный остаток", "expected quantity"]));
-        group.lines.push({ productId: product.id, expected, actual, source: sourceKey(row, sourceNamespace) });
+        group.lines.push({ productId: product.id, expected, actual, source: sourceKey(row, stableRowKeys) });
         stocktakeGroups.set(key, group);
       }
       for (const [key, group] of stocktakeGroups) {
-        const [stocktake] = await tx.insert(stocktakes).values({ warehouse: group.warehouse, countedAt: group.countedAt, note: `Импортирована инвентаризация ${key}`, sourceKey: makeImportSourceKey(sourceNamespace, `stocktake:${key}`) })
+        const [stocktake] = await tx.insert(stocktakes).values({ warehouse: group.warehouse, countedAt: group.countedAt, note: `Импортирована инвентаризация ${key}`, sourceKey: makeImportSourceKey("legacy-workbook-stocktake-v2", `stocktake:${key}`) })
           .onConflictDoUpdate({ target: stocktakes.sourceKey, set: { warehouse: group.warehouse, countedAt: group.countedAt } }).returning();
         await tx.delete(stocktakeLines).where(and(eq(stocktakeLines.stocktakeId, stocktake.id), like(stocktakeLines.sourceKey, "import:%")));
         for (const line of group.lines) await tx.insert(stocktakeLines).values({ stocktakeId: stocktake.id, productId: line.productId, expectedQuantity: String(line.expected), actualQuantity: String(line.actual), sourceKey: line.source });
@@ -355,7 +367,7 @@ export async function POST(request: Request) {
         const returnedAtText = parseImportDate(cell(data, ["дата возврата", "дата", "returned at"]));
         const receivedAtText = parseImportDate(cell(data, ["дата получения продавцом", "получен продавцом", "received by seller"]));
         const availableAtText = parseImportDate(cell(data, ["дата доступности ozon", "доступен на ozon", "available at ozon"]));
-        const legacyKey = sourceKey(row, sourceNamespace);
+        const legacyKey = sourceKey(row, stableRowKeys);
         const returnId = text(cell(data, ["идентификатор возврата", "id возврата", "return id"]));
         const externalId = (returnId || `legacy-return:${legacyKey}`).slice(0, 240);
         const postingNumber = text(cell(data, ["номер отправления", "номер заказа", "posting number", "id заказа"])) || null;

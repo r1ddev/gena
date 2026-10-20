@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import ExcelJS from "exceljs";
 import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -15,8 +16,7 @@ const mappedSkuB = `MAP-B-${tag}`;
 const ozonSku = `OZ-${tag}`;
 const ozonSkuB = `OZ-B-${tag}`;
 const today = new Date().toISOString().slice(0, 10);
-const stocktakeCsv = `SKU,Warehouse,Counted At,Expected Quantity,Actual Quantity\n${mappedSku},seller,${today},0,5\n`;
-const stocktakeHash = createHash("sha256").update(stocktakeCsv).digest("hex");
+const stocktakeWorkbookCache = new Map();
 
 async function api(path, { method = "GET", body, form, expectedStatus = 200 } = {}) {
   const response = await fetch(`${base}${path}`, {
@@ -42,9 +42,22 @@ function psql(query) {
 
 function sqlValue(value) { return `'${String(value).replaceAll("'", "''")}'`; }
 
-async function uploadStocktake() {
+async function stocktakeWorkbook(actualQuantity) {
+  if (!stocktakeWorkbookCache.has(actualQuantity)) {
+    const workbook = new ExcelJS.Workbook();
+    workbook.created = new Date("2020-01-01T00:00:00.000Z");
+    workbook.modified = new Date("2020-01-01T00:00:00.000Z");
+    const sheet = workbook.addWorksheet("Stocktake");
+    sheet.addRow(["SKU", "Warehouse", "Counted At", "Expected Quantity", "Actual Quantity"]);
+    sheet.addRow([mappedSku, "seller", today, 0, actualQuantity]);
+    stocktakeWorkbookCache.set(actualQuantity, Buffer.from(await workbook.xlsx.writeBuffer()));
+  }
+  return stocktakeWorkbookCache.get(actualQuantity);
+}
+
+async function uploadStocktake(actualQuantity = 5, fileName = `stocktakes-smoke-${tag}.xlsx`) {
   const form = new FormData();
-  form.set("file", new File([stocktakeCsv], `stocktakes-smoke-${tag}.csv`, { type: "text/csv" }));
+  form.set("file", new File([await stocktakeWorkbook(actualQuantity)], fileName, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
   const { payload } = await api("/api/import", { method: "POST", form, expectedStatus: 201 });
   assert.equal(payload.summary.byType.stocktakes, 1);
   return payload.batchId;
@@ -71,7 +84,7 @@ async function cleanup() {
   await psql(`DELETE FROM expenses WHERE category=${sqlValue(`Smoke test ${tag}`)};`);
   await psql(`DELETE FROM ozon_finance_accruals WHERE external_key LIKE ${sqlValue(`smoke-finance:${tag}:%`)};`);
   await psql(`DELETE FROM external_items WHERE external_key LIKE ${sqlValue(`smoke-external:${tag}:%`)};`);
-  await psql(`DELETE FROM import_batches WHERE content_hash=${sqlValue(stocktakeHash)};`);
+  await psql(`DELETE FROM import_batches WHERE file_name IN (${sqlValue(`stocktakes-smoke-${tag}.xlsx`)}, ${sqlValue(`stocktakes-renamed-smoke-${tag}.xlsx`)});`);
   await psql(`DELETE FROM products WHERE sku IN (${testSkus});`);
 }
 
@@ -115,7 +128,7 @@ async function main() {
     let dashboard = (await api("/api/dashboard")).payload;
     assert.equal(dashboard.cashBalance, "-120.00");
     assert.equal(dashboard.confirmedProfit, "-60.00");
-    assert.equal(dashboard.sharedExpenseCoefficient, "0.20");
+    assert.equal(dashboard.sharedExpenseCoefficient, "0.2000");
     assert.equal(dashboard.products.find((item) => item.sku === productSku).sellerStock, "0.000");
     assert.equal(dashboard.products.find((item) => item.sku === productSku).ozonStock, "1.000");
 
@@ -127,7 +140,7 @@ async function main() {
     await psql(`DELETE FROM supplies WHERE id=${sqlValue(supply.id)};`);
     dashboard = (await api("/api/dashboard")).payload;
     assert.equal(dashboard.cashBalance, "-110.00");
-    assert.equal(dashboard.sharedExpenseCoefficient, "0.10");
+    assert.equal(dashboard.sharedExpenseCoefficient, "0.1000");
     assert.equal(dashboard.products.find((item) => item.sku === productSku).sellerStock, "2.000");
     assert.equal(dashboard.products.find((item) => item.sku === productSku).ozonStock, "0.000");
 
@@ -181,12 +194,20 @@ async function main() {
     assert.match(duplicateApply.payload.error, /уже был перенесён/);
     const refreshed = (await api("/api/stocktakes")).payload.items.find((item) => item.id === importedTake.id);
     assert.ok(refreshed.lines[0].resolvedAt, "re-upload preserves the accepted inventory resolution");
+    const changedBatch = await uploadStocktake(6);
+    const changedFileApply = await api("/api/import/apply", { method: "POST", body: { batchId: changedBatch }, expectedStatus: 400 });
+    assert.match(changedFileApply.payload.error, /с таким именем уже переносился/);
+    const renamedBatch = await uploadStocktake(6, `stocktakes-renamed-smoke-${tag}.xlsx`);
+    const renamedFileApply = await api("/api/import/apply", { method: "POST", body: { batchId: renamedBatch }, expectedStatus: 400 });
+    assert.match(renamedFileApply.payload.error, /переименованной или исправленной версией/);
+    const unchangedTake = (await api("/api/stocktakes")).payload.items.find((item) => item.id === importedTake.id);
+    assert.equal(unchangedTake.lines[0].actualQuantity, "5.000", "changed same-name import cannot replace a previous line");
     const importedProductId = await psql(`SELECT id FROM products WHERE sku=${sqlValue(mappedSku)} LIMIT 1;`);
     assert.ok(importedProductId);
     dashboard = (await api("/api/dashboard")).payload;
     assert.equal(dashboard.products.find((item) => item.sku === mappedSku).sellerStock, "5.000");
 
-    console.log("Local integration smoke passed: balance breakdown, direct-delete recalculation, exact-SKU finance mapping, concurrent import protection, and repeat-import protection.");
+    console.log("Local integration smoke passed: balance breakdown, direct-delete recalculation, exact-SKU finance mapping, concurrent import protection, repeat-import protection, and same-name/renamed-file correction guards.");
   } finally {
     await cleanup();
   }
