@@ -22,6 +22,34 @@
       "when": 1792458620766,
       "tag": "0002_nifty_the_hunter",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792465872630,
+      "tag": "0003_item-level-marketplace-buyout",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792476617267,
+      "tag": "0004_daily_stocktake",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792477254486,
+      "tag": "0005_unique_stocktake_lines",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792478586127,
+      "tag": "0006_manual_return_reconciliation",
+      "breakpoints": true
     }
   ]
 }

@@ -167,6 +167,8 @@ export const postingItems = pgTable(
     quantity: quantity("quantity"),
     price: money("price"),
     movementEnabled: boolean("movement_enabled").notNull().default(true),
+    isMarketplaceBuyout: boolean("is_marketplace_buyout").notNull().default(false),
+    marketplaceBuyoutAt: timestamp("marketplace_buyout_at", { withTimezone: true }),
     sourceKey: text("source_key").unique(),
     raw: jsonb("raw").$type<Record<string, unknown>>().notNull().default({}),
   },
@@ -207,6 +209,7 @@ export const returns = pgTable(
     returnedAt: timestamp("returned_at", { withTimezone: true }),
     receivedBySellerAt: timestamp("received_by_seller_at", { withTimezone: true }),
     availableAtOzon: timestamp("available_at_ozon", { withTimezone: true }),
+    manualReconciliationFields: text("manual_reconciliation_fields").array().notNull().default(sql`ARRAY[]::text[]`),
     raw: jsonb("raw").$type<Record<string, unknown>>().notNull().default({}),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -249,7 +252,7 @@ export const stocktakes = pgTable("stocktakes", {
   note: text("note").notNull().default(""),
   sourceKey: text("source_key").unique(),
   createdAt: createdAt(),
-});
+}, (table) => [uniqueIndex("stocktakes_warehouse_counted_at_uq").on(table.warehouse, table.countedAt)]);
 
 export const stocktakeLines = pgTable(
   "stocktake_lines",
@@ -264,7 +267,7 @@ export const stocktakeLines = pgTable(
     sourceKey: text("source_key").unique(),
     createdAt: createdAt(),
   },
-  (table) => [index("stocktake_lines_stocktake_idx").on(table.stocktakeId)],
+  (table) => [index("stocktake_lines_stocktake_idx").on(table.stocktakeId), uniqueIndex("stocktake_lines_product_uq").on(table.stocktakeId, table.productId)],
 );
 
 export const stockAdjustments = pgTable("stock_adjustments", {

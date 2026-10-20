@@ -16,7 +16,8 @@ import {
   supplies,
   supplyLines,
 } from "@/db/schema";
-import { calculateAccounting } from "./accounting";
+import { calculateAccounting, hasAccountablePostingItems } from "./accounting";
+import { isOzonWriteoffCompensation } from "@/ozon/finance";
 
 export async function getAccountingSnapshot(now = new Date()) {
   const [productRows, purchaseRows, receiptRows, supplyRows, supplyLineRows, expenseRows, postingRows, postingItemRows, financeRows, returnRows, manualRows, ozonWriteoffRows, adjustmentRows, externalRows] = await Promise.all([
@@ -37,8 +38,10 @@ export async function getAccountingSnapshot(now = new Date()) {
   ]);
 
   const postingIdByExternalId = new Map(postingRows.map((posting) => [posting.externalId, posting.id]));
+  const postingProductPairs = new Set(postingItemRows.flatMap((item) => item.productId ? [`${item.postingId}\u0000${item.productId}`] : []));
   const productIdByPurchaseId = new Map(purchaseRows.map((purchase) => [purchase.id, purchase.productId]));
   const dispositionByExternalKey = new Map(externalRows.map((item) => [item.externalKey, item.disposition]));
+  const ignoredOzonSkus = new Set(externalRows.flatMap((item) => item.disposition === "ignored" && item.ozonSku ? [item.ozonSku] : []));
   const itemsByPosting = new Map<string, typeof postingItemRows>();
   for (const item of postingItemRows) itemsByPosting.set(item.postingId, [...(itemsByPosting.get(item.postingId) ?? []), item]);
   const result = calculateAccounting({
@@ -52,40 +55,65 @@ export async function getAccountingSnapshot(now = new Date()) {
       ...supplyRows.map((supply) => ({ productId: "", quantity: "0", shippingCost: supply.shippingCost, suppliedAt: supply.suppliedAt })),
       ...supplyLineRows.map((line) => ({ productId: line.productId, quantity: line.quantity, shippingCost: "0", suppliedAt: supplyRows.find((supply) => supply.id === line.supplyId)?.suppliedAt })),
     ],
-    expenses: expenseRows.map(({ amount }) => ({ amount })),
+    expenses: expenseRows.map(({ amount, spentAt }) => ({ amount, spentAt })),
     postings: postingRows.map(({ id, status, deliveredAt, marketplaceBuyoutAt, isMarketplaceBuyout }) => ({
       id,
       status,
       deliveredAt: deliveredAt?.toISOString() ?? null,
       marketplaceBuyoutAt: marketplaceBuyoutAt?.toISOString() ?? null,
       isMarketplaceBuyout,
-      accountingEnabled: (itemsByPosting.get(id) ?? []).length > 0 && (itemsByPosting.get(id) ?? []).every((item) => item.productId !== null && dispositionByExternalKey.get(item.externalKey) !== "ignored"),
+      accountingEnabled: hasAccountablePostingItems((itemsByPosting.get(id) ?? []).map((item) => ({
+        productId: item.productId,
+        ignored: dispositionByExternalKey.get(item.externalKey) === "ignored",
+      }))),
     })),
-    postingItems: postingItemRows.map(({ postingId, externalKey, productId, quantity, price, movementEnabled }) => ({
+    postingItems: postingItemRows.map(({ postingId, externalKey, productId, quantity, price, movementEnabled, ozonSku, isMarketplaceBuyout, marketplaceBuyoutAt }) => ({
       postingId,
       productId,
       quantity,
       price,
       movementEnabled,
+      ozonSku,
+      isMarketplaceBuyout,
+      marketplaceBuyoutAt: marketplaceBuyoutAt?.toISOString() ?? null,
       ignored: dispositionByExternalKey.get(externalKey) === "ignored",
     })),
-    financeAccruals: financeRows.map(({ postingNumber, productId, accruedCategory, amount }) => ({
-      postingId: postingNumber ? postingIdByExternalId.get(postingNumber) ?? null : null,
-      productId,
-      amount,
-      category: accruedCategory,
-    })),
-    returns: returnRows.map(({ postingNumber, productId, quantity, destination, returnedAt, receivedBySellerAt, availableAtOzon }) => ({
-      postingId: postingNumber ? postingIdByExternalId.get(postingNumber) ?? null : null,
+    financeAccruals: financeRows.map(({ externalKey, postingNumber, productId, accruedCategory, typeId, amount, accrualDate, raw }) => {
+      const skuMarkerIndex = externalKey.lastIndexOf(":sku:");
+      const ozonSku = skuMarkerIndex < 0 ? null : externalKey.slice(skuMarkerIndex + 5).split(":", 1)[0];
+      return {
+        postingId: postingNumber ? postingIdByExternalId.get(postingNumber) ?? null : null,
+        productId,
+        ozonSku,
+        amount,
+        category: accruedCategory,
+        accrualDate,
+        isOzonWriteoffCompensation: isOzonWriteoffCompensation({ typeId, raw }),
+        ignored: Boolean(ozonSku && ignoredOzonSkus.has(ozonSku) && !productId),
+      };
+    }),
+    returns: returnRows.map(({ externalId, postingNumber, productId, quantity, destination, returnedAt, receivedBySellerAt, availableAtOzon }) => {
+      const candidatePostingId = postingNumber ? postingIdByExternalId.get(postingNumber) ?? null : null;
+      const postingId = candidatePostingId && productId && postingProductPairs.has(`${candidatePostingId}\u0000${productId}`) ? candidatePostingId : null;
+      return {
+        externalId,
+        postingId,
+        productId,
+        quantity,
+        destination,
+        returnedAt: returnedAt?.toISOString() ?? null,
+        receivedBySellerAt: receivedBySellerAt?.toISOString() ?? null,
+        availableAtOzon: availableAtOzon?.toISOString() ?? null,
+      };
+    }),
+    manualWriteoffs: manualRows.map(({ productId, quantity, writtenOffAt }) => ({ productId, quantity, writtenOffAt })),
+    ozonWriteoffs: ozonWriteoffRows.map(({ productId, quantity, occurredAt, compensationStatus, compensationAmount }) => ({
       productId,
       quantity,
-      destination,
-      returnedAt: returnedAt?.toISOString() ?? null,
-      receivedBySellerAt: receivedBySellerAt?.toISOString() ?? null,
-      availableAtOzon: availableAtOzon?.toISOString() ?? null,
+      occurredAt: occurredAt?.toISOString() ?? null,
+      compensationStatus,
+      compensationAmount,
     })),
-    manualWriteoffs: manualRows.map(({ productId, quantity, writtenOffAt }) => ({ productId, quantity, writtenOffAt })),
-    ozonWriteoffs: ozonWriteoffRows.map(({ productId, quantity, occurredAt }) => ({ productId, quantity, occurredAt: occurredAt?.toISOString() ?? null })),
     stockAdjustments: adjustmentRows.map(({ productId, warehouse, actualQuantity, adjustedAt }) => ({ productId, warehouse, actualQuantity, countedAt: adjustedAt })),
   }, now);
 

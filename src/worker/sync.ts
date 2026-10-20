@@ -15,8 +15,10 @@ import {
 } from "@/db/schema";
 import { decryptSecret } from "@/security/secrets";
 import { ozonPost } from "@/ozon/client";
-import { financeAccrualPostingNumber, matchBuyoutLines, staleOzonAccrualKeys } from "@/ozon/finance";
+import { financeAccrualPostingNumber, groupFinanceItemFees, matchBuyoutLines, staleOzonAccrualKeys } from "@/ozon/finance";
 import { observeBuyerHandoffAt } from "@/ozon/postings";
+import { chooseReturnPostingNumber } from "@/ozon/returns";
+import { chooseExternalProductRecord, dispositionAfterProductLink, exactProductLinkForOffer, externalProductKey, resolveExternalProductLink } from "@/ozon/external-product";
 
 type JsonRecord = Record<string, unknown>;
 type ExternalProduct = { offer_id?: unknown; sku?: unknown; name?: unknown; quantity?: unknown; price?: unknown; is_marketplace_buyout?: unknown };
@@ -31,37 +33,79 @@ const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
 const addDays = (date: Date, amount: number) => new Date(date.getTime() + amount * 24 * 60 * 60 * 1000);
 
 function externalKey(offerId: string, sku: string) {
-  return `offer:${offerId || "?"}|sku:${sku || "?"}`;
+  return externalProductKey(offerId, sku);
 }
 
 async function resolveExternalProduct(product: ExternalProduct, raw: JsonRecord) {
   const offerId = asString(product.offer_id);
   const sku = asString(product.sku);
   const key = externalKey(offerId, sku);
-  const links = await db.select().from(productLinks).where(eq(productLinks.offerId, offerId));
-  const skuLinks = sku ? await db.select().from(productLinks).where(eq(productLinks.ozonSku, sku)) : [];
-  const link = links.find((candidate) => candidate.ozonSku === sku)
+  const [exactRows, skuRows, links, skuLinks] = await Promise.all([
+    offerId ? db.select().from(externalItems).where(eq(externalItems.externalKey, key)).limit(1) : Promise.resolve([]),
+    sku ? db.select().from(externalItems).where(eq(externalItems.ozonSku, sku)) : Promise.resolve([]),
+    offerId ? db.select().from(productLinks).where(eq(productLinks.offerId, offerId)) : Promise.resolve([]),
+    sku ? db.select().from(productLinks).where(eq(productLinks.ozonSku, sku)) : Promise.resolve([]),
+  ]);
+  const exact = exactRows[0] ?? skuRows.find((item) => item.externalKey === key);
+  const exactLink = exactProductLinkForOffer(links, offerId, sku);
+  // A deliberate ignore follows Ozon's SKU across offer-id changes; a later explicit mapping for this exact key overrides it.
+  const previous = chooseExternalProductRecord(exact, skuRows);
+  if (previous?.disposition === "ignored" && !exactLink) {
+    await db.insert(externalItems).values({
+      externalKey: key,
+      offerId,
+      ozonSku: sku,
+      title: asString(product.name, "Без названия"),
+      disposition: "ignored",
+      productId: null,
+      raw,
+      lastSeenAt: new Date(),
+    }).onConflictDoUpdate({
+      target: externalItems.externalKey,
+      set: { title: asString(product.name, "Без названия"), disposition: "ignored", productId: null, raw, lastSeenAt: new Date() },
+    });
+    return { externalKey: key, offerId, sku, ...resolveExternalProductLink("ignored", null, null) };
+  }
+
+  const link = exactLink
     ?? skuLinks.find((candidate) => candidate.ozonSku === sku)
     ?? links.find((candidate) => !candidate.ozonSku);
-  if (link) return { externalKey: key, offerId, sku, productId: link.productId };
+  const resolutionDisposition = exactLink
+    ? dispositionAfterProductLink(previous?.disposition ?? "pending")
+    : previous?.disposition ?? "pending";
+  const resolution = resolveExternalProductLink(resolutionDisposition, previous?.productId ?? null, link?.productId ?? null);
+  if (link) {
+    const disposition = dispositionAfterProductLink(previous?.disposition ?? "pending");
+    await db.insert(externalItems).values({
+      externalKey: key,
+      offerId,
+      ozonSku: sku,
+      title: asString(product.name, "Без названия"),
+      disposition,
+      productId: resolution.productId,
+      raw,
+      lastSeenAt: new Date(),
+    }).onConflictDoUpdate({
+      target: externalItems.externalKey,
+      set: { title: asString(product.name, "Без названия"), disposition, productId: resolution.productId, raw, lastSeenAt: new Date() },
+    });
+    return { externalKey: key, offerId, sku, ...resolution };
+  }
 
-  const existing = await db.select().from(externalItems).where(eq(externalItems.externalKey, key)).limit(1);
-  const previous = existing[0];
-  const productId = previous?.disposition === "mapped" || previous?.disposition === "created" ? previous.productId : null;
   await db.insert(externalItems).values({
     externalKey: key,
     offerId,
     ozonSku: sku,
     title: asString(product.name, "Без названия"),
     disposition: previous?.disposition ?? "pending",
-    productId,
+    productId: resolution.productId,
     raw,
     lastSeenAt: new Date(),
   }).onConflictDoUpdate({
     target: externalItems.externalKey,
     set: { title: asString(product.name, "Без названия"), raw, lastSeenAt: new Date() },
   });
-  return { externalKey: key, offerId, sku, productId };
+  return { externalKey: key, offerId, sku, ...resolution };
 }
 
 async function upsertFboPosting(posting: FboPosting) {
@@ -192,27 +236,46 @@ async function importReturns(credentials: OzonCredentials, from: Date, to: Date,
     );
     const page = response.returns ?? [];
     if (page.length === 0) break;
-    for (const item of page) {
+    const prepared = (await Promise.all(page.map(async (item) => {
       const id = asString(item.id);
-      if (!id) continue;
+      if (!id) return null;
       const product = item.product ?? {};
+      return { item, id, product, mapped: await resolveExternalProduct(product, item as JsonRecord), destination: guessReturnDestination(item) };
+    }))).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    const ids = prepared.map((entry) => entry.id);
+    const existingRows = ids.length ? await db.select().from(returns).where(inArray(returns.externalId, ids)) : [];
+    const oldById = new Map(existingRows.map((entry) => [entry.externalId, entry]));
+    const candidateNumbers = [...new Set(prepared.flatMap((entry) => [
+      asString(entry.item.posting_number), oldById.get(entry.id)?.postingNumber ?? "",
+    ]).filter(Boolean))];
+    const candidatePostingItems = candidateNumbers.length
+      ? await db.select({ postingNumber: postings.externalId, productId: postingItems.productId, externalKey: postingItems.externalKey })
+        .from(postings).innerJoin(postingItems, eq(postingItems.postingId, postings.id)).where(inArray(postings.externalId, candidateNumbers))
+      : [];
+    const itemsByPosting = new Map<string, typeof candidatePostingItems>();
+    for (const postingItem of candidatePostingItems) itemsByPosting.set(postingItem.postingNumber, [...(itemsByPosting.get(postingItem.postingNumber) ?? []), postingItem]);
+    for (const { item, id, product, mapped, destination } of prepared) {
       const offerId = asString(product.offer_id);
       const sku = asString(product.sku);
-      const mapped = await resolveExternalProduct(product, item as JsonRecord);
-      const destination = guessReturnDestination(item);
-      const existing = await db.select().from(returns).where(eq(returns.externalId, id)).limit(1);
-      const old = existing[0];
+      const old = oldById.get(id);
+      const apiPostingNumber = asString(item.posting_number) || null;
+      const postingNumber = chooseReturnPostingNumber(apiPostingNumber, old?.postingNumber ?? null, (candidate) =>
+        (itemsByPosting.get(candidate) ?? []).some((postingItem) => mapped.productId
+          ? postingItem.productId === mapped.productId
+          : postingItem.externalKey === mapped.externalKey),
+        old?.manualReconciliationFields.includes("postingNumber") ?? false,
+      );
       const returnedAtValue = item.logistic?.return_date;
       const status = asString(item.visual?.status?.sys_name, asString(item.visual?.status?.display_name, "unknown"));
       await db.insert(returns).values({
         externalId: id,
-        postingNumber: asString(item.posting_number) || null,
+        postingNumber,
         externalKey: mapped.externalKey,
         productId: mapped.productId,
         offerId,
         ozonSku: sku,
         quantity: String(Math.max(0, asNumber(product.quantity))),
-        destination: old?.destination === "unknown" ? destination : old?.destination ?? destination,
+        destination: old?.manualReconciliationFields.includes("destination") ? old.destination : old?.destination === "unknown" ? destination : old?.destination ?? destination,
         status,
         returnedAt: typeof returnedAtValue === "string" ? new Date(returnedAtValue) : old?.returnedAt ?? null,
         receivedBySellerAt: old?.receivedBySellerAt ?? null,
@@ -222,13 +285,13 @@ async function importReturns(credentials: OzonCredentials, from: Date, to: Date,
       }).onConflictDoUpdate({
         target: returns.externalId,
         set: {
-          postingNumber: asString(item.posting_number) || null,
+          postingNumber,
           externalKey: mapped.externalKey,
           productId: mapped.productId,
           offerId,
           ozonSku: sku,
           quantity: String(Math.max(0, asNumber(product.quantity))),
-          destination: old?.destination === "unknown" ? destination : old?.destination ?? destination,
+          destination: old?.manualReconciliationFields.includes("destination") ? old.destination : old?.destination === "unknown" ? destination : old?.destination ?? destination,
           status,
           returnedAt: typeof returnedAtValue === "string" ? new Date(returnedAtValue) : old?.returnedAt ?? null,
           receivedBySellerAt: old?.receivedBySellerAt ?? null,
@@ -296,16 +359,21 @@ async function importDailyAccruals(credentials: OzonCredentials, from: Date, to:
         for (const itemFee of itemFees.fees) {
           const sku = asString(itemFee.sku);
           const fees = itemFee.fees ?? [];
-          const amount = fees.reduce((sum, fee) => sum + Math.round(moneyAmount(fee.accrued) * 100), 0) / 100;
-          if (amount === 0 && fees.length === 0) continue;
           const external = sku
             ? await resolveExternalProduct({ sku, name: `Ozon SKU ${sku}` }, itemFee as JsonRecord)
             : { productId: null };
-          financeRows.push({ suffix: `sku:${sku}`, productId: external.productId, amount, typeId: fees.map((fee) => asString(fee.type_id)).sort().join(",") });
+          for (const feeGroup of groupFinanceItemFees(fees)) {
+            financeRows.push({
+              suffix: `sku:${sku}:type:${feeGroup.typeId}`,
+              productId: external.productId,
+              amount: feeGroup.amount,
+              typeId: feeGroup.typeId,
+            });
+          }
         }
       } else {
         const totalAmount = accrual.total_amount as { amount?: unknown } | undefined;
-        financeRows.push({ suffix: "", productId: null, amount: moneyAmount(totalAmount), typeId: "" });
+        financeRows.push({ suffix: "", productId: null, amount: moneyAmount(totalAmount), typeId: accrualId });
       }
 
       for (const financeRow of financeRows) {
@@ -423,8 +491,7 @@ async function importWriteoffs(credentials: OzonCredentials, from: Date, to: Dat
       const happenedAt = asString(item.date);
       const key = `${postingNumber}:${sku}:${happenedAt}:${asString(item.dispose_reason)}`;
       const candidate = { offer_id: "", sku, name: `Ozon SKU ${sku}` };
-      const productMatch = await db.select().from(productLinks).where(eq(productLinks.ozonSku, sku)).limit(1);
-      const productId = productMatch[0]?.productId ?? (await resolveExternalProduct(candidate, item)).productId;
+      const productId = (await resolveExternalProduct(candidate, item)).productId;
       await db.insert(ozonWriteoffs).values({
         externalId: key,
         productId,

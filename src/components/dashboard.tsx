@@ -7,10 +7,10 @@ import { asRecord, displayValue, findRows, requestJson, type JsonRecord } from "
 import { PageHeader } from "./page-header";
 import { UnmatchedItems } from "./unmatched-items";
 
-type Overview = JsonRecord & { products?: unknown; recentOrders?: unknown; pendingReturns?: unknown; reconciliationErrors?: unknown };
+type Overview = JsonRecord & { products?: unknown; recentOrders?: unknown; pendingReturns?: unknown; reconciliationErrors?: unknown; profitReconciliationIssues?: unknown };
 
 function numeric(value: unknown): number { const result = Number(value ?? 0); return Number.isFinite(result) ? result : 0; }
-function metric(value: unknown) { return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(numeric(value)) + " ₽"; }
+function metric(value: unknown) { return value === null || value === undefined ? "Не рассчитано" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(numeric(value)) + " ₽"; }
 function signedMetric(value: unknown) {
   const amount = numeric(value);
   const prefix = amount > 0 ? "+" : amount < 0 ? "−" : "";
@@ -80,6 +80,9 @@ export function Dashboard() {
   const cashBreakdown = asRecord(overview?.cashBreakdown);
   const profitBreakdown = asRecord(overview?.profitBreakdown);
   const warnings = Array.isArray(overview?.reconciliationErrors) ? overview!.reconciliationErrors as unknown[] : [];
+  const costingIssues = Array.isArray(overview?.costingIssues) ? overview!.costingIssues as JsonRecord[] : [];
+  const profitReconciliationIssues = Array.isArray(overview?.profitReconciliationIssues) ? overview!.profitReconciliationIssues as JsonRecord[] : [];
+  const unrecognizedFinanceAmount = numeric(overview?.unrecognizedFinanceAmount);
 
   return <>
     <PageHeader eyebrow="Панель управления" title="Обзор магазина" description="Коротко о деньгах, остатках и текущих операциях в вашем магазине." actions={<div className="toolbar"><button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Обновить</button><button className="button" onClick={() => void sync()} disabled={syncing}><RefreshCw size={14} className={syncing ? "spin" : ""} />{syncing ? "Запускаем…" : "Обновить из Ozon"}</button></div>} />
@@ -89,20 +92,22 @@ export function Dashboard() {
     {loading && !overview ? <div className="metrics-grid">{[1, 2, 3, 4].map((item) => <div key={item} className="panel metric-card"><div className="loading-line" style={{ width: "65%" }} /><div style={{ height: 19 }} /><div className="loading-line" style={{ width: "45%", height: 22 }} /></div>)}</div> : error && !overview ? <div className="panel empty-state"><div><div className="empty-icon"><AlertTriangle size={19} /></div><div className="empty-title">Обзор пока недоступен</div><p className="empty-description">Обновите страницу после запуска базы данных или повторите загрузку.</p><button className="button secondary" style={{ marginTop: 12 }} onClick={() => void refresh()}>Повторить</button></div></div> : <>
       <div className="metrics-grid">
         <div className="panel metric-card" style={{ "--metric-bg": "#e8f6ee" } as React.CSSProperties}><Wallet className="metric-icon" size={18} /><div className="metric-label">Расчётный денежный баланс</div><div className="metric-value">{metric(overview?.cashBalance)}</div><div className="metric-help">Покупки, расходы и признанные операции Ozon</div></div>
-        <div className="panel metric-card" style={{ "--metric-bg": "#ecf7f2" } as React.CSSProperties}><TrendingUp className="metric-icon" size={18} /><div className="metric-label">Фактическая прибыль</div><div className="metric-value">{metric(overview?.confirmedProfit)}</div><div className="metric-help">По завершённым и признанным операциям</div></div>
+        <div className="panel metric-card" style={{ "--metric-bg": "#ecf7f2" } as React.CSSProperties}><TrendingUp className="metric-icon" size={18} /><div className="metric-label">Фактическая прибыль</div><div className="metric-value">{metric(overview?.confirmedProfit)}</div><div className="metric-help">{profitReconciliationIssues.length ? `${profitReconciliationIssues.length} возвратов требуют сверки` : overview?.confirmedProfit === null ? "Не хватает себестоимости по части товаров" : "По завершённым и признанным операциям"}</div></div>
         <div className="panel metric-card" style={{ "--metric-bg": "#eef5fa" } as React.CSSProperties}><Boxes className="metric-icon" size={18} /><div className="metric-label">Остаток у меня</div><div className="metric-value">{new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(sellerQuantity)} шт.</div><div className="metric-help">Только принятые закупки и полученные возвраты</div></div>
         <div className="panel metric-card" style={{ "--metric-bg": "#fff5e5" } as React.CSSProperties}><ShoppingBag className="metric-icon" size={18} /><div className="metric-label">Предварительные доставки</div><div className="metric-value">{displayValue(preliminary.count ?? overview?.preliminaryOrderCount ?? 0)}</div><div className="metric-help">Заказы младше 21 дня · ожидают признания</div></div>
       </div>
 
       {(cashBreakdown || profitBreakdown) && <div className="dashboard-grid" style={{ marginBottom: 16 }}>
-        <BreakdownCard title="Из чего складывается баланс" description="Расчётный денежный итог" breakdown={cashBreakdown} labels={{
-          recognizedOzon: "Признанные операции Ozon",
+        <BreakdownCard title="Из чего складывается баланс" description="Компенсации выделены из начислений Ozon и не прибавляются повторно" breakdown={cashBreakdown} labels={{
+          recognizedOzonOther: "Прочие признанные начисления Ozon",
+          ozonWriteoffCompensation: "Компенсации Ozon",
           purchases: "Закупки",
           expenses: "Общие расходы",
           supplyShipping: "Доставка поставок",
         }} />
-        <BreakdownCard title="Из чего складывается прибыль" description="Фактическая прибыль после себестоимости" breakdown={profitBreakdown} labels={{
-          recognizedOzon: "Начисления Ozon",
+        <BreakdownCard title="Из чего складывается прибыль" description="Компенсации выделены из начислений Ozon и не прибавляются повторно" breakdown={profitBreakdown} labels={{
+          recognizedOzonOther: "Прочие начисления Ozon",
+          ozonWriteoffCompensation: "Компенсации Ozon",
           soldPurchaseCost: "Закупочная себестоимость продаж",
           soldSharedCosts: "Доля общих расходов в продажах",
           manualLossPurchaseCost: "Закупочная стоимость ручных списаний",
@@ -139,9 +144,13 @@ export function Dashboard() {
             <div className="panel-head"><h2>Проверить</h2><AlertTriangle size={16} color="#b67a15" /></div>
             <div className="panel-body notice-list">
               {warnings.length > 0 && <div className="notice critical"><AlertTriangle size={15} /><span>Есть {warnings.length} отрицательных остатка. Проверьте поставки и складские движения.</span></div>}
+              {costingIssues.length > 0 && <div className="notice critical"><AlertTriangle size={15} /><span>Прибыль не рассчитана: нет полученной закупочной себестоимости у {costingIssues.length} товаров. Проверьте приёмки.</span></div>}
+              {unrecognizedFinanceAmount !== 0 && <div className="notice"><AlertTriangle size={15} /><span>{metric(Math.abs(unrecognizedFinanceAmount))} начислений Ozon не включены в итог и требуют проверки сопоставления.</span></div>}
+              {profitReconciliationIssues.length > 0 && <div className="notice"><AlertTriangle size={15} /><span>{profitReconciliationIssues.length} возвратов меняют остаток или требуют проверки количества; прибыль по ним требует сверки.</span></div>}
               {pendingReturns.length > 0 && <div className="notice"><Clock3 size={15} /><span>{pendingReturns.length} возвратов ожидают обработки или подтверждения получения.</span></div>}
-              {warnings.length === 0 && pendingReturns.length === 0 && <div className="empty-state" style={{ minHeight: 92, padding: 4 }}><div><div className="empty-title">Сейчас всё спокойно</div><p className="empty-description">Здесь появятся расхождения остатков и возвраты, требующие вашего действия.</p></div></div>}
+              {warnings.length === 0 && pendingReturns.length === 0 && costingIssues.length === 0 && profitReconciliationIssues.length === 0 && unrecognizedFinanceAmount === 0 && <div className="empty-state" style={{ minHeight: 92, padding: 4 }}><div><div className="empty-title">Сейчас всё спокойно</div><p className="empty-description">Здесь появятся расхождения остатков и возвраты, требующие вашего действия.</p></div></div>}
               {warnings.length > 0 && <Link href="/catalog" className="button secondary small">Проверить каталог</Link>}
+              {costingIssues.length > 0 && <Link href="/purchases" className="button secondary small">Проверить приёмки</Link>}
               {pendingReturns.length > 0 && <Link href="/returns" className="button secondary small">Открыть возвраты</Link>}
             </div>
           </section>

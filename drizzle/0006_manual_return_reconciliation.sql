@@ -1,0 +1,1 @@
+ALTER TABLE "ozon_returns" ADD COLUMN "manual_reconciliation_fields" text[] DEFAULT ARRAY[]::text[] NOT NULL;

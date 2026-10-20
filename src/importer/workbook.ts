@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { assertXlsxExpandedSize, maximumImportRows } from "./file-limits";
 
 export type ImportRowType = "products" | "purchases" | "supplies" | "expenses" | "sales" | "returns" | "writeoffs" | "stocktakes" | "unknown";
 export type WorkbookImportRow = {
@@ -141,10 +142,12 @@ function parseCsv(text: string): string[][] {
     } else if ((character === "\n" || character === "\r") && !quoted) {
       if (character === "\r" && text[index + 1] === "\n") index += 1;
       row.push(cell); rows.push(row); row = []; cell = "";
+      if (rows.length > maximumImportRows + 1) throw new Error("В файле слишком много строк для одного переноса: максимум 30 000.");
     } else cell += character;
   }
   row.push(cell);
   if (row.some(isPopulated)) rows.push(row);
+  if (rows.length > maximumImportRows + 1) throw new Error("В файле слишком много строк для одного переноса: максимум 30 000.");
   return rows;
 }
 
@@ -154,10 +157,13 @@ export async function parseImportBuffer(buffer: Buffer, fileName: string) {
   if (extension === "csv") {
     sheets = [{ name: "CSV", rows: parseCsv(buffer.toString("utf8")) }];
   } else if (extension === "xlsx") {
+    assertXlsxExpandedSize(buffer);
     const workbook = new ExcelJS.Workbook();
     const bytes = new Uint8Array(buffer.byteLength);
     bytes.set(buffer);
     await workbook.xlsx.load(bytes.buffer);
+    const sourceRows = workbook.worksheets.reduce((count, sheet) => count + sheet.actualRowCount, 0);
+    if (sourceRows > maximumImportRows + workbook.worksheets.length) throw new Error("В файле слишком много строк для одного переноса: максимум 30 000.");
     sheets = workbook.worksheets.map((sheet) => {
       const rows: unknown[][] = [];
       sheet.eachRow({ includeEmpty: false }, (row) => {
@@ -171,6 +177,7 @@ export async function parseImportBuffer(buffer: Buffer, fileName: string) {
     throw new Error("Поддерживаются файлы .xlsx и .csv.");
   }
   const rows = sheets.flatMap((sheet) => toRows(sheet.name, sheet.rows));
+  if (rows.length > maximumImportRows) throw new Error("В файле слишком много строк для одного переноса: максимум 30 000.");
   if (!rows.length) throw new Error("В файле не найдены строки для проверки.");
   return { sheets: sheets.map(({ name }) => name), rows };
 }

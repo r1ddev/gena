@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeImportSourceKey, makeStableImportRowKeys } from "./source-key";
+import { getImportRowFingerprint, makeImportSourceKey, makeStableImportRowKeys } from "./source-key";
 
 describe("makeImportSourceKey", () => {
   it("stays stable for the same content and keeps changed imports apart", () => {
@@ -27,6 +27,18 @@ describe("makeStableImportRowKeys", () => {
     expect(renamedAndReordered.get("new-b")).toBe(first.get("b"));
   });
 
+  it("keeps operation identity when the worksheet is renamed", () => {
+    const data = { headers: ["SKU", "Amount"], cells: { sku: "SKU-1", amount: "100" }, values: ["SKU-1", "100"] };
+    const original = makeStableImportRowKeys([
+      { id: "original", sheetName: "Purchases", rowNumber: 2, rowType: "purchases", data },
+    ]);
+    const renamed = makeStableImportRowKeys([
+      { id: "renamed", sheetName: "Purchases 2026", rowNumber: 2, rowType: "purchases", data },
+    ]);
+
+    expect(renamed.get("renamed")).toBe(original.get("original"));
+  });
+
   it("distinguishes repeated identical rows by their occurrence", () => {
     const data = { headers: ["SKU", "Amount"], cells: { sku: "SKU-1", amount: "100" }, values: ["SKU-1", "100"] };
     const keys = makeStableImportRowKeys([
@@ -35,5 +47,41 @@ describe("makeStableImportRowKeys", () => {
     ]);
 
     expect(keys.get("a")).not.toBe(keys.get("b"));
+  });
+
+  it("uses the same operation identity for equivalent XLSX and CSV values", () => {
+    const xlsx = {
+      headers: ["SKU", "Дата закупки", "Количество", "Цена за единицу"],
+      cells: { sku: "BAG-1", датазакупки: new Date("2026-10-20T00:00:00.000Z"), количество: 2, ценазаединицу: 50 },
+      values: ["BAG-1", new Date("2026-10-20T00:00:00.000Z"), 2, 50],
+    };
+    const csv = {
+      headers: ["SKU", "Дата закупки", "Количество", "Цена за единицу"],
+      cells: { sku: "BAG-1", датазакупки: "20.10.2026", количество: "2", ценазаединицу: "50,00" },
+      values: ["BAG-1", "20.10.2026", "2", "50,00"],
+    };
+
+    const xlsxKey = makeStableImportRowKeys([{ id: "xlsx", sheetName: "Закупки", rowNumber: 2, rowType: "purchases", data: xlsx }]);
+    const csvKey = makeStableImportRowKeys([{ id: "csv", sheetName: "Лист 1", rowNumber: 12, rowType: "purchases", data: csv }]);
+
+    expect(csvKey.get("csv")).toBe(xlsxKey.get("xlsx"));
+  });
+
+  it("uses the same expense identity across equivalent XLSX and CSV headers", () => {
+    const xlsx = {
+      headers: ["Дата", "Категория", "Сумма"],
+      cells: { дата: new Date("2026-10-01T00:00:00.000Z"), категория: "Доставка 42", сумма: 100 },
+      values: [new Date("2026-10-01T00:00:00.000Z"), "Доставка 42", 100],
+    };
+    const csv = {
+      headers: ["Дата расхода", "Расход", "Сумма"],
+      cells: { датарасхода: "01.10.2026", расход: "Доставка 42", сумма: "100" },
+      values: ["01.10.2026", "Доставка 42", "100"],
+    };
+    const xlsxRow = { id: "xlsx", sheetName: "Расходы", rowNumber: 2, rowType: "expenses", data: xlsx };
+    const csvRow = { id: "csv", sheetName: "CSV", rowNumber: 2, rowType: "expenses", data: csv };
+
+    expect(getImportRowFingerprint(csvRow)).toBe(getImportRowFingerprint(xlsxRow));
+    expect(makeStableImportRowKeys([csvRow]).get("csv")).toBe(makeStableImportRowKeys([xlsxRow]).get("xlsx"));
   });
 });

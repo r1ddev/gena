@@ -15,6 +15,7 @@ type ImportPreviewRow = {
 
 type ImportPreview = {
   batchId: string;
+  validation?: ImportResult;
   summary: {
     sheets?: string[];
     totalRows?: number;
@@ -30,6 +31,7 @@ type ImportResult = {
   batchId: string;
   imported: Record<string, number>;
   skippedRows: number;
+  issueCounts: { message: string; count: number }[];
   issues: ImportIssue[];
 };
 
@@ -67,10 +69,17 @@ function asImportResult(value: unknown): ImportResult | null {
       ? [{ sheet: issue.sheet, row: issue.row, message: issue.message }]
       : [];
   }) : [];
+  const issueCounts = Array.isArray(root.issueCounts) ? root.issueCounts.flatMap((item) => {
+    const count = asRecord(item);
+    return count && typeof count.message === "string" && typeof count.count === "number"
+      ? [{ message: count.message, count: count.count }]
+      : [];
+  }) : [];
   return {
     batchId: root.batchId,
     imported: asRecord(root.imported) as Record<string, number> ?? {},
     skippedRows: typeof root.skippedRows === "number" ? root.skippedRows : issues.length,
+    issueCounts: issueCounts.length ? issueCounts : [...issues.reduce((counts, issue) => counts.set(issue.message, (counts.get(issue.message) ?? 0) + 1), new Map<string, number>())].map(([message, count]) => ({ message, count })),
     issues,
   };
 }
@@ -105,8 +114,13 @@ export function ImportWorkspace() {
       const response = await requestJson("/api/import", { method: "POST", body: form });
       const result = asImportPreview(response);
       if (!result) throw new Error("Сервис вернул ответ в неожиданном формате. Повторите проверку файла.");
-      setPreview(result);
-      setSuccess("Предварительный разбор готов. Проверьте сводку и строки, затем подтвердите перенос.");
+      const validationResponse = await requestJson("/api/import/apply?dry-run=true", { method: "POST", body: JSON.stringify({ batchId: result.batchId }) });
+      const validation = asImportResult(validationResponse);
+      if (!validation || validation.batchId !== result.batchId) throw new Error("Не удалось проверить операции из файла. Повторите проверку.");
+      setPreview({ ...result, validation });
+      setSuccess(validation.skippedRows
+        ? `Проверка закончена: ${validation.skippedRows} строк требуют разбора до или после переноса.`
+        : "Проверка закончена. Все распознанные строки можно перенести.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось прочитать файл"); }
     finally { setBusy(false); }
   }
@@ -147,8 +161,11 @@ export function ImportWorkspace() {
           <div className="mini-stat"><span className="mini-stat-label">Строк найдено</span><span className="mini-stat-value">{preview.summary.totalRows ?? preview.rows.length}</span></div>
           <div className="mini-stat"><span className="mini-stat-label">Не распознано</span><span className="mini-stat-value">{preview.summary.unrecognizedRows ?? 0}</span></div>
           {Object.entries(preview.summary.byType ?? {}).map(([type, count]) => <div className="mini-stat" key={type}><span className="mini-stat-label">{typeLabels[type] ?? type}</span><span className="mini-stat-value">{count}</span></div>)}
+          <div className="mini-stat"><span className="mini-stat-label">Будет перенесено</span><span className="mini-stat-value">{Object.values(preview.validation?.imported ?? {}).reduce((total, count) => total + count, 0)}</span></div>
+          <div className="mini-stat"><span className="mini-stat-label">Требуют разбора</span><span className="mini-stat-value">{preview.validation?.skippedRows ?? 0}</span></div>
         </div>
         {preview.summary.note && <p className="form-help">{preview.summary.note}</p>}
+        {(preview.validation?.issues.length ?? 0) > 0 && <div className="preview-box"><h3 style={{ fontSize: 12, marginBottom: 10 }}>Причины пропуска всех строк</h3><ul style={{ margin: "0 0 16px", paddingLeft: 18 }}>{preview.validation?.issueCounts.map((issue) => <li key={issue.message}>{issue.message} — {issue.count}</li>)}</ul><h3 style={{ fontSize: 12, marginBottom: 10 }}>Примеры строк, которые сейчас не попадут в учёт</h3><div className="table-wrap"><table><thead><tr><th>Лист</th><th>Строка</th><th>Причина</th></tr></thead><tbody>{(preview.validation?.issues ?? []).map((issue, index) => <tr key={`${issue.sheet}:${issue.row}:${index}`}><td>{issue.sheet}</td><td>{issue.row}</td><td>{issue.message}</td></tr>)}</tbody></table></div>{(preview.validation?.skippedRows ?? 0) > (preview.validation?.issues.length ?? 0) && <p className="form-help">Показаны первые {preview.validation?.issues.length ?? 0} из {preview.validation?.skippedRows ?? 0} строк.</p>}</div>}
         {preview.rows.length > 0 ? <div className="preview-box"><div className="table-wrap"><table><thead><tr><th>Лист</th><th>Строка</th><th>Тип данных</th><th>Содержимое строки</th></tr></thead><tbody>{preview.rows.map((row, index) => <tr key={row.id ?? `${row.sheetName}:${row.rowNumber}:${index}`}><td>{row.sheetName}</td><td>{row.rowNumber}</td><td><span className={`badge ${row.type === "unknown" ? "orange" : "green"}`}>{typeLabels[row.type] ?? row.type}</span></td><td>{formatRowData(row)}</td></tr>)}</tbody></table></div>{(preview.summary.totalRows ?? 0) > preview.rows.length && <p className="form-help">Показаны первые {preview.rows.length} строк из {preview.summary.totalRows}.</p>}</div> : <p className="form-help">В файле не найдено строк для переноса. Подтверждение всё равно сохранит отчёт проверки.</p>}
       </div>
     </section>}

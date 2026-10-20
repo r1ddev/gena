@@ -40,7 +40,9 @@ export async function POST(request: Request) {
     const snapshot = await getAccountingSnapshot(new Date(`${body.countedAt}T23:59:59.999Z`));
     const currentById = new Map(snapshot.products.map((product) => [product.productId, product]));
     const header = await db.transaction(async (tx) => {
-      const [created] = await tx.insert(stocktakes).values({ warehouse: body.warehouse, countedAt: body.countedAt, note: body.note }).returning();
+      const [created] = await tx.insert(stocktakes).values({ warehouse: body.warehouse, countedAt: body.countedAt, note: body.note })
+        .onConflictDoNothing().returning();
+      if (!created) throw new Error("Инвентаризация этого склада за эту дату уже существует.");
       await tx.insert(stocktakeLines).values(body.lines.map((line) => ({
         stocktakeId: created.id,
         productId: line.productId,

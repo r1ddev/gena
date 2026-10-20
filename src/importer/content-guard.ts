@@ -2,7 +2,7 @@ import { getImportRowFingerprint, type StableImportRow } from "./source-key";
 
 export type ImportBatchIdentity = { id: string; contentHash: string; status: string };
 export type NamedImportBatchIdentity = Omit<ImportBatchIdentity, "contentHash"> & { fileName: string; contentHash: string | null };
-type ImportRowLocation = Pick<StableImportRow, "id" | "sheetName" | "rowNumber" | "rowType" | "data"> & { batchId?: string };
+type ImportRowLocation = Pick<StableImportRow, "id" | "sheetName" | "rowNumber" | "rowType" | "data"> & { batchId?: string; issue?: string | null };
 
 export function findPreviouslyAppliedBatch(
   currentBatch: Pick<ImportBatchIdentity, "id" | "contentHash">,
@@ -25,9 +25,10 @@ export function findChangedAppliedBatch(
 }
 
 export function findChangedAppliedRow(currentRows: ImportRowLocation[], appliedRows: ImportRowLocation[]) {
+  const importedRows = appliedRows.filter((row) => !row.issue);
   const priorAtLocation = new Map<string, ImportRowLocation[]>();
   const currentFingerprints = new Map<string, number>();
-  for (const row of appliedRows) {
+  for (const row of importedRows) {
     const key = `${row.sheetName}\u0000${row.rowNumber}\u0000${row.rowType}`;
     priorAtLocation.set(key, [...(priorAtLocation.get(key) ?? []), row]);
   }
@@ -46,7 +47,7 @@ export function findChangedAppliedRow(currentRows: ImportRowLocation[], appliedR
   }
 
   const appliedBatches = new Map<string, ImportRowLocation[]>();
-  for (const row of appliedRows) {
+  for (const row of importedRows) {
     const batchId = row.batchId ?? "applied-imports";
     appliedBatches.set(batchId, [...(appliedBatches.get(batchId) ?? []), row]);
   }

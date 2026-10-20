@@ -49,15 +49,25 @@ export function assertLocalRequest(request: Request) {
 export function assertLocalMutation(request: Request) {
   assertLocalRequest(request);
   const rawHost = request.headers.get("host");
-  const host = new URL(`http://${rawHost ?? ""}`).hostname.toLowerCase();
+  const requestUrl = new URL(request.url);
+  const expectedOrigin = new URL(`${requestUrl.protocol}//${rawHost ?? ""}`).origin;
   const origin = request.headers.get("origin");
   if (origin) {
-    let originHost = "";
+    let originUrl: URL;
     try {
-      originHost = new URL(origin).hostname.toLowerCase();
+      originUrl = new URL(origin);
     } catch {
       throw new Error("Некорректный источник запроса.");
     }
-    if (!localHosts.has(originHost) || originHost !== host) throw new Error("Источник запроса не совпадает с локальным адресом приложения.");
+    const originHost = originUrl.hostname.toLowerCase();
+    if (
+      !localHosts.has(originHost) ||
+      originUrl.origin !== expectedOrigin ||
+      originUrl.username ||
+      originUrl.password ||
+      originUrl.pathname !== "/" ||
+      originUrl.search ||
+      originUrl.hash
+    ) throw new Error("Источник запроса не совпадает с локальным адресом приложения.");
   }
 }

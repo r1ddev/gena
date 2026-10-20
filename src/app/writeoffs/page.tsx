@@ -5,7 +5,7 @@ import { ResourcePage } from "@/components/resource-page";
 export default function WriteoffsPage() {
   return <ResourcePage config={{
     title: "Списания", eyebrow: "Складские операции",
-    description: "Ручное списание уменьшает мой склад без повторного денежного расхода. Списания Ozon и компенсации приходят из синхронизации.",
+    description: "Ручное списание уменьшает мой склад без повторного денежного расхода. Списания Ozon приходят из синхронизации. Указанная Ozon компенсация пока служит данными для сверки: в баланс и прибыль включаются финансовые начисления, а отдельное сопоставление компенсации ещё не подтверждено.",
     collectionUrl: "/api/writeoffs", createUrl: "/api/writeoffs", createLabel: "Списать со своего склада",
     fields: [
       { name: "productId", label: "Товар *", type: "select", optionsFrom: "/api/products", required: true },

@@ -1,7 +1,8 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { externalItems, financeAccruals, ozonWriteoffs, postingItems, productLinks, products, returns } from "@/db/schema";
+import { externalItemIgnorePlan, externalProductKey } from "@/ozon/external-product";
 import { financeAccrualRowContainsSku } from "@/ozon/finance";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 
@@ -32,7 +33,48 @@ export async function PATCH(request: Request) {
     const external = (await db.select().from(externalItems).where(eq(externalItems.id, id)).limit(1))[0];
     if (!external) throw new Error("Запись не найдена.");
     if (body.action === "ignore") {
-      const [item] = await db.update(externalItems).set({ disposition: "ignored", productId: null }).where(eq(externalItems.id, id)).returning();
+      const item = await db.transaction(async (tx) => {
+        const sameSkuRows = external.ozonSku
+          ? await tx.select({ id: externalItems.id, externalKey: externalItems.externalKey, ozonSku: externalItems.ozonSku, disposition: externalItems.disposition, productId: externalItems.productId })
+            .from(externalItems).where(eq(externalItems.ozonSku, external.ozonSku))
+          : [{ id: external.id, externalKey: external.externalKey, ozonSku: external.ozonSku, disposition: external.disposition, productId: external.productId }];
+        if (external.offerId && external.ozonSku) {
+          await tx.delete(productLinks).where(and(eq(productLinks.offerId, external.offerId), eq(productLinks.ozonSku, external.ozonSku)));
+        }
+        const linkedMappings = external.ozonSku
+          ? (await tx.select({ offerId: productLinks.offerId, ozonSku: productLinks.ozonSku, productId: productLinks.productId })
+            .from(productLinks).where(eq(productLinks.ozonSku, external.ozonSku)))
+            .map((link) => ({ externalKey: externalProductKey(link.offerId, external.ozonSku!), productId: link.productId }))
+          : [];
+        const plan = externalItemIgnorePlan(sameSkuRows, id, linkedMappings);
+        const affectedRows = sameSkuRows.filter((row) => plan.keysToIgnore.includes(row.externalKey));
+        const [ignored] = await tx.update(externalItems).set({ disposition: "ignored", productId: null }).where(eq(externalItems.id, id)).returning();
+        const siblingIds = affectedRows.filter((row) => row.id !== id && (row.disposition === "pending" || row.disposition === "ignored")).map((row) => row.id);
+        if (siblingIds.length) await tx.update(externalItems).set({ disposition: "ignored", productId: null }).where(inArray(externalItems.id, siblingIds));
+        if (external.ozonSku) {
+          await tx.update(postingItems).set({ productId: null }).where(eq(postingItems.ozonSku, external.ozonSku));
+          await tx.update(returns).set({ productId: null, updatedAt: new Date() }).where(eq(returns.ozonSku, external.ozonSku));
+          await tx.update(ozonWriteoffs).set({ productId: null, updatedAt: new Date() }).where(eq(ozonWriteoffs.ozonSku, external.ozonSku));
+          for (const mapping of plan.mappingsToPreserve) {
+            await tx.update(postingItems).set({ productId: mapping.productId }).where(eq(postingItems.externalKey, mapping.externalKey));
+            await tx.update(returns).set({ productId: mapping.productId, updatedAt: new Date() }).where(eq(returns.externalKey, mapping.externalKey));
+            await tx.update(ozonWriteoffs).set({ productId: mapping.productId, updatedAt: new Date() }).where(eq(ozonWriteoffs.externalKey, mapping.externalKey));
+          }
+        } else if (plan.keysToIgnore.length) {
+          await tx.update(postingItems).set({ productId: null }).where(inArray(postingItems.externalKey, plan.keysToIgnore));
+          await tx.update(returns).set({ productId: null, updatedAt: new Date() }).where(inArray(returns.externalKey, plan.keysToIgnore));
+          await tx.update(ozonWriteoffs).set({ productId: null, updatedAt: new Date() }).where(inArray(ozonWriteoffs.externalKey, plan.keysToIgnore));
+        }
+        if (external.ozonSku) {
+          const itemAccruals = await tx.select({ id: financeAccruals.id, externalKey: financeAccruals.externalKey, raw: financeAccruals.raw })
+            .from(financeAccruals).where(eq(financeAccruals.accruedCategory, "ITEM"));
+          const matchingAccrualIds = itemAccruals
+            .filter((accrual) => financeAccrualRowContainsSku(accrual.externalKey, accrual.raw, external.ozonSku!))
+            .map((accrual) => accrual.id);
+          if (matchingAccrualIds.length) await tx.update(financeAccruals).set({ productId: plan.financeProductId }).where(inArray(financeAccruals.id, matchingAccrualIds));
+        }
+        return ignored;
+      });
       return Response.json({ item });
     }
 

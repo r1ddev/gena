@@ -77,4 +77,10 @@ describe("findChangedAppliedRow", () => {
     const removed = { id: "removed", sheetName: "Purchases", rowNumber: 3, rowType: "purchases", data: { cells: { sku: "B-2" } } };
     expect(findChangedAppliedRow([first], [first, removed])).toEqual(removed);
   });
+
+  it("does not treat rejected rows from an applied batch as imported history", () => {
+    const rejected = { id: "rejected", sheetName: "Stocktake", rowNumber: 2, rowType: "stocktakes", data: { cells: { sku: "A-1", actual: 4 } }, issue: "Conflicting duplicate count; row was not imported." };
+    const corrected = { ...rejected, id: "corrected", data: { cells: { sku: "A-1", actual: 5 } }, issue: null };
+    expect(findChangedAppliedRow([corrected], [rejected])).toBeUndefined();
+  });
 });

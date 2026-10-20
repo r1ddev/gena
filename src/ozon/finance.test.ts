@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { financeAccrualPostingNumber, financeAccrualRowContainsSku, financeRowContainsSku, matchBuyoutLines, postingContainsMarketplaceBuyout, staleOzonAccrualKeys } from "./finance";
+import { financeAccrualPostingNumber, financeAccrualRowContainsSku, financeRowContainsSku, groupFinanceItemFees, isOzonWriteoffCompensation, matchBuyoutLines, postingContainsMarketplaceBuyout, staleOzonAccrualKeys } from "./finance";
+
+describe("isOzonWriteoffCompensation", () => {
+  it("recognizes compensation type IDs from both accrual and item fee payloads", () => {
+    expect(isOzonWriteoffCompensation({ typeId: "10" })).toBe(true);
+    expect(isOzonWriteoffCompensation({ typeId: "25" })).toBe(true);
+    expect(isOzonWriteoffCompensation({ typeId: "15" })).toBe(false);
+    expect(isOzonWriteoffCompensation({ typeId: "10,15" })).toBe(false);
+    expect(isOzonWriteoffCompensation({ raw: { non_item_fee: { type_id: 10 } } })).toBe(true);
+    expect(isOzonWriteoffCompensation({ raw: { item_fees: { fees: [{ fees: [{ type_id: 25 }] }] } } })).toBe(true);
+    expect(isOzonWriteoffCompensation({ raw: { item_fees: { fees: [{ fees: [{ type_id: 10 }, { type_id: 15 }] }] } } })).toBe(false);
+    expect(isOzonWriteoffCompensation({ raw: { item_fees: { fees: [{ sku: "25", fees: [{ type_id: 15 }] }] } } })).toBe(false);
+  });
+});
+
+describe("groupFinanceItemFees", () => {
+  it("keeps fee types separate while summing duplicate types to cents", () => {
+    expect(groupFinanceItemFees([
+      { type_id: 10, accrued: { amount: "5.005" } },
+      { type_id: 25, accrued: "12.00" },
+      { type_id: 10, accrued: "3.00" },
+    ])).toEqual([
+      { typeId: "10", amount: 8.01 },
+      { typeId: "25", amount: 12 },
+    ]);
+  });
+});
 
 describe("financeRowContainsSku", () => {
   it("matches the exact Ozon SKU in ITEM fees", () => {
@@ -21,6 +47,7 @@ describe("financeAccrualRowContainsSku", () => {
     expect(financeAccrualRowContainsSku("2026-01-01:ITEM:123:abc:sku:A-1", raw, "B-2")).toBe(false);
     expect(financeAccrualRowContainsSku("2026-01-01:ITEM:123:abc:sku:B-2", raw, "B-2")).toBe(true);
     expect(financeAccrualRowContainsSku("2026-01-01:ITEM:123:abc:sku:B-2", raw, "A-1")).toBe(false);
+    expect(financeAccrualRowContainsSku("2026-01-01:ITEM:123:abc:sku:A-1:type:10", raw, "A-1")).toBe(true);
   });
 
   it("does not confuse an SKU with a longer SKU sharing its prefix", () => {
