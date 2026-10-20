@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Link2, Plus, XCircle } from "lucide-react";
 import { asRecord, findRows, getId, requestJson, type JsonRecord } from "./api";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
-import { filterAndSortRows, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
 
 type Option = { id: string; label: string };
@@ -79,6 +79,7 @@ export function UnmatchedItems() {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [sort, setSort] = useState<TableSort>(null);
   const visibleRows = useMemo(() => filterAndSortRows(rows, unmatchedColumns, filters, sort), [rows, filters, sort]);
+  const hasActiveFilters = Object.values(filters).some((value) => value.trim());
 
   function updateSort(key: string) {
     setSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
@@ -158,7 +159,7 @@ export function UnmatchedItems() {
   return <section id="unmatched-ozon-items" className="panel" style={{ marginTop: 16 }}>
     <div className="panel-head"><div><h2>Записи Ozon без связи с каталогом</h2><span className="small-note">Это не число разных товаров. В списке есть заказы, начисления, возвраты, списания и выкупы.</span>{sourceBreakdown.length > 0 && <span className="small-note" style={{ display: "block", marginTop: 4 }}>{sourceBreakdown.join(" · ")}</span>}</div><span className="badge orange">{visibleRows.length === rows.length ? rows.length : `${visibleRows.length} / ${rows.length}`}</span></div>
     {error && <div className="error-banner" role="alert" style={{ margin: "12px 18px 0" }}><AlertCircle size={14} />{error}</div>}{success && <div className="success-banner" role="status" style={{ margin: "12px 18px 0" }}><CheckCircle2 size={14} />{success}</div>}
-    {loading ? <div className="panel-body"><div className="loading-line" /></div> : rows.length === 0 && !error ? <div className="empty-state" style={{ minHeight: 130 }}><div><div className="empty-icon"><CheckCircle2 size={18} /></div><div className="empty-title">Нет записей без связи с каталогом</div><p className="empty-description">Такие записи появятся после синхронизации Ozon.</p></div></div> : visibleRows.length === 0 && !error ? <div className="empty-state"><div><div className="empty-title">Нет записей по этим фильтрам</div><button type="button" className="button secondary small" style={{ marginTop: 12 }} onClick={() => setFilters({})}>Очистить фильтры</button></div></div> : <div className="table-wrap"><table><TableHead columns={unmatchedColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{visibleRows.map((row, index) => {
+    {loading && rows.length === 0 && !hasActiveFilters ? <div className="panel-body"><div className="loading-line" /></div> : rows.length === 0 && !error && !hasActiveFilters ? <div className="empty-state" style={{ minHeight: 130 }}><div><div className="empty-icon"><CheckCircle2 size={18} /></div><div className="empty-title">Нет записей без связи с каталогом</div><p className="empty-description">Такие записи появятся после синхронизации Ozon.</p></div></div> : <div className="table-wrap"><table><TableHead columns={unmatchedColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{error ? <TableEmptyRow colSpan={unmatchedColumns.length} message={error} /> : loading && hasActiveFilters ? <TableEmptyRow colSpan={unmatchedColumns.length} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={unmatchedColumns.length} message="По заданным условиям совпадений нет." onClear={() => setFilters({})} /> : visibleRows.map((row, index) => {
       const id = getId(row) ?? String(index); const currentMode = mode[id]; const ozonSku = ozonSkuFor(row); const article = articleFor(row); const productName = nameFor(row);
       const defaults = { title: productName, offerId: article, ozonSku };
       const draft = productDrafts[id] ?? {};

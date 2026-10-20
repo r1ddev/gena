@@ -110,3 +110,12 @@ export function TableHead<Row>({
     </tr>
   </thead>;
 }
+
+export function TableEmptyRow({ colSpan, message, onClear }: { colSpan: number; message: string; onClear?: () => void }) {
+  return <tr className="table-empty-row">
+    <td colSpan={colSpan}>
+      <div role="status">{message}</div>
+      {onClear && <button type="button" className="button secondary small" style={{ marginTop: 10 }} onClick={onClear}>Очистить фильтры</button>}
+    </td>
+  </tr>;
+}

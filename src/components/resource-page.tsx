@@ -5,7 +5,7 @@ import { AlertCircle, CheckCircle2, Package, Pencil, Plus, Search, Trash2, X } f
 import { asRecord, displayValue, findRows, getId, localToday, requestJson, stringValue, valueAt, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
-import { filterAndSortRows, TableHead, type TableSort } from "./table-controls";
+import { filterAndSortRows, TableEmptyRow, TableHead, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
 
 export type FieldConfig = {
@@ -273,6 +273,8 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   }
 
   const hasProductSelect = config.fields.some((field) => field.optionsFrom);
+  const hasActiveFilters = Boolean(search.trim() || serverSearch.trim() || Object.values(filters).some((value) => value.trim()) || Object.values(serverFilters).some((value) => value.trim()));
+  const tableColumnCount = config.columns.length + (config.deleteUrl || config.editUrl || rowActions ? 1 : 0);
   return <>
     <PageHeader eyebrow={config.eyebrow ?? "Учёт операций"} title={config.title} description={config.description} actions={<div className="toolbar">{actions}{!config.hideCreate && <button className="button" onClick={() => { setFormOpen((open) => !open); setError(""); setSuccess(""); }}><Plus size={15} />{formOpen ? "Закрыть форму" : config.createLabel}</button>}</div>} />
     {config.showSoldQuantity && <section className="panel metric-card" style={{ "--metric-bg": "#eef5fa", marginBottom: 16 } as React.CSSProperties} aria-label="Проданные товары"><Package className="metric-icon" size={18} /><div className="metric-label">Продано товаров</div><div className="metric-value">{soldQuantity === null ? loading ? "…" : "—" : `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(soldQuantity)} шт.`}</div><div className="metric-help">Доставленные и выкупленные Ozon товары за всё время, за вычетом возвратов</div></section>}
@@ -309,16 +311,16 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     {beforeTable}
     <section className="panel">
       <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Загружаем список…" : config.remotePageSize ? `${pagination?.total ?? 0} записей` : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder={config.remotePageSize ? "Поиск по заказам" : "Поиск"} value={search} onChange={(event) => setSearch(event.target.value)} /></div></div></div>
-      {loading ? <div className="panel-body" aria-label="Загрузка списка"><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /></div>
-        : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={20} /></div><div className="empty-title">Не удалось загрузить данные</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 13 }} onClick={() => void refresh()}>Повторить</button></div></div>
-          : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><Package size={20} /></div><div className="empty-title">{Boolean(search.trim()) || (config.remotePageSize && serverSearch) || Object.values(filters).some((value) => value.trim()) ? "Ничего не найдено" : config.emptyTitle ?? "Пока нет записей"}</div><p className="empty-description">{Boolean(search.trim()) || (config.remotePageSize && serverSearch) || Object.values(filters).some((value) => value.trim()) ? "По заданным условиям совпадений нет. Измените или очистите фильтры." : config.emptyDescription ?? "Добавьте первую запись — она появится в этом списке, а связанные итоги обновятся автоматически."}</p>{(Boolean(search.trim()) || (config.remotePageSize && serverSearch) || Object.values(filters).some((value) => value.trim())) && <button type="button" className="button secondary small" style={{ marginTop: 12 }} onClick={clearTableFilters}>Очистить фильтры</button>}</div></div>
+      {loading && rows.length === 0 && !hasActiveFilters ? <div className="panel-body" aria-label="Загрузка списка"><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /></div>
+        : loadError && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={20} /></div><div className="empty-title">Не удалось загрузить данные</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 13 }} onClick={() => void refresh()}>Повторить</button></div></div>
+          : rows.length === 0 && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><Package size={20} /></div><div className="empty-title">{config.emptyTitle ?? "Пока нет записей"}</div><p className="empty-description">{config.emptyDescription ?? "Добавьте первую запись — она появится в этом списке, а связанные итоги обновятся автоматически."}</p></div></div>
             : <div className="table-wrap"><table><TableHead columns={config.columns.map((column) => ({
               ...column,
               kind: column.kind ?? (column.key === "id" || column.key === "externalId" ? "identifier" : "text"),
               value: column.key === "article" ? (row: JsonRecord) => orderArticleText(row.items)
                 : column.key === "status" ? (row: JsonRecord) => [row.status, row.returnState].filter(Boolean).join(" ")
                   : (row: JsonRecord) => valueAt(row, column.key),
-            }))} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || config.editUrl || rowActions ? ["Действия"] : []} /><tbody>{visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
+            }))} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || config.editUrl || rowActions ? ["Действия"] : []} /><tbody>{loadError ? <TableEmptyRow colSpan={tableColumnCount} message={loadError} /> : config.remotePageSize && loading ? <TableEmptyRow colSpan={tableColumnCount} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={tableColumnCount} message="По заданным условиям совпадений нет." onClear={clearTableFilters} /> : visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
               const value = valueAt(row, column.key);
               const displayKind = column.kind === "date" || column.kind === "money" || column.kind === "quantity" || column.kind === "status" ? column.kind : undefined;
               if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, displayKind)}</span>{typeof row.sku === "string" && column.key !== "sku" && column.key !== "offerId" && <span className="table-secondary">{row.sku}</span>}</td>;

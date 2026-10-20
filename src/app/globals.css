@@ -99,6 +99,7 @@ th { padding: 10px 13px; color: #849089; background: #fafbfa; font-size: 10px; f
 .table-filter-row th { padding: 5px 8px; border-bottom: 1px solid var(--line); background: #fff; }
 .table-filter-row input { width: 100%; min-width: 95px; min-height: 30px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; outline: none; color: var(--ink); background: white; font-family: inherit; font-size: 11px; text-transform: none; }
 .table-filter-row input:focus { border-color: #82c5a4; box-shadow: 0 0 0 2px rgba(23,139,99,.08); }
+.table-empty-row td { padding: 22px 14px; color: var(--muted); text-align: center; }
 td { padding: 12px 13px; border-top: 1px solid #edf0ed; color: #34413a; font-size: 12px; vertical-align: middle; }
 tbody tr:hover { background: #fcfdfc; }
 .table-primary { color: var(--ink); font-weight: 700; }

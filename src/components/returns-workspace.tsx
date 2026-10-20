@@ -6,7 +6,7 @@ import { findRows, getId, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { OzonSyncButton } from "./ozon-sync-button";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
-import { filterAndSortRows, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 
 function returnLabel(value: unknown) {
   const labels: Record<string, string> = { seller: "Мне", ozon: "На склад Ozon", unknown: "Не определено" };
@@ -36,6 +36,7 @@ export function ReturnsWorkspace() {
   const [sort, setSort] = useState<TableSort>(null);
 
   const visibleRows = useMemo(() => filterAndSortRows(rows, returnColumns, filters, sort), [rows, filters, sort]);
+  const hasActiveFilters = Object.values(filters).some((value) => value.trim());
 
   function updateSort(key: string) {
     setSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
@@ -92,7 +93,7 @@ export function ReturnsWorkspace() {
     {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}{success && <div className="success-banner" role="status"><CheckCircle2 size={15} />{success}</div>}
     <section className="panel">
       <div className="panel-head"><div><h2>Возвраты, требующие действия</h2><span className="small-note">{loading ? "Загружаем возвраты…" : visibleRows.length === rows.length ? `${rows.length} записей` : `${visibleRows.length} из ${rows.length} записей`}</span></div><RotateCcw size={17} color="#178b63" /></div>
-      {loading ? <div className="panel-body"><div className="loading-line" /></div> : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={18} /></div><div className="empty-title">Не удалось загрузить возвраты</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 12 }} onClick={() => void refresh()}>Повторить</button></div></div> : rows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><RotateCcw size={18} /></div><div className="empty-title">Возвратов, требующих действия, пока нет</div><p className="empty-description">Здесь появятся возвраты, направленные вам, и возвраты с неопределённым местом. Возврат на склад Ozon виден в состоянии заказа и не меняет остаток.</p></div></div> : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-title">Нет возвратов по этим фильтрам</div><button type="button" className="button secondary small" style={{ marginTop: 12 }} onClick={() => setFilters({})}>Очистить фильтры</button></div></div> : <div className="table-wrap"><table><TableHead columns={returnColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{visibleRows.map((row, index) => {
+      {loading && rows.length === 0 && !hasActiveFilters ? <div className="panel-body"><div className="loading-line" /></div> : loadError && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={18} /></div><div className="empty-title">Не удалось загрузить возвраты</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 12 }} onClick={() => void refresh()}>Повторить</button></div></div> : rows.length === 0 && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><RotateCcw size={18} /></div><div className="empty-title">Возвратов, требующих действия, пока нет</div><p className="empty-description">Здесь появятся возвраты, направленные вам, и возвраты с неопределённым местом. Возврат на склад Ozon виден в состоянии заказа и не меняет остаток.</p></div></div> : <div className="table-wrap"><table><TableHead columns={returnColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{loadError ? <TableEmptyRow colSpan={returnColumns.length} message={loadError} /> : loading && hasActiveFilters ? <TableEmptyRow colSpan={returnColumns.length} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={returnColumns.length} message="По заданным условиям совпадений нет." onClear={() => setFilters({})} /> : visibleRows.map((row, index) => {
         const id = getId(row) ?? String(index); const destination = row.destination;
         const sellerDone = destination === "seller" && Boolean(row.receivedBySellerAt);
         const postingMatched = row.postingMatched === true;

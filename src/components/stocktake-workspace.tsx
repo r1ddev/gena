@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, ClipboardList, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { findRows, getId, localToday, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
-import { filterAndSortRows, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 
 type ProductOption = { id: string; label: string };
 type StocktakeTableRow = JsonRecord & { header: JsonRecord; line: JsonRecord; lineIndex: number; difference: number };
@@ -59,6 +59,7 @@ export function StocktakeWorkspace() {
     });
   }), [rows]);
   const visibleRows = useMemo(() => filterAndSortRows(tableRows, stocktakeColumns, filters, sort), [tableRows, filters, sort]);
+  const hasActiveFilters = Object.values(filters).some((value) => value.trim());
 
   function updateSort(key: string) {
     setSort((current) => ({ key, direction: current?.key === key && current.direction === "asc" ? "desc" : "asc" }));
@@ -123,7 +124,7 @@ export function StocktakeWorkspace() {
 
     <section className="panel">
       <div className="panel-head"><div><h2>История и расхождения</h2><span className="small-note">{loading ? "Загружаем…" : `${rows.length} пересчётов · ${visibleRows.length} строк`}</span></div><RefreshCw size={16} color="#829087" /></div>
-      {loading ? <div className="panel-body"><div className="loading-line" /></div> : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={18} /></div><div className="empty-title">Не удалось загрузить историю</div><p className="empty-description">{loadError}</p></div></div> : rows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><ClipboardList size={18} /></div><div className="empty-title">Пока нет инвентаризаций</div><p className="empty-description">Создайте первый пересчёт выше.</p></div></div> : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-title">Нет строк по этим фильтрам</div><button type="button" className="button secondary small" style={{ marginTop: 12 }} onClick={() => setFilters({})}>Очистить фильтры</button></div></div> : <div className="table-wrap"><table><TableHead columns={stocktakeColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{visibleRows.map((row) => {
+      {loading && rows.length === 0 && !hasActiveFilters ? <div className="panel-body"><div className="loading-line" /></div> : loadError && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={18} /></div><div className="empty-title">Не удалось загрузить историю</div><p className="empty-description">{loadError}</p></div></div> : rows.length === 0 && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><ClipboardList size={18} /></div><div className="empty-title">Пока нет инвентаризаций</div><p className="empty-description">Создайте первый пересчёт выше.</p></div></div> : <div className="table-wrap"><table><TableHead columns={stocktakeColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{loadError ? <TableEmptyRow colSpan={stocktakeColumns.length} message={loadError} /> : loading && hasActiveFilters ? <TableEmptyRow colSpan={stocktakeColumns.length} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={stocktakeColumns.length} message="По заданным условиям совпадений нет." onClear={() => setFilters({})} /> : visibleRows.map((row) => {
         const lineId = getId(row.line) ?? String(row.id);
         const needsReview = String(row.resolutionStatus).startsWith("НУЖНА СВЕРКА");
         const resolved = Boolean(row.line.resolvedAt);
