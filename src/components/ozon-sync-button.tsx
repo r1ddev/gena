@@ -6,13 +6,14 @@ import { asRecord, findRows, requestJson, type JsonRecord } from "./api";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 
 type OzonSyncButtonProps = {
+  kind: "orders" | "returns";
   label: string;
   completedMessage: string;
 };
 
 const pause = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration));
 
-export function OzonSyncButton({ label, completedMessage }: OzonSyncButtonProps) {
+export function OzonSyncButton({ kind, label, completedMessage }: OzonSyncButtonProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState(false);
@@ -20,7 +21,7 @@ export function OzonSyncButton({ label, completedMessage }: OzonSyncButtonProps)
   async function sync() {
     setBusy(true); setMessage(""); setError(false);
     try {
-      const response = asRecord(await requestJson("/api/sync", { method: "POST", body: JSON.stringify({ kind: "full" }) }));
+      const response = asRecord(await requestJson("/api/sync", { method: "POST", body: JSON.stringify({ kind }) }));
       const queuedJob = asRecord(response?.item);
       if (!queuedJob) throw new Error("Не удалось запустить обновление. Проверьте настройки Ozon.");
       const jobId = typeof queuedJob?.id === "string" ? queuedJob.id : "";
@@ -50,5 +51,9 @@ export function OzonSyncButton({ label, completedMessage }: OzonSyncButtonProps)
     } finally { setBusy(false); }
   }
 
-  return <><button className="button secondary" onClick={() => void sync()} disabled={busy} title="Обновляет данные Ozon и связанные с ними суммы и статусы."><RefreshCw size={14} className={busy ? "spin" : ""} />{busy ? "Обновляем…" : label}</button>{message && <span className="small-note" style={error ? { color: "var(--red)" } : undefined} role={error ? "alert" : "status"}>{message}</span>}</>;
+  const description = kind === "orders"
+    ? "Загружает из Ozon заказы, их статусы и связанные денежные суммы."
+    : "Загружает из Ozon возвраты, их статусы и связанные денежные суммы.";
+
+  return <><button className="button secondary" onClick={() => void sync()} disabled={busy} title={description}><RefreshCw size={14} className={busy ? "spin" : ""} />{busy ? "Синхронизируем…" : label}</button>{message && <span className="small-note" style={error ? { color: "var(--red)" } : undefined} role={error ? "alert" : "status"}>{message}</span>}</>;
 }

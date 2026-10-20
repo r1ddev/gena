@@ -69,7 +69,7 @@ export function SettingsWorkspace() {
         </div>
         <div className="settings-section">
           <div className="settings-title">Автоматическое обновление</div>
-          <p className="settings-description">По расписанию обновляются заказы, суммы по отправлениям, возвраты и связанные статусы. Для немедленного обновления используйте кнопку «Обновить продажи» или «Обновить возвраты» в соответствующем разделе.</p>
+          <p className="settings-description">По расписанию обновляются заказы, суммы по отправлениям, возвраты и связанные статусы. Для немедленного обновления используйте «Синхронизировать продажи» или «Синхронизировать возвраты» в соответствующем разделе.</p>
           <div className="form-grid">
             <div className="field"><label htmlFor="sync-interval">Интервал, часов</label><select id="sync-interval" value={interval} onChange={(event) => setInterval(event.target.value)}><option value="24">Раз в день</option><option value="12">Каждые 12 часов</option><option value="6">Каждые 6 часов</option></select></div>
             <div className="field"><label htmlFor="last-sync">Последнее обновление</label><div id="last-sync" className="status-pill" style={{ width: "fit-content", minHeight: 38, borderRadius: 8 }}>{lastSync ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(lastSync)) : "Ещё не запускалось"}</div></div>

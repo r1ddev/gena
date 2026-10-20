@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const configuredRows = await db.select().from(appSettings).limit(1);
     const configured = configuredRows[0];
     if (!configured?.ozonClientId || !configured.ozonApiKeyEncrypted) throw new Error("Сначала укажи Client ID и API-ключ Ozon в настройках.");
-    const [job] = await db.insert(syncJobs).values({ kind: "manual", status: "queued", summary: { requestedBy: "user" } }).returning();
+    const [job] = await db.insert(syncJobs).values({ kind: "orders", status: "queued", summary: { requestedBy: "user" } }).returning();
     return Response.json({ item: job, message: "Синхронизация поставлена в очередь." }, { status: 202 });
   } catch (error) { return errorResponse(error); }
 }

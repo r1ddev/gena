@@ -69,7 +69,7 @@ export function ReturnsWorkspace() {
   }
 
   return <>
-    <PageHeader eyebrow="Обработка возвратов" title="Возвраты" description="Возврат на склад Ozon отображается у заказа и не меняет остатки. Если возврат направлен вам, он попадёт на ваш склад после фактического получения — нажмите «Получил я». Обновите возвраты кнопкой здесь; связанные статусы и суммы загрузятся автоматически." actions={<OzonSyncButton label="Обновить возвраты" completedMessage="Возвраты и связанные с ними статусы и суммы обновлены." />} />
+    <PageHeader eyebrow="Обработка возвратов" title="Возвраты" description="Возврат на склад Ozon отображается у заказа и не меняет остатки. Если возврат направлен вам, он попадёт на ваш склад после фактического получения — нажмите «Получил я». Синхронизируйте возвраты кнопкой здесь; связанные статусы и суммы загрузятся автоматически." actions={<OzonSyncButton kind="returns" label="Синхронизировать возвраты" completedMessage="Возвраты и связанные с ними статусы и суммы обновлены." />} />
     {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}{success && <div className="success-banner" role="status"><CheckCircle2 size={15} />{success}</div>}
     <section className="panel">
       <div className="panel-head"><div><h2>Возвраты, требующие действия</h2><span className="small-note">{loading ? "Загружаем возвраты…" : `${rows.length} записей`}</span></div><RotateCcw size={17} color="#178b63" /></div>

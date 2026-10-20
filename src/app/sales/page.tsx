@@ -13,6 +13,6 @@ export default function SalesPage() {
       { key: "status", label: "Статус", kind: "status" }, { key: "deliveredAt", label: "Доставлен", kind: "date" },
       { key: "phase", label: "Учёт", kind: "status" }, { key: "returnState", label: "Возврат", kind: "status" }, { key: "items", label: "Товары" }, { key: "amount", label: "Денежный итог", kind: "money" },
     ],
-    emptyTitle: "Заказов пока нет", emptyDescription: "Нажмите «Обновить продажи», чтобы загрузить заказы, статусы и суммы.",
-  }} actions={<OzonSyncButton label="Обновить продажи" completedMessage="Заказы, статусы и связанные денежные суммы обновлены." />} />;
+    emptyTitle: "Заказов пока нет", emptyDescription: "Нажмите «Синхронизировать продажи», чтобы загрузить заказы, статусы и суммы.",
+  }} actions={<OzonSyncButton kind="orders" label="Синхронизировать продажи" completedMessage="Заказы, статусы и связанные денежные суммы обновлены." />} />;
 }

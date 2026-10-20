@@ -545,6 +545,8 @@ async function importWriteoffs(credentials: OzonCredentials, from: Date, to: Dat
 }
 
 export async function syncOzonData(jobId: string) {
+  const [job] = await db.select({ kind: syncJobs.kind }).from(syncJobs).where(eq(syncJobs.id, jobId)).limit(1);
+  const kind = job?.kind ?? "full";
   const settings = await db.select().from(appSettings).where(eq(appSettings.id, 1)).limit(1);
   const settingsRow = settings[0];
   if (!settingsRow?.ozonClientId || !settingsRow.ozonApiKeyEncrypted) throw new Error("Сначала укажи Client ID и API-ключ Ozon в настройках.");
@@ -554,7 +556,7 @@ export async function syncOzonData(jobId: string) {
   const startDate = settingsRow.accountingStartDate;
   const { from, to } = resolveOzonSyncRange(startDate, settingsRow.lastSyncAt ?? null, now);
   const errors: string[] = [];
-  const summary: JsonRecord = { accountingStartDate: startDate, queriedFrom: from.toISOString(), queriedTo: to.toISOString() };
+  const summary: JsonRecord = { requestedKind: kind, accountingStartDate: startDate, queriedFrom: from.toISOString(), queriedTo: to.toISOString() };
   const progress = async (label: string) => {
     await db.update(syncJobs).set({ summary: { ...summary, progress: label }, heartbeatAt: new Date() }).where(eq(syncJobs.id, jobId));
   };
@@ -567,12 +569,22 @@ export async function syncOzonData(jobId: string) {
     }
   };
 
-  await run("orders", () => importPostings(credentials, from, to, progress));
-  await run("returns", () => importReturns(credentials, from, to, progress));
-  await run("buyouts", () => importBuyoutReports(credentials, from, to, progress));
-  await run("accruals", () => importDailyAccruals(credentials, from, to, progress));
-  await run("writeoffs", () => importWriteoffs(credentials, from, to, progress));
-  if (!errors.length) await db.update(appSettings).set({ lastSyncAt: new Date(), updatedAt: new Date() }).where(eq(appSettings.id, 1));
+  const fullSync = ["scheduled", "manual", "full"].includes(kind);
+  if (kind === "orders") {
+    await run("orders", () => importPostings(credentials, from, to, progress));
+    await run("buyouts", () => importBuyoutReports(credentials, from, to, progress));
+    await run("accruals", () => importDailyAccruals(credentials, from, to, progress));
+  } else if (kind === "returns") {
+    await run("returns", () => importReturns(credentials, from, to, progress));
+    await run("accruals", () => importDailyAccruals(credentials, from, to, progress));
+  } else {
+    await run("orders", () => importPostings(credentials, from, to, progress));
+    await run("returns", () => importReturns(credentials, from, to, progress));
+    await run("buyouts", () => importBuyoutReports(credentials, from, to, progress));
+    await run("accruals", () => importDailyAccruals(credentials, from, to, progress));
+    await run("writeoffs", () => importWriteoffs(credentials, from, to, progress));
+  }
+  if (fullSync && !errors.length) await db.update(appSettings).set({ lastSyncAt: new Date(), updatedAt: new Date() }).where(eq(appSettings.id, 1));
   if (errors.length) summary.warnings = errors;
   return summary;
 }
