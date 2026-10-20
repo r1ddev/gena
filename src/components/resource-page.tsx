@@ -39,6 +39,8 @@ export type ResourceConfig = {
   emptyTitle?: string;
   emptyDescription?: string;
   deleteUrl?: (row: JsonRecord) => string | null;
+  deleteConfirm?: string;
+  deleteSuccess?: string;
   editUrl?: (row: JsonRecord) => string | null;
   help?: string;
 };
@@ -302,9 +304,9 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     if (!config.deleteUrl) return;
     const url = config.deleteUrl(row);
     if (!url) return;
-    if (typeof window !== "undefined" && !window.confirm("Удалить эту запись? Связанные остатки и итоги обновятся автоматически.")) return;
+    if (typeof window !== "undefined" && !window.confirm(config.deleteConfirm ?? "Удалить эту запись? Связанные остатки и итоги обновятся автоматически.")) return;
     setBusy(true); setError(""); setSuccess("");
-    try { await requestJson(url, { method: "DELETE" }); if (config.collectionUrl === "/api/products") notifyProductCatalogChanged(); setSuccess("Запись удалена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh(); }
+    try { await requestJson(url, { method: "DELETE" }); if (config.collectionUrl === "/api/products") notifyProductCatalogChanged(); setSuccess(config.deleteSuccess ?? "Запись удалена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось удалить запись"); }
     finally { setBusy(false); }
   }
