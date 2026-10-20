@@ -29,15 +29,16 @@ describe("getOrderReturnStatesByPosting", () => {
     expect(states.has("posting-number-1")).toBe(false);
   });
 
-  it("shows an Ozon return only after it is available for sale again", () => {
+  it("shows the Ozon return status on its order instead of a stock restock state", () => {
     const states = getOrderReturnStatesByPosting(postings, postingItems, [{
       postingNumber: "posting-number-1",
       productId: "product-1",
       destination: "ozon",
+      status: "Не выкуплен",
       receivedBySellerAt: null,
       availableAtOzon: new Date("2026-10-20T12:00:00Z"),
     }]);
 
-    expect(states.get("posting-number-1")).toBe("Возврат снова доступен на Ozon");
+    expect(states.get("posting-number-1")).toBe("Возврат на Ozon · Не выкуплен");
   });
 });
