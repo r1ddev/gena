@@ -31,6 +31,7 @@ export type ResourceConfig = {
   fields: FieldConfig[];
   columns: ColumnConfig[];
   remotePageSize?: number;
+  showSoldQuantity?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
   hideRefresh?: boolean;
@@ -109,6 +110,7 @@ function pageItems(currentPage: number, totalPages: number): PageItem[] {
 export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActions, onMutation }: { config: ResourceConfig; actions?: React.ReactNode; beforeTable?: React.ReactNode; refreshKey?: string | number; rowActions?: (row: JsonRecord, refresh: () => Promise<void>) => React.ReactNode; onMutation?: () => void }) {
   const [rows, setRows] = useState<JsonRecord[]>([]);
   const [pagination, setPagination] = useState<{ page: number; pageSize: number; total: number; totalPages: number } | null>(null);
+  const [soldQuantity, setSoldQuantity] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -136,6 +138,8 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       const result = await requestJson(url);
       if (sequence !== requestSequence.current) return;
       setRows(findRows(result));
+      const summary = asRecord(asRecord(result)?.summary);
+      setSoldQuantity(typeof summary?.soldQuantity === "number" && Number.isFinite(summary.soldQuantity) ? summary.soldQuantity : null);
       const remotePage = asRecord(asRecord(result)?.pagination);
       if (remotePage && typeof remotePage.page === "number" && typeof remotePage.pageSize === "number" && typeof remotePage.total === "number" && typeof remotePage.totalPages === "number") {
         setPagination({ page: remotePage.page, pageSize: remotePage.pageSize, total: remotePage.total, totalPages: remotePage.totalPages });
@@ -144,7 +148,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     }
     catch (reason) {
       if (sequence === requestSequence.current) {
-        setRows([]); setPagination(null); setLoadError(reason instanceof Error ? reason.message : "Не удалось загрузить список");
+        setRows([]); setPagination(null); setSoldQuantity(null); setLoadError(reason instanceof Error ? reason.message : "Не удалось загрузить список");
       }
     }
     finally { if (sequence === requestSequence.current) setLoading(false); }
@@ -206,6 +210,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const hasProductSelect = config.fields.some((field) => field.optionsFrom);
   return <>
     <PageHeader eyebrow={config.eyebrow ?? "Учёт операций"} title={config.title} description={config.description} actions={<div className="toolbar">{actions}{!config.hideCreate && <button className="button" onClick={() => { setFormOpen((open) => !open); setError(""); setSuccess(""); }}><Plus size={15} />{formOpen ? "Закрыть форму" : config.createLabel}</button>}</div>} />
+    {config.showSoldQuantity && <section className="panel metric-card" style={{ "--metric-bg": "#eef5fa", marginBottom: 16 } as React.CSSProperties} aria-label="Проданные товары"><Package className="metric-icon" size={18} /><div className="metric-label">Продано товаров</div><div className="metric-value">{soldQuantity === null ? loading ? "…" : "—" : `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(soldQuantity)} шт.`}</div><div className="metric-help">Доставленные и выкупленные Ozon товары за всё время, за вычетом возвратов</div></section>}
     {error && <div className="error-banner" role="alert"><AlertCircle size={16} />{error}</div>}
     {success && <div className="success-banner" role="status"><CheckCircle2 size={16} />{success}</div>}
     {formOpen && <section className="panel form-panel" aria-label={`Новая запись: ${config.title}`}>

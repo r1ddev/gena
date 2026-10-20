@@ -8,6 +8,7 @@ export default function SalesPage() {
     collectionUrl: "/api/orders", createUrl: "/api/orders", hideCreate: true,
     hideRefresh: true,
     remotePageSize: 50,
+    showSoldQuantity: true,
     fields: [],
     columns: [
       { key: "externalId", label: "Отправление", primary: true }, { key: "orderDate", label: "Создан", kind: "date" },

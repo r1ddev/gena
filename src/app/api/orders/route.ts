@@ -37,7 +37,30 @@ export async function GET(request: Request) {
       sql`${postings.deliveredAt}::text ILIKE ${pattern}`,
       itemMatches,
     ) : undefined;
-    const countRows = await db.select({ total: sql<number>`count(*)::int` }).from(postings).where(where);
+    const [countRows, soldItemRows, returnQuantityRows] = await Promise.all([
+      db.select({ total: sql<number>`count(*)::int` }).from(postings).where(where),
+      db.select({ postingNumber: postings.externalId, item: postingItems })
+        .from(postingItems)
+        .innerJoin(postings, eq(postingItems.postingId, postings.id))
+        .where(or(sql`lower(${postings.status}) = 'delivered'`, eq(postingItems.isMarketplaceBuyout, true))),
+      db.select({ postingNumber: returns.postingNumber, externalKey: returns.externalKey, quantity: returns.quantity }).from(returns),
+    ]);
+    const returnQuantityByItem = new Map<string, number>();
+    for (const returned of returnQuantityRows) {
+      if (!returned.postingNumber) continue;
+      const key = `${returned.postingNumber}\u0000${returned.externalKey}`;
+      const quantity = Number(returned.quantity ?? 0);
+      if (Number.isFinite(quantity)) returnQuantityByItem.set(key, (returnQuantityByItem.get(key) ?? 0) + quantity);
+    }
+    const soldQuantityByItem = new Map<string, number>();
+    for (const sold of soldItemRows) {
+      const key = `${sold.postingNumber}\u0000${sold.item.externalKey}`;
+      const quantity = Number(sold.item.quantity ?? 0);
+      if (Number.isFinite(quantity)) soldQuantityByItem.set(key, (soldQuantityByItem.get(key) ?? 0) + quantity);
+    }
+    const soldQuantity = [...soldQuantityByItem].reduce((total, [key, quantity]) =>
+      total + Math.max(0, quantity - Math.min(quantity, returnQuantityByItem.get(key) ?? 0)), 0);
+    const summary = { soldQuantity };
     const total = countRows[0]?.total ?? 0;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const page = Math.min(requestedPageNumber, totalPages);
@@ -45,7 +68,7 @@ export async function GET(request: Request) {
       .orderBy(sql`${postings.orderDate} DESC NULLS LAST`, desc(postings.externalId))
       .limit(pageSize).offset((page - 1) * pageSize);
     const pagination = { page, pageSize, total, totalPages };
-    if (!pageRows.length) return { items: [], pagination };
+    if (!pageRows.length) return { items: [], pagination, summary };
 
     const postingIds = pageRows.map((posting) => posting.id);
     const externalIds = pageRows.map((posting) => posting.externalId);
@@ -92,6 +115,7 @@ export async function GET(request: Request) {
         };
       }),
       pagination,
+      summary,
     };
   });
 }
