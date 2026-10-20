@@ -8,6 +8,7 @@ export default function CatalogPage() {
     title: "Каталог товаров", eyebrow: "Справочники",
     description: "Единый список товаров и их артикулов. Связи с Ozon нужны для автоматического распознавания заказов и возвратов.",
     collectionUrl: "/api/products", createUrl: "/api/products", createLabel: "Добавить товар",
+    imageUpload: true,
     fields: [
       { name: "offerId", label: "Артикул", placeholder: "Артикул продавца" },
       { name: "title", label: "Название товара *", required: true, wide: true },

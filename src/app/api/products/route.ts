@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { productLinks, products } from "@/db/schema";
+import { productImages, productLinks, products } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
-import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+import { readProductImage } from "../_lib/product-image";
+import { assertLocalMutation, errorResponse, handleLocalGet } from "../_lib/http";
 
 const productSchema = z.object({
   title: z.string().trim().min(1).max(300),
@@ -16,11 +17,16 @@ const productSchema = z.object({
 
 export async function GET(request: Request) {
   return handleLocalGet(request, async () => {
-    const snapshot = await getAccountingSnapshot();
-    const links = await db.select().from(productLinks);
+    const [snapshot, links, imageRows] = await Promise.all([
+      getAccountingSnapshot(),
+      db.select().from(productLinks),
+      db.select({ productId: productImages.productId }).from(productImages),
+    ]);
+    const imageProductIds = new Set(imageRows.map(({ productId }) => productId));
     return {
       items: snapshot.products.map((product) => ({
         ...product,
+        imageUrl: imageProductIds.has(product.id) ? `/api/products/${product.id}/image` : null,
         offerId: "",
         ozonSku: "",
         ...links.filter((link) => link.productId === product.id).reduce<Record<string, unknown>>((result, link, index) => ({
@@ -36,7 +42,17 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     assertLocalMutation(request);
-    const body = await parseBody(request, productSchema);
+    let rawBody: unknown;
+    let image: Awaited<ReturnType<typeof readProductImage>> = null;
+    if (request.headers.get("content-type")?.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      rawBody = { title: formData.get("title"), offerId: formData.get("offerId"), ozonSku: formData.get("ozonSku") };
+      image = await readProductImage(formData);
+    } else {
+      try { rawBody = await request.json(); }
+      catch { throw new Error("Тело запроса должно быть корректным JSON."); }
+    }
+    const body = productSchema.parse(rawBody);
     const result = await db.transaction(async (tx) => {
       const linked = body.offerId
         ? await tx.select().from(productLinks).where(eq(productLinks.offerId, body.offerId))
@@ -48,12 +64,14 @@ export async function POST(request: Request) {
       const [product] = await tx.insert(products).values({
         sku: body.offerId || body.ozonSku,
         title: body.title,
-      }).returning();
+      }).returning({ id: products.id, sku: products.sku, title: products.title, category: products.category, archived: products.archived, createdAt: products.createdAt, updatedAt: products.updatedAt });
+
+      if (image) await tx.insert(productImages).values({ productId: product.id, ...image });
 
       if (body.offerId || body.ozonSku) {
         await tx.insert(productLinks).values({ productId: product.id, offerId: body.offerId, ozonSku: body.ozonSku || null });
       }
-      return product;
+      return { ...product, imageUrl: image ? `/api/products/${product.id}/image` : null };
     });
     return Response.json({ item: result }, { status: 201 });
   } catch (error) {

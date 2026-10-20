@@ -2,6 +2,7 @@ import {
   boolean,
   check,
   date,
+  customType,
   index,
   integer,
   jsonb,
@@ -39,6 +40,15 @@ export const products = pgTable(
   },
   (table) => [index("products_archived_title_idx").on(table.archived, table.title)],
 );
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+export const productImages = pgTable("product_images", {
+  productId: uuid("product_id").primaryKey().references(() => products.id, { onDelete: "cascade" }),
+  contentType: text("content_type").notNull(),
+  data: bytea("data").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 export const productLinks = pgTable(
   "product_links",

@@ -1,9 +1,10 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { externalItems, financeAccruals, ozonWriteoffs, postingItems, postings, productLinks, products, returns } from "@/db/schema";
+import { externalItems, financeAccruals, ozonWriteoffs, postingItems, postings, productImages, productLinks, products, returns } from "@/db/schema";
 import { externalItemIgnorePlan, externalProductKey } from "@/ozon/external-product";
 import { financeAccrualRowContainsSku, financeRowContainsSku } from "@/ozon/finance";
+import { readProductImage } from "../_lib/product-image";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 
 function sourceKind(raw: Record<string, unknown>, hasOrderRow: boolean) {
@@ -140,7 +141,17 @@ export async function PATCH(request: Request) {
     assertLocalMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new Error("Не указан идентификатор артикула Ozon.");
-    const body = await parseBody(request, actionSchema);
+    let rawBody: unknown;
+    let image: Awaited<ReturnType<typeof readProductImage>> = null;
+    if (request.headers.get("content-type")?.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      rawBody = { action: formData.get("action"), title: formData.get("title"), offerId: formData.get("offerId"), ozonSku: formData.get("ozonSku") };
+      image = await readProductImage(formData);
+    } else {
+      rawBody = await parseBody(request, actionSchema);
+    }
+    const body = actionSchema.parse(rawBody);
+    if (image && body.action !== "create") throw new Error("Изображение можно добавить только при создании товара.");
     const external = (await db.select().from(externalItems).where(eq(externalItems.id, id)).limit(1))[0];
     if (!external) throw new Error("Запись не найдена.");
     if (body.action === "ignore") {
@@ -198,6 +209,7 @@ export async function PATCH(request: Request) {
       if (body.action === "create") {
         const [created] = await tx.insert(products).values({ sku: offerId || ozonSku, title: body.title }).returning();
         productId = created.id;
+        if (image) await tx.insert(productImages).values({ productId, ...image });
       }
       const [product] = await tx.select().from(products).where(eq(products.id, productId)).limit(1);
       if (!product) throw new Error("Сначала создайте товар в каталоге.");

@@ -129,6 +129,15 @@ tbody tr:hover { background: #fcfdfc; }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: #79c5a0; box-shadow: 0 0 0 3px rgba(23,139,99,.1); }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .form-help { margin: 11px 0 0; color: #89948d; font-size: 10px; line-height: 1.5; }
+.product-image-field { margin-top: 14px; }
+.product-image-controls { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.field input.product-image-file-input { position: absolute; width: 1px; min-height: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+.product-image-file-input:focus-visible + .product-image-controls .product-image-actions > label { outline: 2px solid #79c5a0; outline-offset: 2px; }
+.product-image-preview { width: 68px; height: 68px; flex: 0 0 auto; object-fit: cover; border: 1px solid #dfe5e0; border-radius: 8px; }
+.product-image-actions { display: flex; align-items: center; gap: 9px; min-width: 0; flex-wrap: wrap; }
+.product-image-paste { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 7px 9px; color: #64746a; background: #f6f8f6; border: 1px dashed #bdc9c0; border-radius: 7px; font-size: 10px; cursor: text; }
+.product-image-paste:focus-visible { outline: 2px solid #79c5a0; outline-offset: 2px; }
+.product-image-error { color: #a34535; font-size: 10px; }
 .error-banner, .success-banner { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 13px; padding: 11px 12px; border-radius: 9px; font-size: 11px; line-height: 1.45; }
 .error-banner { border: 1px solid #f0d8d8; color: #954747; background: #fff8f8; }
 .success-banner { border: 1px solid #d8eee1; color: #216e4e; background: #f4fbf7; }

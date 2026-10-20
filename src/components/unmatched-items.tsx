@@ -5,6 +5,7 @@ import { AlertCircle, CheckCircle2, Link2, Plus, XCircle } from "lucide-react";
 import { asRecord, findRows, getId, requestJson, type JsonRecord } from "./api";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 import { filterAndSortRows, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { ProductImageInput } from "./product-image-input";
 
 type Option = { id: string; label: string };
 const sourceLabels: Record<string, string> = {
@@ -78,6 +79,7 @@ export function UnmatchedItems() {
   const [mode, setMode] = useState<Record<string, "map" | "create" | undefined>>({});
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [productDrafts, setProductDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [productImages, setProductImages] = useState<Record<string, File | null>>({});
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [sort, setSort] = useState<TableSort>(null);
   const visibleRows = useMemo(() => filterAndSortRows(rows, unmatchedColumns, filters, sort), [rows, filters, sort]);
@@ -138,10 +140,15 @@ export function UnmatchedItems() {
       ozonSku: draft.ozonSku ?? defaults.ozonSku,
     };
     try {
-      await requestJson(`/api/external-items?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
+      const formData = new FormData();
+      Object.entries(body).forEach(([key, value]) => formData.append(key, value));
+      const image = productImages[id];
+      if (image) formData.append("image", image, image.name || "product-image");
+      await requestJson(`/api/external-items?id=${encodeURIComponent(id)}`, { method: "PATCH", body: formData });
       setSuccess("Товар создан в каталоге и связан с записью Ozon.");
       setMode((current) => { const { [id]: _removed, ...rest } = current; return rest; });
       setProductDrafts((current) => { const { [id]: _removed, ...rest } = current; return rest; });
+      setProductImages((current) => { const { [id]: _removed, ...rest } = current; return rest; });
       await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось создать товар"); }
     finally { setBusy(""); }
@@ -178,6 +185,7 @@ export function UnmatchedItems() {
                 <div className="field wide"><label htmlFor={`new-title-${id}`}>Название товара *</label><input id={`new-title-${id}`} value={values.title} required onChange={(event) => setDraftValue("title", event.target.value)} /></div>
                 <div className="field"><label htmlFor={`new-ozon-sku-${id}`}>SKU Ozon</label><input id={`new-ozon-sku-${id}`} value={values.ozonSku} onChange={(event) => setDraftValue("ozonSku", event.target.value)} /></div>
               </div>
+              <ProductImageInput id={`new-product-image-${id}`} value={productImages[id] ?? null} onChange={(file) => setProductImages((current) => ({ ...current, [id]: file }))} />
               <div className="form-actions"><button type="button" className="button secondary" onClick={() => setMode((current) => ({ ...current, [id]: undefined }))}>Отмена</button><button className="button" disabled={busy === id}>{busy === id ? "Сохраняем…" : "Сохранить"}</button></div>
             </form>
           </section>

@@ -6,6 +6,7 @@ import { asRecord, displayValue, findRows, getId, localToday, requestJson, strin
 import { PageHeader } from "./page-header";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 import { filterAndSortRows, TableHead, type TableSort } from "./table-controls";
+import { ProductImageInput } from "./product-image-input";
 
 export type FieldConfig = {
   name: string;
@@ -29,6 +30,7 @@ export type ResourceConfig = {
   createUrl: string;
   createLabel?: string;
   hideCreate?: boolean;
+  imageUpload?: boolean;
   fields: FieldConfig[];
   columns: ColumnConfig[];
   remotePageSize?: number;
@@ -119,6 +121,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const [loadError, setLoadError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [productImage, setProductImage] = useState<File | null>(null);
   const [productOptions, setProductOptions] = useState<{ value: string; label: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -216,8 +219,13 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     setBusy(true); setError(""); setSuccess("");
     const payload = buildResourcePayload(config.fields, formValues, localToday());
     try {
-      await requestJson(config.createUrl, { method: "POST", body: JSON.stringify(payload) });
-      setFormValues({}); setFormOpen(false); setSuccess("Запись добавлена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh();
+      const body = config.imageUpload ? new FormData() : JSON.stringify(payload);
+      if (body instanceof FormData) {
+        Object.entries(payload).forEach(([key, value]) => body.append(key, String(value)));
+        if (productImage) body.append("image", productImage, productImage.name || "product-image");
+      }
+      await requestJson(config.createUrl, { method: "POST", body });
+      setFormValues({}); setProductImage(null); setFormOpen(false); setSuccess("Запись добавлена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось сохранить запись"); }
     finally { setBusy(false); }
   }
@@ -243,6 +251,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       <div className="panel-head"><h2>Новая запись</h2><span className="small-note">Поля со звёздочкой обязательны</span></div>
       <form className="panel-body" onSubmit={submit}>
         <div className="form-grid">{config.fields.map((field) => <Field key={field.name} config={field} value={formValues[field.name] ?? (field.type === "date" ? localToday() : "")} productOptions={productOptions} onChange={(value) => setFormValues((current) => ({ ...current, [field.name]: value }))} />)}</div>
+        {config.imageUpload && <ProductImageInput id="new-product-image" value={productImage} onChange={setProductImage} />}
         {config.help && <p className="form-help">{config.help}</p>}
         {hasProductSelect && productOptions.length === 0 && <p className="form-help">Сначала добавьте товар в каталог, чтобы выбрать его здесь.</p>}
         <div className="form-actions"><button type="button" className="button secondary" onClick={() => setFormOpen(false)}>Отмена</button><button className="button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></div>
