@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import {
@@ -46,7 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {mobileOpen && <button className="mobile-backdrop" aria-label="Закрыть меню" onClick={() => setMobileOpen(false)} />}
       <aside className={`sidebar ${mobileOpen ? "open" : ""}`} aria-label="Основная навигация">
         <Link className="brand" href="/" onClick={() => setMobileOpen(false)}>
-          <span className="brand-mark">G</span>
+          <Image className="brand-mark" src="/icon.png" alt="" width={44} height={44} priority aria-hidden="true" />
           <span><span className="brand-name">Gena</span><span className="brand-caption" style={{ display: "block" }}>учёт продавца</span></span>
         </Link>
         {navSections.map((section) => (
