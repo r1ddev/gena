@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { manualWriteoffs, ozonWriteoffs, products } from "@/db/schema";
-import { assertLocalMutation, errorResponse, handle, parseBody } from "../_lib/http";
+import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, positiveDecimal } from "../_lib/validation";
 
 const writeoffSchema = z.object({
@@ -12,8 +12,8 @@ const writeoffSchema = z.object({
   note: z.string().trim().max(2000).optional().default(""),
 });
 
-export async function GET() {
-  return handle(async () => {
+export async function GET(request: Request) {
+  return handleLocalGet(request, async () => {
     const [manual, ozon, catalog] = await Promise.all([
       db.select().from(manualWriteoffs).orderBy(desc(manualWriteoffs.writtenOffAt), desc(manualWriteoffs.createdAt)),
       db.select().from(ozonWriteoffs).orderBy(desc(ozonWriteoffs.occurredAt), desc(ozonWriteoffs.updatedAt)),

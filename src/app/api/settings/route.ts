@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { appSettings } from "@/db/schema";
 import { encryptSecret } from "@/security/secrets";
-import { assertLocalMutation, errorResponse, handle, parseBody } from "../_lib/http";
+import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 
 const settingsSchema = z.object({
   clientId: z.string().trim().min(1).max(100),
@@ -11,8 +11,8 @@ const settingsSchema = z.object({
   syncIntervalHours: z.number().int().min(1).max(168).optional().default(24),
 });
 
-export async function GET() {
-  return handle(async () => {
+export async function GET(request: Request) {
+  return handleLocalGet(request, async () => {
     const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1)).limit(1);
     return {
       configured: Boolean(settings?.ozonClientId && settings?.ozonApiKeyEncrypted),

@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { products, returns } from "@/db/schema";
-import { assertLocalMutation, errorResponse, handle, parseBody } from "../_lib/http";
+import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, timestampValue } from "../_lib/validation";
 
 const eventTime = z.union([timestampValue, isoDate]).transform((value) =>
@@ -14,8 +14,8 @@ const returnUpdate = z.object({
   availableAtOzon: eventTime.optional().nullable(),
 });
 
-export async function GET() {
-  return handle(async () => {
+export async function GET(request: Request) {
+  return handleLocalGet(request, async () => {
     const [rows, catalog] = await Promise.all([
       db.select().from(returns).orderBy(desc(returns.updatedAt)),
       db.select().from(products),

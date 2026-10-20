@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { externalItems, financeAccruals, ozonWriteoffs, postingItems, productLinks, products, returns } from "@/db/schema";
 import { financeAccrualRowContainsSku } from "@/ozon/finance";
-import { assertLocalMutation, errorResponse, handle, parseBody } from "../_lib/http";
+import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("map"), productId: z.string().uuid() }),
@@ -12,7 +12,7 @@ const actionSchema = z.discriminatedUnion("action", [
 ]);
 
 export async function GET(request: Request) {
-  return handle(async () => {
+  return handleLocalGet(request, async () => {
     const disposition = new URL(request.url).searchParams.get("disposition") ?? "pending";
     const items = disposition === "all"
       ? await db.select().from(externalItems).orderBy(desc(externalItems.lastSeenAt))

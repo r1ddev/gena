@@ -20,8 +20,9 @@ export function errorResponse(error: unknown) {
   return json({ error: message, message }, status);
 }
 
-export async function handle<T>(operation: () => Promise<T>) {
+export async function handleLocalGet<T>(request: Request, operation: () => Promise<T>) {
   try {
+    assertLocalRequest(request);
     return json(await operation());
   } catch (error) {
     return errorResponse(error);
@@ -38,11 +39,17 @@ export async function parseBody<T>(request: Request, schema: ZodType<T>): Promis
   return schema.parse(body);
 }
 
-export function assertLocalMutation(request: Request) {
+export function assertLocalRequest(request: Request) {
   const rawHost = request.headers.get("host");
   let host = "";
   try { host = new URL(`http://${rawHost ?? ""}`).hostname.toLowerCase(); } catch { /* reject below */ }
   if (!host || !localHosts.has(host)) throw new Error("Приложение принимает изменения только с локального компьютера.");
+}
+
+export function assertLocalMutation(request: Request) {
+  assertLocalRequest(request);
+  const rawHost = request.headers.get("host");
+  const host = new URL(`http://${rawHost ?? ""}`).hostname.toLowerCase();
   const origin = request.headers.get("origin");
   if (origin) {
     let originHost = "";

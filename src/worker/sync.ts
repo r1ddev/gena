@@ -1,4 +1,4 @@
-import { and, eq, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { db } from "@/db";
 import {
@@ -15,7 +15,8 @@ import {
 } from "@/db/schema";
 import { decryptSecret } from "@/security/secrets";
 import { ozonPost } from "@/ozon/client";
-import { postingContainsMarketplaceBuyout } from "@/ozon/finance";
+import { financeAccrualPostingNumber, matchBuyoutLines, staleOzonAccrualKeys } from "@/ozon/finance";
+import { observeBuyerHandoffAt } from "@/ozon/postings";
 
 type JsonRecord = Record<string, unknown>;
 type ExternalProduct = { offer_id?: unknown; sku?: unknown; name?: unknown; quantity?: unknown; price?: unknown; is_marketplace_buyout?: unknown };
@@ -38,7 +39,10 @@ async function resolveExternalProduct(product: ExternalProduct, raw: JsonRecord)
   const sku = asString(product.sku);
   const key = externalKey(offerId, sku);
   const links = await db.select().from(productLinks).where(eq(productLinks.offerId, offerId));
-  const link = links.find((candidate) => candidate.ozonSku === sku) ?? links.find((candidate) => !candidate.ozonSku);
+  const skuLinks = sku ? await db.select().from(productLinks).where(eq(productLinks.ozonSku, sku)) : [];
+  const link = links.find((candidate) => candidate.ozonSku === sku)
+    ?? skuLinks.find((candidate) => candidate.ozonSku === sku)
+    ?? links.find((candidate) => !candidate.ozonSku);
   if (link) return { externalKey: key, offerId, sku, productId: link.productId };
 
   const existing = await db.select().from(externalItems).where(eq(externalItems.externalKey, key)).limit(1);
@@ -64,21 +68,26 @@ async function upsertFboPosting(posting: FboPosting) {
   const postingNumber = asString(posting.posting_number);
   if (!postingNumber) return false;
   const status = asString(posting.status, "unknown");
-  const markedAsMarketplaceBuyout = postingContainsMarketplaceBuyout(posting);
   const mappedProducts = await Promise.all((posting.products ?? []).map(async (product) => ({
     product,
     mapped: await resolveExternalProduct(product, product as JsonRecord),
   })));
   await db.transaction(async (tx) => {
     const [existing] = await tx.select().from(postings).where(eq(postings.externalId, postingNumber)).limit(1);
-    const deliveredAt = existing?.deliveredAt ?? (status === "delivered" ? new Date() : null);
+    const oldItems = existing ? await tx.select().from(postingItems).where(eq(postingItems.postingId, existing.id)) : [];
+    const oldItemByKey = new Map(oldItems.map((item) => [item.externalKey, item]));
+    const deliveredAt = observeBuyerHandoffAt(existing?.deliveredAt ?? null, status, new Date());
+    const allItemsAreMarketplaceBuyouts = mappedProducts.length > 0 && mappedProducts.every(({ product, mapped }) =>
+      product.is_marketplace_buyout === true || oldItemByKey.get(mapped.externalKey)?.isMarketplaceBuyout === true,
+    );
     const [saved] = await tx.insert(postings).values({
       externalId: postingNumber,
       orderNumber: asString(posting.order_number),
       status,
       orderDate: typeof posting.created_at === "string" ? new Date(posting.created_at) : null,
       deliveredAt,
-      isMarketplaceBuyout: markedAsMarketplaceBuyout,
+      isMarketplaceBuyout: allItemsAreMarketplaceBuyouts,
+      marketplaceBuyoutAt: existing?.marketplaceBuyoutAt ?? null,
       raw: posting as JsonRecord,
       updatedAt: new Date(),
     }).onConflictDoUpdate({
@@ -87,24 +96,31 @@ async function upsertFboPosting(posting: FboPosting) {
         orderNumber: asString(posting.order_number),
         status,
         deliveredAt,
-        isMarketplaceBuyout: Boolean(existing?.isMarketplaceBuyout || markedAsMarketplaceBuyout),
+        isMarketplaceBuyout: allItemsAreMarketplaceBuyouts,
+        marketplaceBuyoutAt: existing?.marketplaceBuyoutAt ?? null,
         raw: posting as JsonRecord,
         updatedAt: new Date(),
       },
     }).returning({ id: postings.id });
     if (!saved) throw new Error(`Не удалось обновить отправление ${postingNumber}.`);
     await tx.delete(postingItems).where(eq(postingItems.postingId, saved.id));
-    if (mappedProducts.length) await tx.insert(postingItems).values(mappedProducts.map(({ product, mapped }) => ({
-      postingId: saved.id,
-      externalKey: mapped.externalKey,
-      productId: mapped.productId,
-      offerId: mapped.offerId,
-      ozonSku: mapped.sku,
-      title: asString(product.name, "Без названия"),
-      quantity: String(Math.max(0, asNumber(product.quantity))),
-      price: String(Math.max(0, moneyAmount(product.price))),
-      raw: product as JsonRecord,
-    })));
+    if (mappedProducts.length) await tx.insert(postingItems).values(mappedProducts.map(({ product, mapped }) => {
+      const previous = oldItemByKey.get(mapped.externalKey);
+      const isMarketplaceBuyout = product.is_marketplace_buyout === true || previous?.isMarketplaceBuyout === true;
+      return {
+        postingId: saved.id,
+        externalKey: mapped.externalKey,
+        productId: mapped.productId,
+        offerId: mapped.offerId,
+        ozonSku: mapped.sku,
+        title: asString(product.name, "Без названия"),
+        quantity: String(Math.max(0, asNumber(product.quantity))),
+        price: String(Math.max(0, moneyAmount(product.price))),
+        isMarketplaceBuyout,
+        marketplaceBuyoutAt: previous?.marketplaceBuyoutAt ?? (existing?.isMarketplaceBuyout ? existing.marketplaceBuyoutAt : null),
+        raw: product as JsonRecord,
+      };
+    }));
   });
   return true;
 }
@@ -188,9 +204,6 @@ async function importReturns(credentials: OzonCredentials, from: Date, to: Date,
       const old = existing[0];
       const returnedAtValue = item.logistic?.return_date;
       const status = asString(item.visual?.status?.sys_name, asString(item.visual?.status?.display_name, "unknown"));
-      const apiReceivedAt = status.toLowerCase() === "receivedbyseller"
-        ? (typeof item.logistic?.final_moment === "string" ? item.logistic.final_moment : new Date().toISOString())
-        : null;
       await db.insert(returns).values({
         externalId: id,
         postingNumber: asString(item.posting_number) || null,
@@ -202,7 +215,7 @@ async function importReturns(credentials: OzonCredentials, from: Date, to: Date,
         destination: old?.destination === "unknown" ? destination : old?.destination ?? destination,
         status,
         returnedAt: typeof returnedAtValue === "string" ? new Date(returnedAtValue) : old?.returnedAt ?? null,
-        receivedBySellerAt: old?.receivedBySellerAt ?? (apiReceivedAt ? new Date(apiReceivedAt) : null),
+        receivedBySellerAt: old?.receivedBySellerAt ?? null,
         availableAtOzon: old?.availableAtOzon ?? null,
         raw: item as JsonRecord,
         updatedAt: new Date(),
@@ -218,7 +231,7 @@ async function importReturns(credentials: OzonCredentials, from: Date, to: Date,
           destination: old?.destination === "unknown" ? destination : old?.destination ?? destination,
           status,
           returnedAt: typeof returnedAtValue === "string" ? new Date(returnedAtValue) : old?.returnedAt ?? null,
-          receivedBySellerAt: old?.receivedBySellerAt ?? (apiReceivedAt ? new Date(apiReceivedAt) : null),
+          receivedBySellerAt: old?.receivedBySellerAt ?? null,
           raw: item as JsonRecord,
           updatedAt: new Date(),
         },
@@ -241,7 +254,8 @@ async function importDailyAccruals(credentials: OzonCredentials, from: Date, to:
   for (let day = start; day <= to; day = addDays(day, 1)) {
     const dayText = dateOnly(day);
     let lastId = "";
-    const seenKeys = new Set<string>();
+    const dailyAccruals: JsonRecord[] = [];
+    let paginationComplete = false;
     for (let page = 0; page < 500; page += 1) {
       const response = await ozonPost<{ accruals?: JsonRecord[]; last_id?: string }>(
         "/v1/finance/accrual/by-day",
@@ -249,69 +263,91 @@ async function importDailyAccruals(credentials: OzonCredentials, from: Date, to:
         credentials,
       );
       const accruals = response.accruals ?? [];
-      for (const accrual of accruals) {
-        const unitNumber = asString(accrual.unit_number);
-        const category = asString(accrual.accrued_category, "unknown");
-        const accrualId = asString(accrual.accrual_id ?? accrual.type_id);
-        if (category.toUpperCase() === "POSTING" && unitNumber) {
-          await db.delete(financeAccruals).where(and(eq(financeAccruals.postingNumber, unitNumber), eq(financeAccruals.accrualId, "imported")));
-        }
-        const itemFees = accrual.item_fees as { fees?: { sku?: unknown; fees?: { accrued?: unknown; type_id?: unknown }[] }[] } | undefined;
-        const financeRows: { suffix: string; productId: string | null; amount: number; typeId: string }[] = [];
-        if (category.toUpperCase() === "ITEM" && itemFees?.fees?.length) {
-          for (const itemFee of itemFees.fees) {
-            const sku = asString(itemFee.sku);
-            const fees = itemFee.fees ?? [];
-            const amount = fees.reduce((sum, fee) => sum + Math.round(moneyAmount(fee.accrued) * 100), 0) / 100;
-            if (amount === 0 && fees.length === 0) continue;
-            const links = sku ? await db.select().from(productLinks).where(eq(productLinks.ozonSku, sku)).limit(1) : [];
-            const externalRows = sku ? await db.select().from(externalItems).where(eq(externalItems.ozonSku, sku)) : [];
-            const external = externalRows.find((entry) => entry.disposition === "mapped" || entry.disposition === "created");
-            const productId = links[0]?.productId ?? external?.productId ?? null;
-            financeRows.push({ suffix: `sku:${sku}`, productId, amount, typeId: fees.map((fee) => asString(fee.type_id)).sort().join(",") });
-          }
-        } else {
-          const totalAmount = accrual.total_amount as { amount?: unknown } | undefined;
-          financeRows.push({ suffix: "", productId: null, amount: moneyAmount(totalAmount), typeId: "" });
-        }
-
-        for (const financeRow of financeRows) {
-          const fingerprint = createHash("sha256").update(JSON.stringify(accrual)).digest("hex").slice(0, 24);
-          const stableId = accrualId || fingerprint;
-          const key = `${dayText}:${category}:${unitNumber}:${stableId}:${financeRow.suffix}`;
-          seenKeys.add(key);
-          await db.insert(financeAccruals).values({
-            externalKey: key,
-            accrualDate: dayText,
-            postingNumber: category.toUpperCase() === "POSTING" ? unitNumber || null : null,
-            productId: financeRow.productId,
-            accrualId,
-            accruedCategory: category,
-            typeId: financeRow.typeId,
-            amount: String(financeRow.amount),
-            raw: accrual,
-          }).onConflictDoUpdate({
-            target: financeAccruals.externalKey,
-            set: {
-              postingNumber: category.toUpperCase() === "POSTING" ? unitNumber || null : null,
-              productId: financeRow.productId,
-              amount: String(financeRow.amount),
-              accruedCategory: category,
-              typeId: financeRow.typeId,
-              raw: accrual,
-            },
-          });
-          total += 1;
-        }
-      }
+      dailyAccruals.push(...accruals);
       lastId = response.last_id ?? "";
-      if (!lastId || !accruals.length) break;
+      if (!lastId || !accruals.length) {
+        paginationComplete = true;
+        break;
+      }
       await sleep(100);
     }
-    const oldRows = await db.select({ externalKey: financeAccruals.externalKey }).from(financeAccruals).where(eq(financeAccruals.accrualDate, dayText));
-    const obsoleteKeys = oldRows.map((row) => row.externalKey).filter((key) => !seenKeys.has(key));
-    if (seenKeys.size && obsoleteKeys.length) await db.delete(financeAccruals).where(and(eq(financeAccruals.accrualDate, dayText), notInArray(financeAccruals.externalKey, [...seenKeys])));
-    if (!seenKeys.size) await db.delete(financeAccruals).where(eq(financeAccruals.accrualDate, dayText));
+    if (!paginationComplete) throw new Error(`Не удалось полностью загрузить начисления Ozon за ${dayText}; прежние данные сохранены.`);
+    const seenKeys = new Set<string>();
+    const legacyPostingNumbers = new Set<string>();
+    const preparedRows: {
+      externalKey: string;
+      postingNumber: string | null;
+      productId: string | null;
+      accrualId: string;
+      accruedCategory: string;
+      typeId: string;
+      amount: string;
+      raw: JsonRecord;
+    }[] = [];
+    for (const accrual of dailyAccruals) {
+      const unitNumber = asString(accrual.unit_number);
+      const category = asString(accrual.accrued_category, "unknown");
+      const accrualId = asString(accrual.accrual_id ?? accrual.type_id);
+      const postingNumber = financeAccrualPostingNumber(category, unitNumber);
+      if (postingNumber) legacyPostingNumbers.add(postingNumber);
+      const itemFees = accrual.item_fees as { fees?: { sku?: unknown; fees?: { accrued?: unknown; type_id?: unknown }[] }[] } | undefined;
+      const financeRows: { suffix: string; productId: string | null; amount: number; typeId: string }[] = [];
+      if (category.toUpperCase() === "ITEM" && itemFees?.fees?.length) {
+        for (const itemFee of itemFees.fees) {
+          const sku = asString(itemFee.sku);
+          const fees = itemFee.fees ?? [];
+          const amount = fees.reduce((sum, fee) => sum + Math.round(moneyAmount(fee.accrued) * 100), 0) / 100;
+          if (amount === 0 && fees.length === 0) continue;
+          const external = sku
+            ? await resolveExternalProduct({ sku, name: `Ozon SKU ${sku}` }, itemFee as JsonRecord)
+            : { productId: null };
+          financeRows.push({ suffix: `sku:${sku}`, productId: external.productId, amount, typeId: fees.map((fee) => asString(fee.type_id)).sort().join(",") });
+        }
+      } else {
+        const totalAmount = accrual.total_amount as { amount?: unknown } | undefined;
+        financeRows.push({ suffix: "", productId: null, amount: moneyAmount(totalAmount), typeId: "" });
+      }
+
+      for (const financeRow of financeRows) {
+        const fingerprint = createHash("sha256").update(JSON.stringify(accrual)).digest("hex").slice(0, 24);
+        const stableId = accrualId || fingerprint;
+        const externalKey = `${dayText}:${category}:${unitNumber}:${stableId}:${financeRow.suffix}`;
+        seenKeys.add(externalKey);
+        preparedRows.push({
+          externalKey,
+          postingNumber,
+          productId: financeRow.productId,
+          accrualId,
+          accruedCategory: category,
+          typeId: financeRow.typeId,
+          amount: String(financeRow.amount),
+          raw: accrual,
+        });
+      }
+    }
+    total += preparedRows.length;
+    await db.transaction(async (tx) => {
+      for (const row of preparedRows) {
+        await tx.insert(financeAccruals).values({ ...row, accrualDate: dayText }).onConflictDoUpdate({
+          target: financeAccruals.externalKey,
+          set: {
+            postingNumber: row.postingNumber,
+            productId: row.productId,
+            accrualId: row.accrualId,
+            accruedCategory: row.accruedCategory,
+            typeId: row.typeId,
+            amount: row.amount,
+            raw: row.raw,
+          },
+        });
+      }
+      if (legacyPostingNumbers.size) {
+        await tx.delete(financeAccruals).where(and(inArray(financeAccruals.postingNumber, [...legacyPostingNumbers]), eq(financeAccruals.accrualId, "imported")));
+      }
+      const oldRows = await tx.select({ externalKey: financeAccruals.externalKey }).from(financeAccruals).where(eq(financeAccruals.accrualDate, dayText));
+      const obsoleteKeys = staleOzonAccrualKeys(dayText, oldRows.map((row) => row.externalKey), seenKeys, paginationComplete);
+      if (obsoleteKeys.length) await tx.delete(financeAccruals).where(inArray(financeAccruals.externalKey, obsoleteKeys));
+    });
     days += 1;
     if (days % 10 === 0 || dayText === dateOnly(to)) await progress(`Начисления Ozon: ${days} дней, ${total} строк; до ${dayText}`);
     await sleep(200);
@@ -335,18 +371,27 @@ async function importBuyoutReports(credentials: OzonCredentials, from: Date, to:
       const offerId = asString(product.offer_id);
       const links = await db.select().from(productLinks).where(eq(productLinks.offerId, offerId));
       const link = links.find((entry) => entry.ozonSku === sku) ?? links.find((entry) => !entry.ozonSku);
-      const key = externalKey(offerId, sku);
       const posting = await db.select().from(postings).where(eq(postings.externalId, postingNumber)).limit(1);
       if (posting[0]) {
-        await db.update(postings).set({
-          isMarketplaceBuyout: true,
-          marketplaceBuyoutAt: sql`COALESCE(${postings.marketplaceBuyoutAt}, ${new Date()})`,
-          updatedAt: new Date(),
-        }).where(eq(postings.externalId, postingNumber));
+        const lineItems = await db.select().from(postingItems).where(eq(postingItems.postingId, posting[0].id));
+        const matchingItems = matchBuyoutLines(lineItems, { sku, offerId });
+        if (matchingItems.length) {
+          const observedAt = new Date();
+          await db.update(postingItems).set({
+            isMarketplaceBuyout: true,
+            marketplaceBuyoutAt: sql`COALESCE(${postingItems.marketplaceBuyoutAt}, ${observedAt})`,
+          }).where(inArray(postingItems.id, matchingItems.map((item) => item.id)));
+          const refreshedItems = await db.select().from(postingItems).where(eq(postingItems.postingId, posting[0].id));
+          const allItemsAreMarketplaceBuyouts = refreshedItems.length > 0 && refreshedItems.every((item) => item.isMarketplaceBuyout);
+          await db.update(postings).set({
+            isMarketplaceBuyout: allItemsAreMarketplaceBuyouts,
+            marketplaceBuyoutAt: allItemsAreMarketplaceBuyouts ? sql`COALESCE(${postings.marketplaceBuyoutAt}, ${observedAt})` : posting[0].marketplaceBuyoutAt,
+            updatedAt: observedAt,
+          }).where(eq(postings.id, posting[0].id));
+        }
       }
       if (!link && offerId) await resolveExternalProduct(product as ExternalProduct, product);
       productsFound += 1;
-      void key;
     }
     reports += 1;
     await progress(`Отчёты о выкупах Ozon: ${reports} периодов, ${productsFound} товаров`);

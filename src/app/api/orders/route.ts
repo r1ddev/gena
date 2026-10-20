@@ -1,10 +1,10 @@
 import { db } from "@/db";
 import { appSettings, financeAccruals, postingItems, syncJobs } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
-import { assertLocalMutation, errorResponse, handle } from "../_lib/http";
+import { assertLocalMutation, errorResponse, handleLocalGet } from "../_lib/http";
 
-export async function GET() {
-  return handle(async () => {
+export async function GET(request: Request) {
+  return handleLocalGet(request, async () => {
     const [snapshot, accruals] = await Promise.all([
       getAccountingSnapshot(),
       db.select().from(financeAccruals),
@@ -17,11 +17,16 @@ export async function GET() {
       items: snapshot.postingRows.map((posting) => ({
         ...posting,
         items: itemRows.filter((item) => item.postingId === posting.id).map((item) => ({
-          title: item.title, offerId: item.offerId, ozonSku: item.ozonSku, quantity: item.quantity, price: item.price, mapped: Boolean(item.productId),
+          title: item.title, offerId: item.offerId, ozonSku: item.ozonSku, quantity: item.quantity, price: item.price, mapped: Boolean(item.productId), isMarketplaceBuyout: item.isMarketplaceBuyout,
         })),
         amount: accrualsByPosting.get(posting.externalId) ?? 0,
         recognized: recognized.has(posting.id),
-        phase: posting.isMarketplaceBuyout ? "Выкуп Ozon" : recognized.has(posting.id) ? "Учтён" : posting.deliveredAt ? "Предварительно" : "Ожидает доставки",
+        phase: (() => {
+          const items = itemRows.filter((item) => item.postingId === posting.id);
+          if (items.length && items.every((item) => item.isMarketplaceBuyout)) return "Выкуп Ozon";
+          if (items.some((item) => item.isMarketplaceBuyout)) return "Смешанная продажа";
+          return recognized.has(posting.id) ? "Учтён" : posting.deliveredAt ? "Предварительно" : "Ожидает доставки";
+        })(),
       })),
     };
   });

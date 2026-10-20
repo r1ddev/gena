@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { expenses } from "@/db/schema";
-import { assertLocalMutation, errorResponse, handle, parseBody } from "../_lib/http";
+import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, nonNegativeDecimal } from "../_lib/validation";
 
 const expenseSchema = z.object({
@@ -12,8 +12,8 @@ const expenseSchema = z.object({
   note: z.string().trim().max(2000).optional().default(""),
 });
 
-export async function GET() {
-  return handle(async () => ({ items: await db.select().from(expenses).orderBy(desc(expenses.spentAt), desc(expenses.createdAt)) }));
+export async function GET(request: Request) {
+  return handleLocalGet(request, async () => ({ items: await db.select().from(expenses).orderBy(desc(expenses.spentAt), desc(expenses.createdAt)) }));
 }
 
 export async function POST(request: Request) {

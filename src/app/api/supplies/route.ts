@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { products, supplies, supplyLines } from "@/db/schema";
-import { assertLocalMutation, errorResponse, handle, parseBody } from "../_lib/http";
+import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, nonNegativeDecimal, positiveDecimal } from "../_lib/validation";
 
 const supplySchema = z.object({
@@ -12,8 +12,8 @@ const supplySchema = z.object({
   lines: z.array(z.object({ productId: z.string().uuid(), quantity: positiveDecimal })).min(1),
 });
 
-export async function GET() {
-  return handle(async () => {
+export async function GET(request: Request) {
+  return handleLocalGet(request, async () => {
     const [headers, lines, catalog] = await Promise.all([
       db.select().from(supplies).orderBy(desc(supplies.suppliedAt), desc(supplies.createdAt)),
       db.select().from(supplyLines),

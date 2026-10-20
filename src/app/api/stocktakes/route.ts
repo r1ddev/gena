@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { products, stockAdjustments, stocktakeLines, stocktakes } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
-import { assertLocalMutation, errorResponse, handle, parseBody } from "../_lib/http";
+import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, nonNegativeDecimal } from "../_lib/validation";
 
 const stocktakeSchema = z.object({
@@ -14,8 +14,8 @@ const stocktakeSchema = z.object({
 });
 const resolutionSchema = z.object({ resolutionNote: z.string().trim().max(2000).optional().default("") });
 
-export async function GET() {
-  return handle(async () => {
+export async function GET(request: Request) {
+  return handleLocalGet(request, async () => {
     const [headers, lines, catalog] = await Promise.all([
       db.select().from(stocktakes).orderBy(desc(stocktakes.countedAt), desc(stocktakes.createdAt)),
       db.select().from(stocktakeLines),

@@ -3,13 +3,23 @@ import { z } from "zod";
 import { db } from "@/db";
 import { expenses, financeAccruals, importBatches, importRows, manualWriteoffs, postingItems, postings, productLinks, products, purchaseReceipts, purchases, returns, stocktakeLines, stocktakes, supplies, supplyLines } from "@/db/schema";
 import { makeImportSourceKey } from "@/importer/source-key";
-import { findPreviouslyAppliedBatch } from "@/importer/content-guard";
+import { findChangedAppliedBatch, findPreviouslyAppliedBatch } from "@/importer/content-guard";
 import { getImportCellValue, getImportedProductCategory, getSupplyShippingCost, normalizeImportHeader, parseImportDate, parseImportMoney } from "@/importer/workbook";
+import { summarizeImportIssues } from "@/importer/issue-summary";
+import { getImportedReceivedQuantity, shouldDeleteImportedReceipt } from "@/importer/purchases";
+import { getImportedBuyerDeliveryDate, getSaleAmountImportIssue, isDeliveredSaleStatus, isImportableSaleMovement, isMarketplaceBuyoutStatus } from "@/importer/sales";
+import { preserveMarketplaceBuyoutEvidence } from "@/ozon/postings";
+import { getLegacyReturnWriteMode } from "@/importer/returns";
 import { assertLocalMutation, errorResponse, parseBody } from "../../_lib/http";
 
 const requestSchema = z.object({ batchId: z.string().uuid() });
 type StoredRow = { headers: string[]; cells: Record<string, unknown>; values?: unknown[] };
 type SaleSource = { row: typeof importRows.$inferSelect; data: StoredRow; orderId: string; productSku: string; status: string; quantity: number; amount: number | null; orderDate: string | null; deliveredAt: string | null };
+type ImportResult = { batchId: string; imported: Record<string, number>; skippedRows: number; issueCounts: { message: string; count: number }[]; issues: { sheet: string; row: number; message: string }[] };
+
+class ImportPreviewRollback extends Error {
+  constructor(readonly result: ImportResult) { super("Dry-run import rollback"); }
+}
 
 function cell(data: StoredRow, aliases: string[]) {
   return getImportCellValue(data.cells, aliases);
@@ -17,11 +27,9 @@ function cell(data: StoredRow, aliases: string[]) {
 
 function valueAt(data: StoredRow, index: number) { return data.values?.[index] ?? null; }
 function text(value: unknown) { return value === null || value === undefined ? "" : String(value).trim(); }
-function sourceKey(row: typeof importRows.$inferSelect, contentHash: string, suffix = "") {
-  return makeImportSourceKey(contentHash, `row:${row.sheetName}:${row.rowNumber}${suffix ? `:${suffix}` : ""}`);
+function sourceKey(row: typeof importRows.$inferSelect, sourceNamespace: string, suffix = "") {
+  return makeImportSourceKey(sourceNamespace, `row:${row.sheetName}:${row.rowNumber}${suffix ? `:${suffix}` : ""}`);
 }
-function yes(value: unknown) { return /^(да|yes|true|1|получен|выполнен|выполнена|доставлен|received)$/i.test(text(value)); }
-function isDelivered(value: string) { return /доставлен|delivered|выкуп/i.test(value); }
 function dateValue(data: StoredRow, aliases: string[]) { return parseImportDate(cell(data, aliases)); }
 function quantityValue(value: unknown, fallback = 0) { return parseImportMoney(value) ?? fallback; }
 function productSku(data: StoredRow) { return text(cell(data, ["sku", "артикул", "карточка", "карточка (артикул)", "код товара", "offer id"])); }
@@ -46,21 +54,34 @@ export async function POST(request: Request) {
   try {
     assertLocalMutation(request);
     const { batchId } = await parseBody(request, requestSchema);
-    const result = await db.transaction(async (tx) => {
+    const dryRun = new URL(request.url).searchParams.get("dry-run") === "true";
+    let result: ImportResult;
+    try {
+      result = await db.transaction(async (tx) => {
       const [initialBatch] = await tx.select().from(importBatches).where(eq(importBatches.id, batchId)).limit(1);
       if (!initialBatch) throw new Error("Пакет переноса не найден.");
-      const lockKey = initialBatch.contentHash ?? initialBatch.id;
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
+      const fileLockKey = `import:file:${initialBatch.fileName.trim().toLocaleLowerCase()}`;
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${fileLockKey}, 0))`);
+      if (initialBatch.contentHash) {
+        const contentLockKey = `import:content:${initialBatch.contentHash}`;
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${contentLockKey}, 0))`);
+      }
 
       const [batch] = await tx.select().from(importBatches).where(eq(importBatches.id, batchId)).limit(1);
       if (!batch) throw new Error("Пакет переноса не найден.");
       if (batch.status !== "preview") throw new Error("Этот пакет уже обработан; повторный перенос заблокирован.");
+      const sourceNamespace = batch.contentHash ?? batch.id;
       if (batch.contentHash) {
         const appliedBatches = await tx.select({ id: importBatches.id, contentHash: importBatches.contentHash, status: importBatches.status })
           .from(importBatches)
           .where(and(eq(importBatches.contentHash, batch.contentHash), eq(importBatches.status, "applied"), ne(importBatches.id, batch.id)));
         const duplicate = findPreviouslyAppliedBatch(batch, appliedBatches);
         if (duplicate) throw new Error("Файл с таким содержимым уже был перенесён; повторное применение не изменит инвентаризационные корректировки.");
+        const changedFileBatches = await tx.select({ id: importBatches.id, fileName: importBatches.fileName, contentHash: importBatches.contentHash, status: importBatches.status })
+          .from(importBatches)
+          .where(and(sql`lower(${importBatches.fileName}) = ${batch.fileName.trim().toLocaleLowerCase()}`, eq(importBatches.status, "applied"), ne(importBatches.id, batch.id)));
+        const changed = findChangedAppliedBatch(batch, changedFileBatches);
+        if (changed) throw new Error("Файл с таким именем уже переносился с другим содержимым. Повтор заблокирован: сначала требуется сверить обе версии, чтобы не изменить чужую строку и не задвоить операции.");
       }
       const rows = await tx.select().from(importRows).where(eq(importRows.batchId, batchId)).orderBy(importRows.sheetName, importRows.rowNumber);
       const imported: Record<string, number> = {};
@@ -99,7 +120,7 @@ export async function POST(request: Request) {
         const quantity = quantityValue(cell(data, ["количество", "кол-во", "qty", "quantity"]));
         const unitCost = amountValue(data, ["цена за единицу", "цена за 1", "цена", "unit cost"]);
         const total = amountValue(data, ["сумма", "сумм", "стоимость закупки", "итого", "amount"]);
-        const purchasedAt = dateValue(data, ["дата закупки", "дата", "создано", "изменено", "purchase date"]);
+        const purchasedAt = dateValue(data, ["дата закупки", "дата", "создано", "purchase date"]);
         if (!product || quantity <= 0 || (unitCost === null && total === null) || !purchasedAt) {
           const message = !product ? "Товар закупки не найден в каталоге." : quantity <= 0 || (unitCost === null && total === null) ? "Не найдены количество и стоимость закупки." : "Дата закупки не найдена; строка не перенесена, чтобы не назначать вымышленную дату.";
           await addIssue(row, message);
@@ -112,19 +133,22 @@ export async function POST(request: Request) {
           orderedQuantity: String(quantity),
           amountPaid: String(paid),
           note: text(cell(data, ["примечание", "комментарий", "источник", "ссылка"])) .slice(0, 2000),
-          sourceKey: sourceKey(row, batch.contentHash),
+          sourceKey: sourceKey(row, sourceNamespace),
         }).onConflictDoUpdate({ target: purchases.sourceKey, set: { productId: product.id, purchasedAt, orderedQuantity: String(quantity), amountPaid: String(paid) } }).returning();
-        const receivedValue = cell(data, ["получено количество", "получено", "received quantity", "received"]);
-        const receivedQuantity = parseImportMoney(receivedValue) ?? (yes(receivedValue) ? quantity : 0);
+        const receivedQuantity = getImportedReceivedQuantity(data.cells, quantity);
+        const receiptAt = dateValue(data, ["дата получения", "дата приемки", "дата приёмки", "received date"]);
+        const receiptSourceKey = sourceKey(row, sourceNamespace, "receipt");
+        if (shouldDeleteImportedReceipt(receivedQuantity)) {
+          await tx.delete(purchaseReceipts).where(eq(purchaseReceipts.sourceKey, receiptSourceKey));
+        }
         if (receivedQuantity > 0) {
-          const receiptAt = dateValue(data, ["дата получения", "дата приемки", "дата приёмки", "received date"]);
           if (!receiptAt) {
             await addIssue(row, "Закупка перенесена, но дата её получения отсутствует; приёмка пропущена, чтобы не менять остаток по вымышленной дате.");
             addImported("purchases");
             continue;
           }
           const receiptUnitCost = unitCost ?? paid / quantity;
-          await tx.insert(purchaseReceipts).values({ purchaseId: purchase.id, receivedAt: receiptAt, receivedQuantity: String(Math.min(receivedQuantity, quantity)), unitCost: String(receiptUnitCost), sourceKey: sourceKey(row, batch.contentHash, "receipt") })
+          await tx.insert(purchaseReceipts).values({ purchaseId: purchase.id, receivedAt: receiptAt, receivedQuantity: String(Math.min(receivedQuantity, quantity)), unitCost: String(receiptUnitCost), sourceKey: receiptSourceKey })
             .onConflictDoUpdate({ target: purchaseReceipts.sourceKey, set: { purchaseId: purchase.id, receivedAt: receiptAt, receivedQuantity: String(Math.min(receivedQuantity, quantity)), unitCost: String(receiptUnitCost) } });
         }
         addImported("purchases");
@@ -138,7 +162,7 @@ export async function POST(request: Request) {
         if (!spentAt) { await addIssue(row, "Дата расхода не найдена; строка не перенесена, чтобы не назначать вымышленную дату."); continue; }
         const category = text(cell(data, ["категория", "статья", "название расхода", "что", "комментарий", "расход"])).slice(0, 120) || "Импортированный расход";
         const note = text(cell(data, ["примечание", "комментарий", "описание", "ссылка"])).slice(0, 2000);
-        await tx.insert(expenses).values({ spentAt, category, amount: String(amount), note, sourceKey: sourceKey(row, batch.contentHash) })
+        await tx.insert(expenses).values({ spentAt, category, amount: String(amount), note, sourceKey: sourceKey(row, sourceNamespace) })
           .onConflictDoUpdate({ target: expenses.sourceKey, set: { spentAt, category, amount: String(amount), note } });
         addImported("expenses");
       }
@@ -171,7 +195,7 @@ export async function POST(request: Request) {
           for (const row of group.rows) await addIssue(row, "Дата поставки не найдена; операция не перенесена, чтобы не назначать вымышленную дату.");
           continue;
         }
-        const src = makeImportSourceKey(batch.contentHash, `supply:${key}`);
+        const src = makeImportSourceKey(sourceNamespace, `supply:${key}`);
         const [supply] = await tx.insert(supplies).values({ suppliedAt: group.at, shippingCost: String(group.shippingCost), note: group.note.slice(0, 2000), sourceKey: src })
           .onConflictDoUpdate({ target: supplies.sourceKey, set: { suppliedAt: group.at, shippingCost: String(group.shippingCost), note: group.note.slice(0, 2000) } }).returning();
         await tx.delete(supplyLines).where(and(eq(supplyLines.supplyId, supply.id), like(supplyLines.sourceKey, "import:%")));
@@ -193,7 +217,7 @@ export async function POST(request: Request) {
         if (!product || quantity <= 0) { await addIssue(row, !product ? "Товар списания не найден в каталоге." : "Не найдено количество списания."); continue; }
         const writtenOffAt = dateValue(data, ["дата списания", "дата", "date"]);
         if (!writtenOffAt) { await addIssue(row, "Дата списания не найдена; строка не перенесена, чтобы не назначать вымышленную дату."); continue; }
-        await tx.insert(manualWriteoffs).values({ productId: product.id, writtenOffAt, quantity: String(quantity), note: reason.slice(0, 2000), sourceKey: sourceKey(row, batch.contentHash) })
+        await tx.insert(manualWriteoffs).values({ productId: product.id, writtenOffAt, quantity: String(quantity), note: reason.slice(0, 2000), sourceKey: sourceKey(row, sourceNamespace) })
           .onConflictDoUpdate({ target: manualWriteoffs.sourceKey, set: { productId: product.id, writtenOffAt, quantity: String(quantity), note: reason.slice(0, 2000) } });
         addImported("writeoffs");
       }
@@ -207,10 +231,13 @@ export async function POST(request: Request) {
         const quantity = quantityValue(cell(data, ["количество", "кол-во", "qty", "quantity"]), 1);
         const amount = amountValue(data, ["сумма", "выплата", "доход", "amount"]);
         const orderDate = dateValue(data, ["дата заказа", "дата создания", "создано", "дата", "order date", "created at"]);
-        const deliveredAt = dateValue(data, ["дата доставки покупателю", "дата доставки", "дата вручения", "buyer delivery date", "delivered at", "дата"]);
+        const deliveredAt = getImportedBuyerDeliveryDate(data.cells);
         if (!sku || quantity <= 0) { await addIssue(row, !sku ? "Не найден артикул продажи." : "Некорректное количество продажи."); continue; }
+        const amountIssue = getSaleAmountImportIssue(amount, status);
+        if (amountIssue === "negative") { await addIssue(row, "Отрицательная сумма не перенесена: сначала нужно сопоставить её с финансовым событием Ozon, чтобы не считать неизвестную операцию продажей."); continue; }
+        if (amountIssue === "missing") { await addIssue(row, "У доставленного заказа нет суммы продажи; строка не перенесена, чтобы не списывать себестоимость без выручки."); continue; }
         if (!orderDate && !deliveredAt) { await addIssue(row, "Дата заказа не найдена; строка не перенесена, чтобы не назначать вымышленную дату."); continue; }
-        if (isDelivered(status) && !deliveredAt) { await addIssue(row, "Дата передачи покупателю не найдена; доставленный заказ не перенесён, чтобы не начать 21-дневный срок с неверной даты."); continue; }
+        if (isDeliveredSaleStatus(status) && !deliveredAt) { await addIssue(row, "Дата передачи покупателю не найдена; доставленный заказ не перенесён, чтобы не начать 21-дневный срок с неверной даты."); continue; }
         saleSources.push({ row, data, orderId: orderId || `legacy:${row.sheetName}:${row.rowNumber}`, productSku: sku, status, quantity, amount, orderDate: orderDate ?? deliveredAt, deliveredAt });
       }
       const saleGroups = new Map<string, SaleSource[]>();
@@ -222,7 +249,7 @@ export async function POST(request: Request) {
           if (!previous || sale.row.rowNumber >= previous.row.rowNumber) chosenBySku.set(sale.productSku, sale);
         }
         const lines = [...chosenBySku.values()];
-        const delivered = lines.filter((sale) => isDelivered(sale.status));
+        const delivered = lines.filter((sale) => isDeliveredSaleStatus(sale.status));
         const status = delivered.length ? "delivered" : lines.at(-1)?.status ?? "unknown";
         const deliveredAt = delivered.map((sale) => sale.deliveredAt).filter((date): date is string => Boolean(date)).sort()[0] ?? null;
         const orderDate = lines.map((sale) => sale.orderDate).filter((date): date is string => Boolean(date)).sort()[0] ?? deliveredAt;
@@ -242,22 +269,29 @@ export async function POST(request: Request) {
           for (const line of lines) await addIssue(line.row, "Продажа уже поступила из Ozon API; импортная строка не заменяет источник API.");
           continue;
         }
+        const marketplaceBuyout = mappedLines.length > 0 && mappedLines.every(({ sale }) => isMarketplaceBuyoutStatus(sale.status));
+        const buyoutEvidence = preserveMarketplaceBuyoutEvidence(marketplaceBuyout, existing ? {
+          marketplaceBuyoutAt: existing.marketplaceBuyoutAt,
+        } : null);
         const [posting] = await tx.insert(postings).values({
           externalId: orderId,
           orderNumber: orderId,
           status,
           orderDate: new Date(`${orderDate}T00:00:00.000Z`),
           deliveredAt: deliveredAt ? new Date(`${deliveredAt}T00:00:00.000Z`) : null,
-          isMarketplaceBuyout: lines.some((sale) => /выкуп.*маркетплейс|marketplace buyout/i.test(sale.status)),
+          isMarketplaceBuyout: marketplaceBuyout,
           raw: { source: "legacy-import", sheets: [...new Set(lines.map((sale) => sale.row.sheetName))] },
           updatedAt: new Date(),
         }).onConflictDoUpdate({
           target: postings.externalId,
-          set: { orderNumber: orderId, status, orderDate: new Date(`${orderDate}T00:00:00.000Z`), deliveredAt: deliveredAt ? new Date(`${deliveredAt}T00:00:00.000Z`) : null, raw: { source: "legacy-import" }, updatedAt: new Date() },
+          set: { orderNumber: orderId, status, orderDate: new Date(`${orderDate}T00:00:00.000Z`), deliveredAt: deliveredAt ? new Date(`${deliveredAt}T00:00:00.000Z`) : null, ...buyoutEvidence, raw: { source: "legacy-import" }, updatedAt: new Date() },
         }).returning();
+        const previousItems = await tx.select().from(postingItems).where(eq(postingItems.postingId, posting.id));
         await tx.delete(postingItems).where(and(eq(postingItems.postingId, posting.id), like(postingItems.sourceKey, "import:%")));
         for (const { sale, productId } of mappedLines) {
-          const rowKey = sourceKey(sale.row, batch.contentHash);
+          const rowKey = sourceKey(sale.row, sourceNamespace);
+          const previousItem = previousItems.find((item) => item.offerId === sale.productSku);
+          const isMarketplaceBuyout = isMarketplaceBuyoutStatus(sale.status) || previousItem?.isMarketplaceBuyout === true;
           await tx.insert(postingItems).values({
             postingId: posting.id,
             externalKey: `legacy:${sale.row.sheetName}:${sale.row.rowNumber}`.slice(0, 240),
@@ -267,7 +301,9 @@ export async function POST(request: Request) {
             title: sale.productSku,
             quantity: String(sale.quantity),
             price: String(Math.max(0, sale.amount ?? 0)),
-            movementEnabled: isDelivered(sale.status),
+            movementEnabled: isImportableSaleMovement(sale.status),
+            isMarketplaceBuyout,
+            marketplaceBuyoutAt: previousItem?.marketplaceBuyoutAt ?? (existing?.isMarketplaceBuyout ? existing.marketplaceBuyoutAt : null),
             raw: { source: "legacy-import", sheet: sale.row.sheetName, row: sale.row.rowNumber, status: sale.status },
           });
           if (sale.amount !== null) {
@@ -299,11 +335,11 @@ export async function POST(request: Request) {
         const key = `${row.sheetName}:${warehouse}:${countedAt}`;
         const group = stocktakeGroups.get(key) ?? { first: row, warehouse, countedAt, lines: [] };
         const expected = quantityValue(cell(data, ["ожидаемый остаток", "расчетный остаток", "расчётный остаток", "expected quantity"]));
-        group.lines.push({ productId: product.id, expected, actual, source: sourceKey(row, batch.contentHash) });
+        group.lines.push({ productId: product.id, expected, actual, source: sourceKey(row, sourceNamespace) });
         stocktakeGroups.set(key, group);
       }
       for (const [key, group] of stocktakeGroups) {
-        const [stocktake] = await tx.insert(stocktakes).values({ warehouse: group.warehouse, countedAt: group.countedAt, note: `Импортирована инвентаризация ${key}`, sourceKey: makeImportSourceKey(batch.contentHash, `stocktake:${key}`) })
+        const [stocktake] = await tx.insert(stocktakes).values({ warehouse: group.warehouse, countedAt: group.countedAt, note: `Импортирована инвентаризация ${key}`, sourceKey: makeImportSourceKey(sourceNamespace, `stocktake:${key}`) })
           .onConflictDoUpdate({ target: stocktakes.sourceKey, set: { warehouse: group.warehouse, countedAt: group.countedAt } }).returning();
         await tx.delete(stocktakeLines).where(and(eq(stocktakeLines.stocktakeId, stocktake.id), like(stocktakeLines.sourceKey, "import:%")));
         for (const line of group.lines) await tx.insert(stocktakeLines).values({ stocktakeId: stocktake.id, productId: line.productId, expectedQuantity: String(line.expected), actualQuantity: String(line.actual), sourceKey: line.source });
@@ -319,21 +355,48 @@ export async function POST(request: Request) {
         const returnedAtText = parseImportDate(cell(data, ["дата возврата", "дата", "returned at"]));
         const receivedAtText = parseImportDate(cell(data, ["дата получения продавцом", "получен продавцом", "received by seller"]));
         const availableAtText = parseImportDate(cell(data, ["дата доступности ozon", "доступен на ozon", "available at ozon"]));
-        const id = sourceKey(row, batch.contentHash);
-        await tx.insert(returns).values({
-          externalId: `legacy-return:${id}`.slice(0, 240),
-          postingNumber: text(cell(data, ["номер отправления", "posting number", "id заказа", "id"])) || null,
-          externalKey: `offer:${product.sku}|sku:?`,
+        const legacyKey = sourceKey(row, sourceNamespace);
+        const returnId = text(cell(data, ["идентификатор возврата", "id возврата", "return id"]));
+        const externalId = (returnId || `legacy-return:${legacyKey}`).slice(0, 240);
+        const postingNumber = text(cell(data, ["номер отправления", "номер заказа", "posting number", "id заказа"])) || null;
+        const returnedAt = returnedAtText ? new Date(`${returnedAtText}T00:00:00.000Z`) : null;
+        const receivedBySellerAt = receivedAtText ? new Date(`${receivedAtText}T00:00:00.000Z`) : null;
+        const availableAtOzon = availableAtText ? new Date(`${availableAtText}T00:00:00.000Z`) : null;
+        const externalKey = `offer:${product.sku}|sku:?`;
+        const status = statusValue(cell(data, ["статус", "status"])) || "imported";
+        const raw = { source: "legacy-import", sheet: row.sheetName, row: row.rowNumber };
+        const values = {
+          externalId,
+          postingNumber,
+          externalKey,
           productId: product.id,
           offerId: product.sku,
           quantity: String(quantity),
           destination,
-          status: statusValue(cell(data, ["статус", "status"])) || "imported",
-          returnedAt: returnedAtText ? new Date(`${returnedAtText}T00:00:00.000Z`) : null,
-          receivedBySellerAt: receivedAtText ? new Date(`${receivedAtText}T00:00:00.000Z`) : null,
-          availableAtOzon: availableAtText ? new Date(`${availableAtText}T00:00:00.000Z`) : null,
-          raw: { source: "legacy-import", sheet: row.sheetName, row: row.rowNumber },
-        }).onConflictDoNothing();
+          status,
+          returnedAt,
+          receivedBySellerAt,
+          availableAtOzon,
+          raw,
+        };
+        if (returnId) {
+          const [existingReturn] = await tx.select().from(returns).where(eq(returns.externalId, externalId)).limit(1);
+          const writeMode = getLegacyReturnWriteMode(existingReturn?.raw);
+          if (writeMode === "conflict") {
+            await addIssue(row, "Идентификатор возврата уже занят записью Ozon API; импорт не заменяет данные API.");
+            continue;
+          }
+          if (writeMode === "update" && existingReturn) {
+            await tx.update(returns).set({ ...values, updatedAt: new Date() }).where(eq(returns.id, existingReturn.id));
+          } else {
+            await tx.insert(returns).values(values).onConflictDoNothing();
+          }
+        } else {
+          await tx.insert(returns).values(values).onConflictDoUpdate({
+            target: returns.externalId,
+            set: { postingNumber, externalKey, productId: product.id, offerId: product.sku, quantity: String(quantity), destination, status, returnedAt, receivedBySellerAt, availableAtOzon, raw, updatedAt: new Date() },
+          });
+        }
         addImported("returns");
       }
 
@@ -341,10 +404,16 @@ export async function POST(request: Request) {
         await addIssue(row, "Тип данных не распознан; строка сохранена в отчёте и не перенесена.");
       }
 
+      const result = { batchId, imported, skippedRows: issues.length, issueCounts: summarizeImportIssues(issues), issues: issues.slice(0, 200) };
+      if (dryRun) throw new ImportPreviewRollback(result);
       const summary = { ...(batch.summary as Record<string, unknown>), applied: imported, issues: issues.length, issueRows: issues.slice(0, 200) };
       await tx.update(importBatches).set({ status: "applied", summary, appliedAt: new Date() }).where(eq(importBatches.id, batchId));
-      return { batchId, imported, skippedRows: issues.length, issues: issues.slice(0, 200) };
-    });
+      return result;
+      });
+    } catch (error) {
+      if (error instanceof ImportPreviewRollback) result = error.result;
+      else throw error;
+    }
     return Response.json(result);
   } catch (error) {
     return errorResponse(error);

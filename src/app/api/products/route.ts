@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { productLinks, products } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
-import { assertLocalMutation, errorResponse, handle, parseBody } from "../_lib/http";
+import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 
 const productSchema = z.object({
   sku: z.string().trim().min(1).max(100),
@@ -13,8 +13,8 @@ const productSchema = z.object({
   ozonSku: z.string().trim().max(40).optional().default(""),
 });
 
-export async function GET() {
-  return handle(async () => {
+export async function GET(request: Request) {
+  return handleLocalGet(request, async () => {
     const snapshot = await getAccountingSnapshot();
     const links = await db.select().from(productLinks);
     return {
