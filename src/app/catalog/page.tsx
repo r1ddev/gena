@@ -4,7 +4,7 @@ import { ResourcePage } from "@/components/resource-page";
 
 export default function CatalogPage() {
   return <ResourcePage config={{
-    title: "Каталог товаров", eyebrow: "Справочники",
+    title: "Каталог товаров",
     description: "Список товаров с артикулами и SKU Ozon.",
     collectionUrl: "/api/products", createUrl: "/api/products", createLabel: "Добавить товар",
     editUrl: (row) => typeof row.id === "string" ? `/api/products/${encodeURIComponent(row.id)}` : null,
