@@ -58,7 +58,7 @@ export function StocktakeWorkspace() {
   }
 
   return <>
-    <PageHeader eyebrow="Контроль остатков" title="Инвентаризация" description="Запишите фактическое количество по каждому товару. Расхождение не изменяет остаток, пока вы не разберёте и не подтвердите его отдельно." actions={<button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Обновить</button>} />
+    <PageHeader eyebrow="Контроль остатков" title="Инвентаризация" description="Запишите фактическое количество по каждому товару. Расхождение не изменяет остаток, пока вы не разберёте и не подтвердите его отдельно." />
     {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}{success && <div className="success-banner" role="status"><CheckCircle2 size={15} />{success}</div>}
     <section className="panel form-panel">
       <div className="panel-head"><h2>Новый пересчёт</h2><ClipboardList size={17} color="#178b63" /></div>

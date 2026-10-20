@@ -6,7 +6,6 @@ export default function SalesPage() {
     title: "Продажи и заказы", eyebrow: "Ozon FBO",
     description: "Отправления Ozon: статус, артикулы и денежный итог по каждому отправлению.",
     collectionUrl: "/api/orders", createUrl: "/api/orders", hideCreate: true,
-    hideRefresh: true,
     remotePageSize: 50,
     showSoldQuantity: true,
     fields: [],

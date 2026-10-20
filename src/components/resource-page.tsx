@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, Package, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Package, Plus, Search, Trash2 } from "lucide-react";
 import { asRecord, displayValue, findRows, getId, localToday, requestJson, stringValue, valueAt, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
@@ -34,7 +34,6 @@ export type ResourceConfig = {
   showSoldQuantity?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
-  hideRefresh?: boolean;
   deleteUrl?: (row: JsonRecord) => string | null;
   help?: string;
 };
@@ -227,7 +226,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     </section>}
     {beforeTable}
     <section className="panel">
-      <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Загружаем список…" : config.remotePageSize ? `${pagination?.total ?? 0} записей` : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder={config.remotePageSize ? "Поиск по заказам" : "Поиск"} value={search} onChange={(event) => setSearch(event.target.value)} /></div>{!config.hideRefresh && <button className="button secondary small" title="Обновляет список записей." onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />Обновить список</button>}</div></div>
+      <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Загружаем список…" : config.remotePageSize ? `${pagination?.total ?? 0} записей` : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder={config.remotePageSize ? "Поиск по заказам" : "Поиск"} value={search} onChange={(event) => setSearch(event.target.value)} /></div></div></div>
       {loading ? <div className="panel-body" aria-label="Загрузка списка"><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /></div>
         : loadError ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={20} /></div><div className="empty-title">Не удалось загрузить данные</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 13 }} onClick={() => void refresh()}>Повторить</button></div></div>
           : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><Package size={20} /></div><div className="empty-title">{config.remotePageSize && serverSearch ? "Ничего не найдено" : config.emptyTitle ?? "Пока нет записей"}</div><p className="empty-description">{config.remotePageSize && serverSearch ? `По запросу «${serverSearch}» совпадений нет. Измените запрос или очистите поиск.` : config.emptyDescription ?? "Добавьте первую запись — она появится в этом списке, а связанные итоги обновятся автоматически."}</p></div></div>
