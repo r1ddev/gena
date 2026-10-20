@@ -144,6 +144,7 @@ export function PurchasesWorkspace() {
   const [lines, setLines] = useState<{ productId: string; quantity: string }[]>([]);
   const [note, setNote] = useState("");
   const [editingReceiptId, setEditingReceiptId] = useState("");
+  const [historyPurchaseId, setHistoryPurchaseId] = useState("");
   const [historyFilters, setHistoryFilters] = useState<Record<string, string>>({});
   const [historySort, setHistorySort] = useState<TableSort>(null);
   const catalog = products.filter((product) => typeof product.id === "string");
@@ -186,7 +187,17 @@ export function PurchasesWorkspace() {
     { key: "totalQuantity", label: "Количество", kind: "quantity" },
     { key: "note", label: "Комментарий", kind: "text" },
   ];
-  const visibleReceiptRows = filterAndSortRows(receiptRows, historyColumns, historyFilters, historySort);
+  const historyPurchase = purchases.find((purchase) => getId(purchase) === historyPurchaseId) ?? null;
+  const receiptRowsForHistory = historyPurchaseId ? receiptRows.filter((receipt) => receipt.purchaseId === historyPurchaseId) : receiptRows;
+  const visibleReceiptRows = filterAndSortRows(receiptRowsForHistory, historyColumns, historyFilters, historySort);
+
+  function showPurchaseReceipts(purchase: JsonRecord) {
+    const id = getId(purchase);
+    if (!id) return;
+    setHistoryPurchaseId(id);
+    setHistoryFilters({});
+    document.getElementById("receipt-history")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   function resetReceiptForm() {
     setEditingReceiptId(""); setSelectedId(""); setLines([]); setNote(""); setReceivedAt(localToday());
@@ -272,7 +283,11 @@ export function PurchasesWorkspace() {
       emptyTitle: "Закупок пока нет", emptyDescription: "Создайте закупку. Приёмка сразу добавит товар на склад, а средняя себестоимость начнёт учитывать её после завершения закупки.",
     }} rowActions={(row) => {
       const completed = row.status === "completed";
-      return <button type="button" className="button secondary small" disabled={busy} aria-label={`${completed ? "Возобновить" : "Завершить"} закупку`} onClick={() => void togglePurchaseStatus(row)}>{completed ? <><RotateCcw size={14} /> Возобновить</> : <><CheckCircle2 size={14} /> Завершить закупку</>}</button>;
+      const receiptCount = Array.isArray(row.receipts) ? row.receipts.length : 0;
+      return <>
+        <button type="button" className="button secondary small" aria-label={`Показать приёмки закупки ${String(row.sku ?? "")}`} onClick={() => showPurchaseReceipts(row)}>Приёмки ({receiptCount})</button>
+        <button type="button" className="button secondary small" disabled={busy} aria-label={`${completed ? "Возобновить" : "Завершить"} закупку`} onClick={() => void togglePurchaseStatus(row)}>{completed ? <><RotateCcw size={14} /> Возобновить</> : <><CheckCircle2 size={14} /> Завершить закупку</>}</button>
+      </>;
     }} />
 
     <section className="panel" id="receipt-form" style={{ marginTop: 16 }}>
@@ -309,11 +324,11 @@ export function PurchasesWorkspace() {
       </form>
     </section>
 
-    <section className="panel" style={{ marginTop: 16 }}>
-      <div className="panel-head"><h2>История приёмок</h2><span className="small-note">{receiptRows.length} записей</span></div>
+    <section className="panel" id="receipt-history" style={{ marginTop: 16 }}>
+      <div className="panel-head"><div><h2>{historyPurchaseId ? `Приёмки закупки ${String(historyPurchase?.sku ?? "")}` : "История приёмок"}</h2><span className="small-note">{receiptRowsForHistory.length} записей</span></div>{historyPurchaseId && <button type="button" className="button secondary small" onClick={() => setHistoryPurchaseId("")}>Все приёмки</button>}</div>
       <div className="table-wrap"><table>
         <TableHead columns={historyColumns} filters={historyFilters} onFilter={(key, value) => setHistoryFilters((current) => ({ ...current, [key]: value }))} sort={historySort} onSort={(key) => setHistorySort((current) => cycleTableSort(current, key))} trailingHeaders={["Действия"]} />
-        <tbody>{visibleReceiptRows.length === 0 ? <TableEmptyRow colSpan={6} message={receiptRows.length === 0 ? "Приёмок пока нет." : "По фильтрам ничего не найдено."} onClear={Object.values(historyFilters).some(Boolean) ? () => setHistoryFilters({}) : undefined} /> : visibleReceiptRows.map((receipt) => <tr key={String(receipt.id)}>
+        <tbody>{visibleReceiptRows.length === 0 ? <TableEmptyRow colSpan={6} message={receiptRowsForHistory.length === 0 ? historyPurchaseId ? "У этой закупки пока нет приёмок." : "Приёмок пока нет." : "По фильтрам ничего не найдено."} onClear={Object.values(historyFilters).some(Boolean) ? () => setHistoryFilters({}) : undefined} /> : visibleReceiptRows.map((receipt) => <tr key={String(receipt.id)}>
           <td className="number">{formatPurchaseDate(receipt.receivedAt)}</td>
           <td><ProductArticle identifier={String(receipt.purchaseSku || "Артикул не указан")} productId={typeof receipt.purchaseProductId === "string" ? receipt.purchaseProductId : null} fallback={receipt} /></td>
           <td><div className="supply-article-list">{(Array.isArray(receipt.actualLines) ? receipt.actualLines : []).map((value, index) => { const line = asRecord(value); if (!line) return null; return <span className="supply-article-chip" key={String(line.id ?? index)}><ProductArticle identifier={String(line.sku || "Артикул не указан")} productId={typeof line.productId === "string" ? line.productId : null} fallback={line} /><strong>× {formatPurchaseQuantity(line.quantity)}</strong></span>; })}</div></td>
