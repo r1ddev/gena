@@ -54,6 +54,7 @@ const actionSchema = z.discriminatedUnion("action", [
     ozonSku: z.string().trim().min(1, "Укажите SKU Ozon.").max(40),
   }),
   z.object({ action: z.literal("ignore") }),
+  z.object({ action: z.literal("restore") }),
 ]);
 
 export async function GET(request: Request) {
@@ -61,7 +62,9 @@ export async function GET(request: Request) {
     const disposition = new URL(request.url).searchParams.get("disposition") ?? "pending";
     const items = disposition === "all"
       ? await db.select().from(externalItems).orderBy(desc(externalItems.lastSeenAt))
-      : await db.select().from(externalItems).where(eq(externalItems.disposition, "pending")).orderBy(desc(externalItems.lastSeenAt));
+      : await db.select().from(externalItems)
+        .where(eq(externalItems.disposition, disposition === "ignored" ? "ignored" : "pending"))
+        .orderBy(desc(externalItems.lastSeenAt));
     const catalog = await db.select().from(products);
     const byId = new Map(catalog.map((product) => [product.id, product]));
     const externalKeys = [...new Set(items.map((item) => item.externalKey))];
@@ -143,6 +146,16 @@ export async function PATCH(request: Request) {
     if (image && body.action !== "create") throw new Error("Изображение можно добавить только при создании товара.");
     const external = (await db.select().from(externalItems).where(eq(externalItems.id, id)).limit(1))[0];
     if (!external) throw new Error("Запись не найдена.");
+    if (body.action === "restore") {
+      const ignoredRows = await db.update(externalItems)
+        .set({ disposition: "pending", productId: null })
+        .where(and(
+          eq(externalItems.disposition, "ignored"),
+          external.ozonSku ? eq(externalItems.ozonSku, external.ozonSku) : eq(externalItems.id, external.id),
+        ))
+        .returning();
+      return Response.json({ items: ignoredRows });
+    }
     if (body.action === "ignore") {
       const item = await db.transaction(async (tx) => {
         const sameSkuRows = external.ozonSku
