@@ -152,7 +152,7 @@ export async function parseImportBuffer(buffer: Buffer, fileName: string) {
   const extension = fileName.toLocaleLowerCase("en-US").split(".").pop();
   let sheets: { name: string; rows: unknown[][] }[];
   if (extension === "csv") {
-    sheets = [{ name: fileName.replace(/\.csv$/i, "") || "CSV", rows: parseCsv(buffer.toString("utf8")) }];
+    sheets = [{ name: "CSV", rows: parseCsv(buffer.toString("utf8")) }];
   } else if (extension === "xlsx") {
     const workbook = new ExcelJS.Workbook();
     const bytes = new Uint8Array(buffer.byteLength);
