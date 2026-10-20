@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     ]);
     const imageProductIds = new Set(imageRows.map(({ productId }) => productId));
     return {
-      items: snapshot.products.map((product) => ({
+      items: snapshot.products.map(({ archived: _archived, ...product }) => ({
         ...product,
         imageUrl: imageProductIds.has(product.id) ? `/api/products/${product.id}/image` : null,
         offerId: "",
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
       const [product] = await tx.insert(products).values({
         sku: body.offerId || body.ozonSku,
         title: body.title,
-      }).returning({ id: products.id, sku: products.sku, title: products.title, category: products.category, archived: products.archived, createdAt: products.createdAt, updatedAt: products.updatedAt });
+      }).returning({ id: products.id, sku: products.sku, title: products.title, category: products.category, createdAt: products.createdAt, updatedAt: products.updatedAt });
 
       if (image) await tx.insert(productImages).values({ productId: product.id, ...image });
 

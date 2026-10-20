@@ -268,15 +268,14 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
               kind: column.kind ?? (column.key === "id" || column.key === "externalId" ? "identifier" : "text"),
               value: column.key === "article" ? (row: JsonRecord) => orderArticleText(row.items)
                 : column.key === "status" ? (row: JsonRecord) => [row.status, row.returnState].filter(Boolean).join(" ")
-                  : column.key === "archived" ? (row: JsonRecord) => row.archived ? "В архиве" : "Активен"
-                    : (row: JsonRecord) => valueAt(row, column.key),
+                  : (row: JsonRecord) => valueAt(row, column.key),
             }))} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || rowActions ? ["Действия"] : []} /><tbody>{visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
               const value = valueAt(row, column.key);
               const displayKind = column.kind === "date" || column.kind === "money" || column.kind === "quantity" || column.kind === "status" ? column.kind : undefined;
               if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, displayKind)}</span>{typeof row.sku === "string" && column.key !== "sku" && column.key !== "offerId" && <span className="table-secondary">{row.sku}</span>}</td>;
               if (column.key === "article") return <td key={column.key}>{orderArticleText(row.items)}</td>;
-              const rendered = column.key === "archived" ? (value ? "В архиве" : "Активен") : displayValue(value, displayKind);
-              return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") || column.key === "archived" ? <><span className={`badge ${column.key === "archived" && !value ? "green" : ""}`}>{rendered}</span>{column.key === "status" && typeof row.returnState === "string" && <span className="table-secondary">{row.returnState}</span>}</> : rendered}</td>;
+              const rendered = displayValue(value, displayKind);
+              return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") ? <><span className="badge">{rendered}</span>{column.key === "status" && typeof row.returnState === "string" && <span className="table-secondary">{row.returnState}</span>}</> : rendered}</td>;
             })}{(config.deleteUrl || rowActions) && <td><div className="row-actions">{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
       {pagination && pagination.totalPages > 1 && <nav className="pagination-controls" aria-label={`Страницы: ${config.title}`} aria-busy={loading}>
         {pageItems(pagination.page, pagination.totalPages).map((item, index) => item === "ellipsis"
