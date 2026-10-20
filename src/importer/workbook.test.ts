@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
-import { classifyImportSheet, getImportCellValue, getSupplyShippingCost, parseImportBuffer, parseImportDate, parseImportMoney } from "./workbook";
+import { classifyImportSheet, getImportCellValue, getImportedProductCategory, getSupplyShippingCost, normalizeImportHeader, parseImportBuffer, parseImportDate, parseImportMoney } from "./workbook";
 
 describe("workbook import helpers", () => {
   it("finds legacy values using the actual sheet labels after normalization", () => {
@@ -43,6 +43,26 @@ describe("workbook import helpers", () => {
     expect(classifyImportSheet("Sheet 3", ["Что-то", "Непонятно"])).toBe("unknown");
   });
 
+  it("does not classify chart summaries as expenses", () => {
+    expect(classifyImportSheet("Графики", ["Дата", "Доход по дням", "Расход по дням", "Прибыль"])).toBe("unknown");
+  });
+
+  it("classifies plural English supply sheet names", () => {
+    expect(classifyImportSheet("supplies", ["Date", "SKU", "Quantity"])).toBe("supplies");
+  });
+
+  it("normalizes source headers with dynamic totals and quantities", () => {
+    expect(normalizeImportHeader("Кол-во: 3069")).toBe("колво");
+    expect(normalizeImportHeader("Сумм: 146209,93")).toBe("сумм");
+    expect(getImportCellValue({ "колво": 4, "сумм": 200 }, ["кол-во"])).toBe(4);
+    expect(getImportCellValue({ "поставка": "S-17" }, ["supply id", "номер поставки", "поставка"])).toBe("S-17");
+  });
+
+  it("uses an explicit product category or a neutral default instead of the source sheet name", () => {
+    expect(getImportedProductCategory({ "категория": "Аксессуары" })).toBe("Аксессуары");
+    expect(getImportedProductCategory({ "цвет": "черный" })).toBe("Без категории");
+  });
+
   it.each([
     ["Закупки", "purchases"], ["Поставки", "supplies"], ["Продажи", "sales"],
     ["Возвраты", "returns"], ["Инвентаризация", "stocktakes"], ["Списания", "writeoffs"],
@@ -68,6 +88,19 @@ describe("workbook import helpers", () => {
     });
   });
 
+  it("treats invalid cached spreadsheet dates as empty cells", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Каталог");
+    sheet.addRow(["SKU", "Наименование", { formula: "DATEVALUE(\"invalid\")", result: new Date(Number.NaN) }]);
+    sheet.addRow(["A-1", "Сумка", null]);
+
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    await expect(parseImportBuffer(buffer, "catalog.xlsx")).resolves.toMatchObject({
+      rows: [{ type: "products", data: { cells: { "sku": "A-1", "наименование": "Сумка" } } }],
+    });
+  });
+
   it("parses quoted semicolon CSV, localized money, and common dates", async () => {
     const parsed = await parseImportBuffer(Buffer.from('SKU;Наименование;Цена\nA-1;"Сумка; чёрная";"1 234,50"', "utf8"), "items.csv");
     expect(parsed.rows[0].data.cells["наименование"]).toBe("Сумка; чёрная");
@@ -85,6 +118,24 @@ describe("workbook import helpers", () => {
       "наименование": 'Сумка "Чёрная"',
       "примечание": "первая строка,\nвторая строка",
     });
+  });
+
+  it("drops helper-only rows from operation sheets and skips derived chart sheets", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sales = workbook.addWorksheet("Продажи");
+    sales.addRow(["id", "Артикул", "Статус", "Сумма", "Стоим тов", "Итог по тов", "Дата"]);
+    sales.addRow(["O-1", "A-1", "Доставлен", 300, 50, 250, "2026-10-01"]);
+    sales.addRow(["O-2", "A-2", "Доставлен", -25, 50, 25, "2026-10-02"]);
+    sales.addRow([null, null, null, null, 50, 250, null]);
+    const charts = workbook.addWorksheet("Графики");
+    charts.addRow(["Дата", "Доход по дням", "Расход по дням", "Прибыль"]);
+    charts.addRow(["2026-10-01", 300, 50, 250]);
+
+    const parsed = await parseImportBuffer(Buffer.from(await workbook.xlsx.writeBuffer()), "workbook.xlsx");
+
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows[0]).toMatchObject({ sheetName: "Продажи", type: "sales", rowNumber: 2 });
+    expect(parsed.rows[1].data.cells).toMatchObject({ "сумма": -25, "артикул": "A-2" });
   });
 
   it("extracts rich text and hyperlink display values from xlsx cells", async () => {

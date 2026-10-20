@@ -8,7 +8,7 @@ export type WorkbookImportRow = {
   data: { headers: string[]; cells: Record<string, unknown>; values: unknown[] };
 };
 
-export const normalizeImportHeader = (value: string) => value.toLocaleLowerCase("ru-RU").replaceAll("ё", "е").replace(/[^\p{L}\p{N}]+/gu, "").trim();
+export const normalizeImportHeader = (value: string) => value.replace(/:\s*[\d\s.,]+$/u, "").toLocaleLowerCase("ru-RU").replaceAll("ё", "е").replace(/[^\p{L}\p{N}]+/gu, "").trim();
 
 export function getImportCellValue(cells: Record<string, unknown>, aliases: string[]) {
   const entries = Object.entries(cells);
@@ -36,7 +36,7 @@ export function getSupplyShippingCost(data: { headers: string[]; cells: Record<s
 
 function cellValue(value: unknown): unknown {
   if (value === null || value === undefined || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value ?? null;
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
     if ("result" in record) return cellValue(record.result);
@@ -54,8 +54,9 @@ export function classifyImportSheet(sheetName: string, headers: string[]): Impor
   const name = normalizeImportHeader(sheetName);
   const keys = headers.map(normalizeImportHeader);
   const has = (...parts: string[]) => keys.some((key) => parts.some((part) => key.includes(normalizeImportHeader(part))));
+  if (/(график|диаграм|chart|dashboard)/i.test(name)) return "unknown";
   if (/(закуп|покуп|purchase)/i.test(name)) return "purchases";
-  if (/(постав|shipment|supply)/i.test(name)) return "supplies";
+  if (/(постав|shipments?|suppl(?:y|ies))/i.test(name)) return "supplies";
   if (/(расход|expense)/i.test(name)) return "expenses";
   if (/(продаж|заказ|sale|order)/i.test(name)) return "sales";
   if (/(возврат|return)/i.test(name)) return "returns";
@@ -70,6 +71,26 @@ export function classifyImportSheet(sheetName: string, headers: string[]): Impor
   if (has("дата закупки", "purchase date") || (has("получен", "received") && has("цена за", "unit cost") && has("количество", "quantity"))) return "purchases";
   if (has("sku", "артикул", "карточка") && (has("наименование", "название", "цвет", "размер", "product name"))) return "products";
   return "unknown";
+}
+
+function hasOperationalIdentity(type: ImportRowType, cells: Record<string, unknown>) {
+  const has = (aliases: string[]) => isPopulated(getImportCellValue(cells, aliases));
+  switch (type) {
+    case "products": return has(["sku", "артикул", "карточка", "карточка (артикул)", "код товара", "offer id"]);
+    case "purchases": return has(["sku", "артикул", "карточка", "код товара", "offer id", "количество", "кол-во", "qty", "quantity"]);
+    case "supplies": return has(["sku", "артикул", "карточка", "код товара", "количество", "кол-во", "qty", "quantity"]);
+    case "sales": return has(["posting number", "номер отправления", "id заказа", "id", "заказ", "sku", "артикул", "карточка", "код товара", "offer id"]);
+    case "returns": return has(["return id", "идентификатор возврата", "posting number", "номер отправления", "id заказа", "sku", "артикул", "карточка", "код товара"]);
+    case "writeoffs": return has(["sku", "артикул", "карточка", "код товара", "количество", "кол-во", "списано", "qty", "quantity"]);
+    case "stocktakes": return has(["sku", "артикул", "карточка", "код товара", "по факту", "фактический остаток", "actual quantity"]);
+    case "expenses": return has(["что", "категория", "статья", "название расхода", "дата расхода", "дата", "spent at", "сумма", "стоимость", "расход", "amount"]);
+    case "unknown": return true;
+  }
+}
+
+export function getImportedProductCategory(cells: Record<string, unknown>) {
+  const category = getImportCellValue(cells, ["категория", "category"]);
+  return (isPopulated(category) ? String(category).trim() : "Без категории").slice(0, 120);
 }
 
 function uniqueHeaders(rawHeaders: unknown[]): { headers: string[]; keys: string[] } {
@@ -93,10 +114,12 @@ function toRows(sheetName: string, rawRows: unknown[][]): WorkbookImportRow[] {
   if (headerIndex < 0) return [];
   const { headers, keys } = uniqueHeaders(rawRows[headerIndex]);
   const type = classifyImportSheet(sheetName, headers);
+  if (/(график|диаграм|chart|dashboard)/i.test(normalizeImportHeader(sheetName))) return [];
   return rawRows.slice(headerIndex + 1).flatMap((row, index) => {
     if (!row.some(isPopulated)) return [];
     const values = row.map(cellValue);
     const cells = Object.fromEntries(keys.map((key, column) => [key, values[column] ?? null]));
+    if (!hasOperationalIdentity(type, cells)) return [];
     return [{ sheetName, rowNumber: headerIndex + index + 2, type, data: { headers, cells, values } }];
   });
 }

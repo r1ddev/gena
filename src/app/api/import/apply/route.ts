@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { expenses, financeAccruals, importBatches, importRows, manualWriteoffs, postingItems, postings, productLinks, products, purchaseReceipts, purchases, returns, stocktakeLines, stocktakes, supplies, supplyLines } from "@/db/schema";
 import { makeImportSourceKey } from "@/importer/source-key";
 import { findPreviouslyAppliedBatch } from "@/importer/content-guard";
-import { getImportCellValue, getSupplyShippingCost, normalizeImportHeader, parseImportDate, parseImportMoney } from "@/importer/workbook";
+import { getImportCellValue, getImportedProductCategory, getSupplyShippingCost, normalizeImportHeader, parseImportDate, parseImportMoney } from "@/importer/workbook";
 import { assertLocalMutation, errorResponse, parseBody } from "../../_lib/http";
 
 const requestSchema = z.object({ batchId: z.string().uuid() });
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
         const explicitTitle = text(cell(data, ["название товара", "наименование", "название", "товар", "product name"]));
         const descriptor = [cell(data, ["цвет", "color"]), cell(data, ["размер", "размер / длина", "size"]), cell(data, ["модель", "model"])].map(text).filter(Boolean).join(" · ");
         const title = (explicitTitle || descriptor || sku).slice(0, 300);
-        const category = (row.sheetName || "Без категории").slice(0, 120);
+        const category = getImportedProductCategory(data.cells);
         const [created] = await tx.insert(products).values({ sku, title, category }).onConflictDoNothing({ target: products.sku }).returning();
         const product = created ?? await findProduct(sku);
         if (!product) { await addIssue(row, "Не удалось создать или найти товар."); continue; }
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
         const product = await findProduct(productSku(data));
         const quantity = quantityValue(cell(data, ["количество", "кол-во", "qty", "quantity"]));
         const unitCost = amountValue(data, ["цена за единицу", "цена за 1", "цена", "unit cost"]);
-        const total = amountValue(data, ["сумма", "стоимость закупки", "итого", "amount"]);
+        const total = amountValue(data, ["сумма", "сумм", "стоимость закупки", "итого", "amount"]);
         const purchasedAt = dateValue(data, ["дата закупки", "дата", "создано", "изменено", "purchase date"]);
         if (!product || quantity <= 0 || (unitCost === null && total === null) || !purchasedAt) {
           const message = !product ? "Товар закупки не найден в каталоге." : quantity <= 0 || (unitCost === null && total === null) ? "Не найдены количество и стоимость закупки." : "Дата закупки не найдена; строка не перенесена, чтобы не назначать вымышленную дату.";
@@ -150,7 +150,7 @@ export async function POST(request: Request) {
         const sourceDate = dateValue(data, ["дата поставки", "дата", "supplied at"]);
         const firstHeader = normalizeImportHeader(data.headers[0] ?? "");
         const firstColumnId = /supplyid|shipmentid|номерпоставки|идентификаторпоставки/.test(firstHeader) ? text(valueAt(data, 0)) : "";
-        const explicitId = text(cell(data, ["supply id", "номер поставки", "shipment id"])) || firstColumnId;
+        const explicitId = text(cell(data, ["supply id", "номер поставки", "shipment id", "поставка"])) || firstColumnId;
         const id = explicitId || sourceDate || lastSupplyIdBySheet.get(row.sheetName) || `${row.sheetName}:${row.rowNumber}`;
         lastSupplyIdBySheet.set(row.sheetName, id);
         const key = `${row.sheetName}:${id}`;
