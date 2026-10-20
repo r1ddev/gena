@@ -9,8 +9,9 @@ const envPath = resolve(root, ".env");
 await mkdir(resolve(root, "data/postgres"), { recursive: true });
 await mkdir(resolve(root, "data/backups"), { recursive: true });
 
+let localEnv = "";
 try {
-  await readFile(envPath, "utf8");
+  localEnv = await readFile(envPath, "utf8");
 } catch {
   const lines = [
     "POSTGRES_DB=gena",
@@ -20,7 +21,8 @@ try {
     "SYNC_INTERVAL_HOURS=24",
     `APP_ENCRYPTION_KEY=${randomBytes(32).toString("hex")}`,
   ];
-  await writeFile(envPath, `${lines.join("\n")}\n`, { mode: 0o600, flag: "wx" });
+  localEnv = `${lines.join("\n")}\n`;
+  await writeFile(envPath, localEnv, { mode: 0o600, flag: "wx" });
   await chmod(envPath, 0o600);
 }
 
@@ -32,7 +34,7 @@ processHandle.once("error", (error) => {
 processHandle.once("close", (code) => {
   process.exitCode = code ?? 1;
   if (code === 0) {
-    const port = process.env.APP_PORT || "3000";
+    const port = process.env.APP_PORT || localEnv.match(/^APP_PORT=(\d+)$/m)?.[1] || "3000";
     process.stdout.write(`Gena is starting. Open http://localhost:${port} after the containers become healthy.\n`);
   }
 });
