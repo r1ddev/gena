@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import Decimal from "decimal.js";
 import { z } from "zod";
 import { db } from "@/db";
-import { products, purchaseReceiptLines, purchaseReceipts, purchases } from "@/db/schema";
+import { products, purchaseReceiptLines, purchaseReceipts, purchases, purchaseStatusEnum } from "@/db/schema";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, nonNegativeDecimal, positiveDecimal } from "../_lib/validation";
 
@@ -13,6 +13,8 @@ const purchaseSchema = z.object({
   amountPaid: nonNegativeDecimal,
   note: z.string().trim().max(2000).optional().default(""),
 });
+
+const purchaseStatusSchema = z.object({ status: z.enum(purchaseStatusEnum.enumValues) });
 
 export async function GET(request: Request) {
   return handleLocalGet(request, async () => {
@@ -42,7 +44,8 @@ export async function GET(request: Request) {
           }),
         })),
         receivedQuantity: received.toFixed(3),
-        expectedQuantity: Decimal.max(0, ordered.minus(received)).toFixed(3),
+        expectedQuantity: purchase.status === "completed" ? "0.000" : Decimal.max(0, ordered.minus(received)).toFixed(3),
+        receiptStatus: purchase.status === "completed" ? "Завершена" : received.isZero() ? "Не начата" : "В процессе",
       };
     }) };
   });
@@ -56,6 +59,19 @@ export async function POST(request: Request) {
     return Response.json({ item }, { status: 201 });
   } catch (error) { return errorResponse(error); }
 }
+
+export async function PATCH(request: Request) {
+  try {
+    assertLocalMutation(request);
+    const id = new URL(request.url).searchParams.get("id");
+    if (!id || !z.string().uuid().safeParse(id).success) throw new Error("Не указан корректный идентификатор закупки.");
+    const body = await parseBody(request, purchaseStatusSchema);
+    const [item] = await db.update(purchases).set({ status: body.status }).where(eq(purchases.id, id)).returning();
+    if (!item) throw new Error("Закупка не найдена.");
+    return Response.json({ item });
+  } catch (error) { return errorResponse(error); }
+}
+
 export async function DELETE(request: Request) {
   try {
     assertLocalMutation(request);

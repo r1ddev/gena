@@ -26,6 +26,7 @@ export const dispositionEnum = pgEnum("external_disposition", ["pending", "mappe
 export const syncJobStatusEnum = pgEnum("sync_job_status", ["queued", "running", "completed", "failed"]);
 export const returnDestinationEnum = pgEnum("return_destination", ["seller", "ozon", "unknown"]);
 export const warehouseEnum = pgEnum("warehouse", ["seller", "ozon"]);
+export const purchaseStatusEnum = pgEnum("purchase_status", ["open", "completed"]);
 
 export const products = pgTable(
   "products",
@@ -92,6 +93,7 @@ export const purchases = pgTable(
     purchasedAt: date("purchased_at").notNull(),
     orderedQuantity: quantity("ordered_quantity"),
     amountPaid: money("amount_paid"),
+    status: purchaseStatusEnum("status").notNull().default("open"),
     note: text("note").notNull().default(""),
     sourceKey: text("source_key").unique(),
     createdAt: createdAt(),

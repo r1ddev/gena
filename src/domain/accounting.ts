@@ -5,7 +5,7 @@ Decimal.set({ precision: 24, rounding: Decimal.ROUND_HALF_UP });
 export type AccountingInput = {
   products: { id: string; sku: string; title: string }[];
   purchases: { id: string; amountPaid: string | number }[];
-  receipts: { productId: string; quantity: string | number; unitCost: string | number; receivedAt?: string }[];
+  receipts: { productId: string; quantity: string | number; unitCost: string | number; includeInAverageCost?: boolean; receivedAt?: string }[];
   supplies: { productId: string; quantity: string | number; shippingCost: string | number; suppliedAt?: string }[];
   expenses: { amount: string | number; spentAt?: string }[];
   postings: {
@@ -164,11 +164,14 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
   );
 
   const receivedByProduct = new Map<string, Decimal>();
+  const costedQuantityByProduct = new Map<string, Decimal>();
   const receivedValueByProduct = new Map<string, Decimal>();
   for (const receipt of input.receipts) {
     if (!isEffectiveAt(receipt.receivedAt, now)) continue;
     const receivedQty = d(receipt.quantity);
     receivedByProduct.set(receipt.productId, (receivedByProduct.get(receipt.productId) ?? new Decimal(0)).plus(receivedQty));
+    if (receipt.includeInAverageCost === false) continue;
+    costedQuantityByProduct.set(receipt.productId, (costedQuantityByProduct.get(receipt.productId) ?? new Decimal(0)).plus(receivedQty));
     const purchaseValue = receivedQty.times(d(receipt.unitCost));
     receivedValueByProduct.set(receipt.productId, (receivedValueByProduct.get(receipt.productId) ?? new Decimal(0)).plus(purchaseValue));
   }
@@ -185,7 +188,7 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
   const averageByProduct = new Map<string, Decimal>();
   const landedByProduct = new Map<string, Decimal>();
   for (const product of input.products) {
-    const qty = receivedByProduct.get(product.id) ?? new Decimal(0);
+    const qty = costedQuantityByProduct.get(product.id) ?? new Decimal(0);
     const value = receivedValueByProduct.get(product.id) ?? new Decimal(0);
     if (qty.gt(0) && value.gt(0)) {
       const average = value.div(qty);

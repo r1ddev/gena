@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, PackageCheck, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, PackageCheck, Pencil, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { asRecord, findRows, getId, localToday, requestJson, stringValue, type JsonRecord } from "./api";
 import { ResourcePage } from "./resource-page";
 import { ProductArticle } from "./product-hover-card";
@@ -236,10 +236,25 @@ export function PurchasesWorkspace() {
     finally { setBusy(false); }
   }
 
+  async function togglePurchaseStatus(purchase: JsonRecord) {
+    const id = getId(purchase);
+    if (!id) return;
+    const nextStatus = purchase.status === "completed" ? "open" : "completed";
+    setBusy(true); setError(""); setSuccess("");
+    try {
+      await requestJson(`/api/purchases?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status: nextStatus }) });
+      setSuccess(nextStatus === "completed" ? "Закупка завершена. Себестоимость пересчитана по фактическим приёмкам." : "Закупка возобновлена. Её приёмки исключены из средней себестоимости.");
+      setRefreshKey((value) => value + 1);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось изменить статус закупки"); }
+    finally { setBusy(false); }
+  }
+
   return <>
+    {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}
+    {success && <div className="success-banner" role="status"><CheckCircle2 size={15} />{success}</div>}
     <ResourcePage refreshKey={refreshKey} onMutation={() => setRefreshKey((value) => value + 1)} config={{
       title: "Закупки", eyebrow: "Товары и себестоимость",
-      description: "Закупка уменьшает расчётный денежный баланс сразу. В остаток и среднюю закупочную цену входит только фактически принятое количество.",
+      description: "Закупка уменьшает расчётный денежный баланс сразу. Принятый товар сразу попадает на склад, но влияет на среднюю себестоимость только после завершения закупки.",
       collectionUrl: "/api/purchases", createUrl: "/api/purchases", createLabel: "Новая закупка",
       fields: [
         { name: "productId", label: "Товар *", type: "select", optionsFrom: "/api/products", required: true },
@@ -251,16 +266,17 @@ export function PurchasesWorkspace() {
       columns: [
         { key: "purchasedAt", label: "Дата", kind: "date" }, { key: "title", label: "Товар", primary: true }, { key: "sku", label: "Артикул" },
         { key: "orderedQuantity", label: "Заказано", kind: "quantity" }, { key: "receivedQuantity", label: "Принято", kind: "quantity" },
-        { key: "expectedQuantity", label: "Ожидается", kind: "quantity" }, { key: "amountPaid", label: "Оплачено", kind: "money" }, { key: "note", label: "Комментарий" },
+        { key: "expectedQuantity", label: "Ожидается", kind: "quantity" }, { key: "amountPaid", label: "Оплачено", kind: "money" }, { key: "receiptStatus", label: "Приёмка", kind: "status" }, { key: "note", label: "Комментарий" },
       ],
       deleteUrl: (row) => typeof row.id === "string" ? `/api/purchases?id=${encodeURIComponent(row.id)}` : null,
-      emptyTitle: "Закупок пока нет", emptyDescription: "Создайте закупку. Неполученное количество будет видно отдельно и не повлияет на остаток или среднюю себестоимость.",
+      emptyTitle: "Закупок пока нет", emptyDescription: "Создайте закупку. Приёмка сразу добавит товар на склад, а средняя себестоимость начнёт учитывать её после завершения закупки.",
+    }} rowActions={(row) => {
+      const completed = row.status === "completed";
+      return <button type="button" className="button secondary small" disabled={busy} aria-label={`${completed ? "Возобновить" : "Завершить"} закупку`} onClick={() => void togglePurchaseStatus(row)}>{completed ? <><RotateCcw size={14} /> Возобновить</> : <><CheckCircle2 size={14} /> Завершить закупку</>}</button>;
     }} />
 
     <section className="panel" id="receipt-form" style={{ marginTop: 16 }}>
       <div className="panel-head"><h2>{editingReceiptId ? "Изменить приёмку" : "Приёмка закупки"}</h2><PackageCheck size={17} color="#178b63" /></div>
-      {error && <div className="error-banner" role="alert" style={{ margin: "13px 18px 0" }}><AlertCircle size={15} />{error}</div>}
-      {success && <div className="success-banner" role="status" style={{ margin: "13px 18px 0" }}><CheckCircle2 size={15} />{success}</div>}
       <form className="panel-body" onSubmit={submitReceipt}>
         <div className="form-grid">
           {editingReceiptId ? <div className="field wide"><label>Закупка</label><div className="receipt-purchase-readonly">{selectedPurchase ? <><ProductArticle identifier={String(selectedPurchase.sku ?? "Артикул не указан")} productId={String(selectedPurchase.productId ?? "")} fallback={selectedPurchase} /> · {formatPurchaseDate(selectedPurchase.purchasedAt)} · оплачено {formatPurchaseAmount(selectedPurchase.amountPaid)} ₽</> : "Закупка"}</div></div> : <PurchasePicker purchases={purchases} selectedId={selectedId} onSelect={(purchase) => {
@@ -282,7 +298,7 @@ export function PurchasesWorkspace() {
             <div className="field"><label htmlFor={`receipt-quantity-${index}`}>Количество, шт. *</label><input id={`receipt-quantity-${index}`} type="number" min="0.001" step="0.001" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: event.target.value } : item))} /></div>
             <button type="button" className="icon-button receipt-line-remove" aria-label="Убрать товар из приёмки" disabled={lines.length <= 1} onClick={() => setLines((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={15} /></button>
           </div>)}
-          <p className="form-help">Стоимость одной штуки сервис рассчитает из общей оплаты закупки и всего количества, принятого по этой закупке.</p>
+          <p className="form-help">Приёмка сразу меняет остаток. Средняя себестоимость начнёт учитывать закупку только после завершения и рассчитается по всему фактически принятому количеству.</p>
         </div>
         <div className="form-actions">
           {editingReceiptId && <button type="button" className="button secondary" disabled={busy} onClick={resetReceiptForm}>Отмена</button>}

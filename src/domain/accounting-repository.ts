@@ -70,9 +70,8 @@ export async function getAccountingSnapshot(now = new Date()) {
       const purchase = purchaseById.get(receipt.purchaseId);
       const totalReceived = receivedQuantityByPurchase.get(receipt.purchaseId);
       if (!purchase || !totalReceived || totalReceived.isZero()) return [];
-      const costBasisQuantity = Decimal.max(new Decimal(purchase.orderedQuantity), totalReceived);
-      const unitCost = new Decimal(purchase.amountPaid).div(costBasisQuantity).toString();
-      return [{ productId: line.productId, quantity: line.quantity, unitCost, receivedAt: receipt.receivedAt }];
+      const unitCost = new Decimal(purchase.amountPaid).div(totalReceived).toString();
+      return [{ productId: line.productId, quantity: line.quantity, unitCost, includeInAverageCost: purchase.status === "completed", receivedAt: receipt.receivedAt }];
     }),
     supplies: [
       ...supplyRows.map((supply) => ({ productId: "", quantity: "0", shippingCost: supply.shippingCost, suppliedAt: supply.suppliedAt })),

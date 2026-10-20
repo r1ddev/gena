@@ -13,7 +13,7 @@ The service is the source of truth for the catalog, purchases and receipts, manu
 | Area | MVP behavior |
 | --- | --- |
 | Catalog | Universal product categories and internal SKUs; links to Ozon identifiers; archive without losing history |
-| Purchases | Ordered quantity and money recorded immediately; partial receipts add only received quantity to stock and average purchase cost |
+| Purchases | Payment reduces cash immediately; each receipt adds actual quantity to seller stock, while received units affect average purchase cost only after the purchase is manually completed |
 | Stock | Separate seller and Ozon balances derived from dated operations |
 | Supplies | Created manually; immediately transfer stock to Ozon; delivery cost affects cash and the shared expense coefficient once |
 | Orders | Ozon FBO statuses are synchronized; delivery moves stock out of Ozon; unknown product IDs wait for a saved mapping decision |
@@ -27,7 +27,7 @@ The service is the source of truth for the catalog, purchases and receipts, manu
 ## 3. Accounting rules
 
 - Current stock, average purchase cost, landed cost, cash balance, and profit are calculated from source operations when requested. Removing a source row from PostgreSQL must change the next result.
-- Only received purchase quantity enters inventory and average purchase cost. The entered purchase payment affects cash immediately, including for goods that have not arrived.
+- Received purchase quantity enters seller inventory immediately. Only receipts linked to completed purchases enter average purchase cost; completion uses total actual received quantity, not the ordered quantity. Purchases can be reopened, and receipt records remain editable before and after completion. The entered purchase payment affects cash immediately, including for goods that have not arrived.
 - Ordinary delivered orders are preliminary for 21 days from the first synchronization that observes the Ozon “Delivered” status, which represents handoff to the buyer. Before that deadline, their amount and expected profit appear separately. They enter the main calculation after the deadline, and later Ozon returns or adjustments update the result.
 - Marketplace buyouts are a separate transaction type and are recognized from Ozon’s financial buyout report, without waiting 21 days.
 - Ozon delivery reduces Ozon stock. A return to the seller increases seller stock only when physically received. A return to Ozon increases its stock when Ozon makes the item sellable again.
