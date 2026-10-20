@@ -15,7 +15,7 @@ import {
 } from "@/db/schema";
 import { decryptSecret } from "@/security/secrets";
 import { ozonPost } from "@/ozon/client";
-import { financeAccrualPostingNumber, groupFinanceItemFees, matchBuyoutLines, staleOzonAccrualKeys, supportedOzonBuyoutRange } from "@/ozon/finance";
+import { financeAccrualPostingNumber, groupFinanceItemFees, isOzonWriteoffCompensation, matchBuyoutLines, staleOzonAccrualKeys, supportedOzonBuyoutRange } from "@/ozon/finance";
 import { observeBuyerHandoffAt } from "@/ozon/postings";
 import { chooseReturnPostingNumber } from "@/ozon/returns";
 import { resolveOzonSyncRange, splitUtcDateRange } from "@/ozon/sync-range";
@@ -367,8 +367,10 @@ async function importDailyAccruals(credentials: OzonCredentials, from: Date, to:
       const category = asString(accrual.accrued_category, "unknown");
       const accrualId = asString(accrual.accrual_id ?? accrual.type_id);
       const postingNumber = financeAccrualPostingNumber(category, unitNumber);
-      if (!postingNumber) continue;
-      legacyPostingNumbers.add(postingNumber);
+      const nonItemFee = accrual.non_item_fee as { type_id?: unknown } | undefined;
+      const writeoffCompensation = isOzonWriteoffCompensation({ typeId: asString(nonItemFee?.type_id), raw: accrual });
+      if (!postingNumber && !writeoffCompensation) continue;
+      if (postingNumber) legacyPostingNumbers.add(postingNumber);
       const itemFees = accrual.item_fees as { fees?: { sku?: unknown; fees?: { accrued?: unknown; type_id?: unknown }[] }[] } | undefined;
       const financeRows: { suffix: string; productId: string | null; amount: number; typeId: string }[] = [];
       if (category.toUpperCase() === "ITEM" && itemFees?.fees?.length) {
@@ -389,7 +391,7 @@ async function importDailyAccruals(credentials: OzonCredentials, from: Date, to:
         }
       } else {
         const totalAmount = accrual.total_amount as { amount?: unknown } | undefined;
-        financeRows.push({ suffix: "", productId: null, amount: moneyAmount(totalAmount), typeId: accrualId });
+        financeRows.push({ suffix: "", productId: null, amount: moneyAmount(totalAmount), typeId: asString(nonItemFee?.type_id, accrualId) });
       }
 
       for (const financeRow of financeRows) {

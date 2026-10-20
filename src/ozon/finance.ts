@@ -82,6 +82,13 @@ export function groupFinanceItemFees(fees: unknown[]) {
 const writeoffCompensationTypeIds = new Set(["10", "25"]);
 
 export function isOzonWriteoffCompensation(input: { typeId?: string | null; raw?: OzonFinanceRow }) {
+  const nonItemFee = input.raw?.non_item_fee;
+  if (nonItemFee && typeof nonItemFee === "object" && "type_id" in nonItemFee) {
+    const typeId = (nonItemFee as { type_id?: unknown }).type_id;
+    if (typeof typeId === "string" || typeof typeId === "number") {
+      return writeoffCompensationTypeIds.has(String(typeId));
+    }
+  }
   const ids = new Set<string>();
   const addIdValues = (value: unknown) => {
     if (typeof value === "string" || typeof value === "number") {

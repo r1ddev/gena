@@ -348,15 +348,18 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
 
   const orderFinance = input.financeAccruals.filter((accrual) => {
     const category = accrual.category?.toUpperCase();
+    if (accrual.isOzonWriteoffCompensation) return true;
     return accrual.postingId !== null
       && postingById.has(accrual.postingId)
       && (!category || category === "POSTING" || category === "ITEM");
   });
   const recognizedFinance = orderFinance.filter((accrual) => {
+    const posting = accrual.postingId ? postingById.get(accrual.postingId) : undefined;
+    if (!posting && !accrual.isOzonWriteoffCompensation) return false;
     if (!isEffectiveAt(accrual.accrualDate, now)) return false;
     if (accrual.ignored) return false;
     if (accrual.isOzonWriteoffCompensation) return true;
-    const posting = postingById.get(accrual.postingId!);
+    if (!posting) return false;
     const category = accrual.category?.toUpperCase();
     if (!mappablePostingIds.has(posting.id)) return false;
     if (category === "ITEM") {

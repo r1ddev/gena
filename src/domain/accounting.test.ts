@@ -365,7 +365,7 @@ describe("calculateAccounting", () => {
     expect(result.products[0].ozonStock).toBe("0.000");
   });
 
-  it("does not count Ozon finance compensation that is not linked to an order", () => {
+  it("recognizes Ozon compensation only from a writeoff compensation fee", () => {
     const result = calculateAccounting(
       base({
         purchases: [{ id: "purchase-1", amountPaid: "100" }],
@@ -389,11 +389,11 @@ describe("calculateAccounting", () => {
       new Date("2026-10-20T12:00:00Z"),
     );
 
-    expect(result.cashBalance).toBe("-100.00");
-    expect(result.confirmedProfit).toBe("-50.00");
-    expect(result.cashBreakdown.ozonWriteoffCompensation).toBe("0.00");
+    expect(result.cashBalance).toBe("-20.00");
+    expect(result.confirmedProfit).toBe("30.00");
+    expect(result.cashBreakdown.ozonWriteoffCompensation).toBe("80.00");
     expect(result.cashBreakdown.recognizedOzonOther).toBe("0.00");
-    expect(result.profitBreakdown.ozonWriteoffCompensation).toBe("0.00");
+    expect(result.profitBreakdown.ozonWriteoffCompensation).toBe("80.00");
     expect(result.products[0].ozonStock).toBe("1.000");
   });
 
@@ -414,7 +414,7 @@ describe("calculateAccounting", () => {
 
     expect(result.cashBalance).toBe(baseline.cashBalance);
     expect(result.confirmedProfit).toBe(baseline.confirmedProfit);
-    expect(result.unrecognizedFinanceAmount).toBe("0.00");
+    expect(result.unrecognizedFinanceAmount).toBe("60.00");
   });
 
   it("subtracts one return once when multiple Ozon item rows map to the same product", () => {
