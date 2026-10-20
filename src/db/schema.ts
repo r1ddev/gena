@@ -105,13 +105,23 @@ export const purchaseReceipts = pgTable(
     id: id(),
     purchaseId: uuid("purchase_id").notNull().references(() => purchases.id, { onDelete: "cascade" }),
     receivedAt: date("received_at").notNull(),
-    receivedQuantity: quantity("received_quantity"),
-    unitCost: money("unit_cost"),
     note: text("note").notNull().default(""),
     sourceKey: text("source_key").unique(),
     createdAt: createdAt(),
   },
   (table) => [index("purchase_receipts_purchase_idx").on(table.purchaseId)],
+);
+
+export const purchaseReceiptLines = pgTable(
+  "purchase_receipt_lines",
+  {
+    id: id(),
+    receiptId: uuid("receipt_id").notNull().references(() => purchaseReceipts.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    quantity: quantity("quantity"),
+    createdAt: createdAt(),
+  },
+  (table) => [index("purchase_receipt_lines_receipt_idx").on(table.receiptId), index("purchase_receipt_lines_product_idx").on(table.productId)],
 );
 
 export const supplies = pgTable("supplies", {

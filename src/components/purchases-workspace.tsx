@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, PackageCheck, Search } from "lucide-react";
-import { findRows, getId, localToday, requestJson, type JsonRecord } from "./api";
+import { AlertCircle, CheckCircle2, PackageCheck, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { asRecord, findRows, getId, localToday, requestJson, stringValue, type JsonRecord } from "./api";
 import { ResourcePage } from "./resource-page";
 import { ProductArticle } from "./product-hover-card";
+import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 
 function formatPurchaseQuantity(value: unknown): string {
   const number = Number(value ?? 0);
@@ -134,32 +135,104 @@ function PurchasePicker({
 export function PurchasesWorkspace() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [purchases, setPurchases] = useState<JsonRecord[]>([]);
+  const [products, setProducts] = useState<JsonRecord[]>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [receivedAt, setReceivedAt] = useState(localToday());
-  const [quantity, setQuantity] = useState("");
+  const [lines, setLines] = useState<{ productId: string; quantity: string }[]>([]);
   const [note, setNote] = useState("");
-  const receivablePurchases = purchases.filter((purchase) => Number(purchase.expectedQuantity) > 0);
+  const [editingReceiptId, setEditingReceiptId] = useState("");
+  const [historyFilters, setHistoryFilters] = useState<Record<string, string>>({});
+  const [historySort, setHistorySort] = useState<TableSort>(null);
+  const catalog = products.filter((product) => typeof product.id === "string");
 
   const refreshPurchases = useCallback(async () => {
-    try { setPurchases(findRows(await requestJson("/api/purchases"))); }
-    catch { setPurchases([]); }
+    const [purchaseResult, productResult] = await Promise.allSettled([requestJson("/api/purchases"), requestJson("/api/products")]);
+    if (purchaseResult.status === "fulfilled") setPurchases(findRows(purchaseResult.value));
+    else setPurchases([]);
+    if (productResult.status === "fulfilled") setProducts(findRows(productResult.value));
+    else setProducts([]);
   }, []);
   useEffect(() => { void refreshPurchases(); }, [refreshPurchases, refreshKey]);
 
+  const selectedPurchase = purchases.find((purchase) => getId(purchase) === selectedId) ?? null;
+  const receiptRows: JsonRecord[] = purchases.flatMap<JsonRecord>((purchase) => {
+    if (!Array.isArray(purchase.receipts)) return [];
+    return purchase.receipts.flatMap<JsonRecord>((value) => {
+      const receipt = asRecord(value);
+      const receiptId = receipt ? getId(receipt) : null;
+      if (!receipt || !receiptId) return [];
+      const receiptLines = Array.isArray(receipt.lines) ? receipt.lines.map(asRecord).filter((line): line is JsonRecord => line !== null) : [];
+      const totalQuantity = receiptLines.reduce((sum, line) => sum + Number(line.quantity ?? 0), 0);
+      return [{
+        ...receipt,
+        id: receiptId,
+        purchaseId: getId(purchase) ?? "",
+        purchaseSku: typeof purchase.sku === "string" ? purchase.sku : "",
+        purchaseProductId: typeof purchase.productId === "string" ? purchase.productId : null,
+        purchaseDate: purchase.purchasedAt,
+        actualLines: receiptLines,
+        actualArticles: receiptLines.map((line) => stringValue(line.sku) ?? "").join(" "),
+        totalQuantity,
+      }];
+    });
+  });
+  const historyColumns: TableColumn<JsonRecord>[] = [
+    { key: "receivedAt", label: "Дата", kind: "date", filterable: false },
+    { key: "purchaseSku", label: "Закупка", kind: "identifier" },
+    { key: "actualArticles", label: "Что приехало", kind: "text", value: (row) => row.actualArticles },
+    { key: "totalQuantity", label: "Количество", kind: "quantity" },
+    { key: "note", label: "Комментарий", kind: "text" },
+  ];
+  const visibleReceiptRows = filterAndSortRows(receiptRows, historyColumns, historyFilters, historySort);
+
+  function resetReceiptForm() {
+    setEditingReceiptId(""); setSelectedId(""); setLines([]); setNote(""); setReceivedAt(localToday());
+  }
+
   async function submitReceipt(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedId || !receivablePurchases.some((purchase) => getId(purchase) === selectedId)) {
+    if (!selectedId || !selectedPurchase) {
       setError("Выберите закупку из списка.");
+      return;
+    }
+    if (lines.length === 0 || lines.some((line) => !line.productId || !line.quantity || Number(line.quantity) <= 0)) {
+      setError("Укажите фактически полученные товары и их количество.");
       return;
     }
     setBusy(true); setError(""); setSuccess("");
     try {
-      await requestJson("/api/purchases/receipts", { method: "POST", body: JSON.stringify({ purchaseId: selectedId, receivedAt, receivedQuantity: Number(quantity), note }) });
-      setSelectedId(""); setQuantity(""); setNote(""); setSuccess("Приёмка записана. Остаток и средняя себестоимость обновлены."); setRefreshKey((value) => value + 1);
+      const body = { ...(editingReceiptId ? {} : { purchaseId: selectedId }), receivedAt, lines: lines.map((line) => ({ productId: line.productId, quantity: Number(line.quantity) })), note };
+      await requestJson(editingReceiptId ? `/api/purchases/receipts?id=${encodeURIComponent(editingReceiptId)}` : "/api/purchases/receipts", { method: editingReceiptId ? "PATCH" : "POST", body: JSON.stringify(body) });
+      resetReceiptForm(); setSuccess(editingReceiptId ? "Приёмка изменена." : "Приёмка записана."); setRefreshKey((value) => value + 1);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось записать приёмку"); }
+    finally { setBusy(false); }
+  }
+
+  function editReceipt(receipt: JsonRecord) {
+    const receiptId = getId(receipt);
+    if (!receiptId) return;
+    setEditingReceiptId(receiptId);
+    setSelectedId(typeof receipt.purchaseId === "string" ? receipt.purchaseId : "");
+    setReceivedAt(typeof receipt.receivedAt === "string" ? receipt.receivedAt.slice(0, 10) : localToday());
+    setNote(typeof receipt.note === "string" ? receipt.note : "");
+    const receiptLines = Array.isArray(receipt.actualLines) ? receipt.actualLines.map(asRecord).filter((line): line is JsonRecord => line !== null) : [];
+    setLines(receiptLines.map((line) => ({ productId: typeof line.productId === "string" ? line.productId : "", quantity: String(line.quantity ?? "") })));
+    setError(""); setSuccess("");
+    document.getElementById("receipt-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  async function deleteReceipt(receipt: JsonRecord) {
+    const id = getId(receipt);
+    if (!id || !window.confirm("Удалить эту приёмку? Остаток и себестоимость пересчитаются без неё.")) return;
+    setBusy(true); setError(""); setSuccess("");
+    try {
+      await requestJson(`/api/purchases/receipts?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (editingReceiptId === id) resetReceiptForm();
+      setSuccess("Приёмка удалена."); setRefreshKey((value) => value + 1);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось удалить приёмку"); }
     finally { setBusy(false); }
   }
 
@@ -184,26 +257,55 @@ export function PurchasesWorkspace() {
       emptyTitle: "Закупок пока нет", emptyDescription: "Создайте закупку. Неполученное количество будет видно отдельно и не повлияет на остаток или среднюю себестоимость.",
     }} />
 
-    <section className="panel" style={{ marginTop: 16 }}>
-      <div className="panel-head"><h2>Приёмка закупки</h2><PackageCheck size={17} color="#178b63" /></div>
+    <section className="panel" id="receipt-form" style={{ marginTop: 16 }}>
+      <div className="panel-head"><h2>{editingReceiptId ? "Изменить приёмку" : "Приёмка закупки"}</h2><PackageCheck size={17} color="#178b63" /></div>
       {error && <div className="error-banner" role="alert" style={{ margin: "13px 18px 0" }}><AlertCircle size={15} />{error}</div>}
       {success && <div className="success-banner" role="status" style={{ margin: "13px 18px 0" }}><CheckCircle2 size={15} />{success}</div>}
       <form className="panel-body" onSubmit={submitReceipt}>
         <div className="form-grid">
-          <PurchasePicker purchases={receivablePurchases} selectedId={selectedId} onSelect={(purchase) => {
-            if (!purchase) { setSelectedId(""); setQuantity(""); return; }
+          {editingReceiptId ? <div className="field wide"><label>Закупка</label><div className="receipt-purchase-readonly">{selectedPurchase ? <><ProductArticle identifier={String(selectedPurchase.sku ?? "Артикул не указан")} productId={String(selectedPurchase.productId ?? "")} fallback={selectedPurchase} /> · {formatPurchaseDate(selectedPurchase.purchasedAt)} · оплачено {formatPurchaseAmount(selectedPurchase.amountPaid)} ₽</> : "Закупка"}</div></div> : <PurchasePicker purchases={purchases} selectedId={selectedId} onSelect={(purchase) => {
+            if (!purchase) { setSelectedId(""); setLines([]); return; }
             const id = getId(purchase);
             const expectedQuantity = Number(purchase.expectedQuantity);
             setSelectedId(id ?? "");
-            setQuantity(Number.isFinite(expectedQuantity) && expectedQuantity > 0 ? String(expectedQuantity) : "");
-          }} />
+            setLines([{ productId: String(purchase.productId ?? ""), quantity: Number.isFinite(expectedQuantity) && expectedQuantity > 0 ? String(expectedQuantity) : "" }]);
+          }} />}
           <div className="field"><label htmlFor="receipt-date">Дата приёмки *</label><input id="receipt-date" type="date" required value={receivedAt} onChange={(event) => setReceivedAt(event.target.value)} /></div>
-          <div className="field"><label htmlFor="receipt-quantity">Принято, шт. *</label><input id="receipt-quantity" type="number" min="0.001" step="0.001" required value={quantity} onChange={(event) => setQuantity(event.target.value)} /></div>
           <div className="field wide"><label htmlFor="receipt-note">Комментарий</label><input id="receipt-note" value={note} onChange={(event) => setNote(event.target.value)} /></div>
         </div>
-        <div className="form-actions"><button className="button" disabled={busy || receivablePurchases.length === 0}>{busy ? "Сохраняем…" : "Записать приёмку"}</button></div>
-        {receivablePurchases.length === 0 && <p className="form-help">Нет закупок с ожидаемым количеством.</p>}
+        <div className="receipt-lines-editor">
+          <div className="receipt-lines-title"><strong>Фактически приехало</strong><button type="button" className="button secondary small" onClick={() => setLines((current) => [...current, { productId: "", quantity: "" }])}><Plus size={14} /> Добавить товар</button></div>
+          {lines.map((line, index) => <div className="receipt-line-editor" key={`${editingReceiptId || selectedId}-${index}`}>
+            <div className="field"><label htmlFor={`receipt-product-${index}`}>Товар *</label><select id={`receipt-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, productId: event.target.value } : item))}>
+              <option value="">Выберите артикул…</option>{catalog.map((product) => <option key={String(product.id)} value={String(product.id)}>{String(product.sku ?? "Артикул не указан")} · {String(product.title ?? "Товар")}</option>)}
+            </select></div>
+            <div className="field"><label htmlFor={`receipt-quantity-${index}`}>Количество, шт. *</label><input id={`receipt-quantity-${index}`} type="number" min="0.001" step="0.001" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: event.target.value } : item))} /></div>
+            <button type="button" className="icon-button receipt-line-remove" aria-label="Убрать товар из приёмки" disabled={lines.length <= 1} onClick={() => setLines((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={15} /></button>
+          </div>)}
+          <p className="form-help">Стоимость одной штуки сервис рассчитает из общей оплаты закупки и всего количества, принятого по этой закупке.</p>
+        </div>
+        <div className="form-actions">
+          {editingReceiptId && <button type="button" className="button secondary" disabled={busy} onClick={resetReceiptForm}>Отмена</button>}
+          <button className="button" disabled={busy || purchases.length === 0 || catalog.length === 0}>{busy ? "Сохраняем…" : editingReceiptId ? "Сохранить приёмку" : "Записать приёмку"}</button>
+        </div>
+        {purchases.length === 0 && <p className="form-help">Сначала добавьте закупку.</p>}
+        {catalog.length === 0 && <p className="form-help">Сначала добавьте товары в каталог.</p>}
       </form>
+    </section>
+
+    <section className="panel" style={{ marginTop: 16 }}>
+      <div className="panel-head"><h2>История приёмок</h2><span className="small-note">{receiptRows.length} записей</span></div>
+      <div className="table-wrap"><table>
+        <TableHead columns={historyColumns} filters={historyFilters} onFilter={(key, value) => setHistoryFilters((current) => ({ ...current, [key]: value }))} sort={historySort} onSort={(key) => setHistorySort((current) => cycleTableSort(current, key))} trailingHeaders={["Действия"]} />
+        <tbody>{visibleReceiptRows.length === 0 ? <TableEmptyRow colSpan={6} message={receiptRows.length === 0 ? "Приёмок пока нет." : "По фильтрам ничего не найдено."} onClear={Object.values(historyFilters).some(Boolean) ? () => setHistoryFilters({}) : undefined} /> : visibleReceiptRows.map((receipt) => <tr key={String(receipt.id)}>
+          <td className="number">{formatPurchaseDate(receipt.receivedAt)}</td>
+          <td><ProductArticle identifier={String(receipt.purchaseSku || "Артикул не указан")} productId={typeof receipt.purchaseProductId === "string" ? receipt.purchaseProductId : null} fallback={receipt} /></td>
+          <td><div className="supply-article-list">{(Array.isArray(receipt.actualLines) ? receipt.actualLines : []).map((value, index) => { const line = asRecord(value); if (!line) return null; return <span className="supply-article-chip" key={String(line.id ?? index)}><ProductArticle identifier={String(line.sku || "Артикул не указан")} productId={typeof line.productId === "string" ? line.productId : null} fallback={line} /><strong>× {formatPurchaseQuantity(line.quantity)}</strong></span>; })}</div></td>
+          <td className="number">{formatPurchaseQuantity(receipt.totalQuantity)}</td>
+          <td>{String(receipt.note ?? "") || "—"}</td>
+          <td><div className="row-actions"><button type="button" className="icon-button" aria-label="Изменить приёмку" onClick={() => editReceipt(receipt)}><Pencil size={14} /></button><button type="button" className="icon-button danger" aria-label="Удалить приёмку" disabled={busy} onClick={() => void deleteReceipt(receipt)}><Trash2 size={14} /></button></div></td>
+        </tr>)}</tbody>
+      </table></div>
     </section>
   </>;
 }

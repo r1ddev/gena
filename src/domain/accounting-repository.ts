@@ -1,4 +1,5 @@
 import { desc, eq } from "drizzle-orm";
+import Decimal from "decimal.js";
 import { db } from "@/db";
 import {
   expenses,
@@ -10,6 +11,7 @@ import {
   postings,
   products,
   purchaseReceipts,
+  purchaseReceiptLines,
   purchases,
   returns,
   stockAdjustments,
@@ -20,10 +22,11 @@ import { calculateAccounting, hasAccountablePostingItems } from "./accounting";
 import { financePostingSaleSkus, isOzonWriteoffCompensation } from "@/ozon/finance";
 
 export async function getAccountingSnapshot(now = new Date()) {
-  const [productRows, purchaseRows, receiptRows, supplyRows, supplyLineRows, expenseRows, postingRows, postingItemRows, financeRows, returnRows, manualRows, ozonWriteoffRows, adjustmentRows, externalRows] = await Promise.all([
+  const [productRows, purchaseRows, receiptRows, receiptLineRows, supplyRows, supplyLineRows, expenseRows, postingRows, postingItemRows, financeRows, returnRows, manualRows, ozonWriteoffRows, adjustmentRows, externalRows] = await Promise.all([
     db.select().from(products),
     db.select().from(purchases),
     db.select().from(purchaseReceipts),
+    db.select().from(purchaseReceiptLines),
     db.select().from(supplies),
     db.select().from(supplyLines),
     db.select().from(expenses),
@@ -44,7 +47,16 @@ export async function getAccountingSnapshot(now = new Date()) {
     return postingId ? financePostingSaleSkus(row.raw).map((sku) => `${postingId}\u0000${sku}`) : [];
   }));
   const postingProductPairs = new Set(postingItemRows.flatMap((item) => item.productId ? [`${item.postingId}\u0000${item.productId}`] : []));
-  const productIdByPurchaseId = new Map(purchaseRows.map((purchase) => [purchase.id, purchase.productId]));
+  const purchaseById = new Map(purchaseRows.map((purchase) => [purchase.id, purchase]));
+  const receiptById = new Map(receiptRows.map((receipt) => [receipt.id, receipt]));
+  const effectiveReceiptIds = new Set(receiptRows.filter((receipt) => Date.parse(`${receipt.receivedAt}T00:00:00.000Z`) <= now.getTime()).map((receipt) => receipt.id));
+  const receivedQuantityByPurchase = new Map<string, Decimal>();
+  for (const line of receiptLineRows) {
+    if (!effectiveReceiptIds.has(line.receiptId)) continue;
+    const purchaseId = receiptById.get(line.receiptId)?.purchaseId;
+    if (!purchaseId) continue;
+    receivedQuantityByPurchase.set(purchaseId, (receivedQuantityByPurchase.get(purchaseId) ?? new Decimal(0)).plus(line.quantity));
+  }
   const dispositionByExternalKey = new Map(externalRows.map((item) => [item.externalKey, item.disposition]));
   const ignoredOzonSkus = new Set(externalRows.flatMap((item) => item.disposition === "ignored" && item.ozonSku ? [item.ozonSku] : []));
   const itemsByPosting = new Map<string, typeof postingItemRows>();
@@ -52,9 +64,14 @@ export async function getAccountingSnapshot(now = new Date()) {
   const result = calculateAccounting({
     products: productRows.map(({ id, sku, title }) => ({ id, sku, title })),
     purchases: purchaseRows.map(({ id, amountPaid }) => ({ id, amountPaid })),
-    receipts: receiptRows.flatMap(({ purchaseId, receivedQuantity, unitCost, receivedAt }) => {
-      const productId = productIdByPurchaseId.get(purchaseId);
-      return productId ? [{ productId, quantity: receivedQuantity, unitCost, receivedAt }] : [];
+    receipts: receiptLineRows.flatMap((line) => {
+      const receipt = receiptById.get(line.receiptId);
+      if (!receipt || !effectiveReceiptIds.has(receipt.id)) return [];
+      const purchase = purchaseById.get(receipt.purchaseId);
+      const totalReceived = receivedQuantityByPurchase.get(receipt.purchaseId);
+      if (!purchase || !totalReceived || totalReceived.isZero()) return [];
+      const unitCost = new Decimal(purchase.amountPaid).div(totalReceived).toString();
+      return [{ productId: line.productId, quantity: line.quantity, unitCost, receivedAt: receipt.receivedAt }];
     }),
     supplies: [
       ...supplyRows.map((supply) => ({ productId: "", quantity: "0", shippingCost: supply.shippingCost, suppliedAt: supply.suppliedAt })),
