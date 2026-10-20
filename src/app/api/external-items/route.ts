@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { externalItems, financeAccruals, ozonWriteoffs, postingItems, postings, productImages, productLinks, products, returns } from "@/db/schema";
@@ -50,8 +50,8 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("create"),
     title: z.string().trim().min(1).max(300),
-    offerId: z.string().trim().max(120).optional().default(""),
-    ozonSku: z.string().trim().max(40).optional().default(""),
+    offerId: z.string().trim().min(1, "Укажите артикул продавца.").max(120),
+    ozonSku: z.string().trim().min(1, "Укажите SKU Ozon.").max(40),
   }),
   z.object({ action: z.literal("ignore") }),
 ]);
@@ -66,7 +66,7 @@ export async function GET(request: Request) {
     const byId = new Map(catalog.map((product) => [product.id, product]));
     const externalKeys = [...new Set(items.map((item) => item.externalKey))];
     const skus = [...new Set(items.map((item) => item.ozonSku).filter(Boolean))];
-    const [orderRows, returnRows, writeoffRows, itemAccruals, relatedItems] = await Promise.all([
+    const [orderRows, returnRows, writeoffRows, itemAccruals] = await Promise.all([
       externalKeys.length
         ? db.select({ externalKey: postingItems.externalKey, postingNumber: postings.externalId })
           .from(postingItems).innerJoin(postings, eq(postingItems.postingId, postings.id)).where(inArray(postingItems.externalKey, externalKeys))
@@ -82,18 +82,7 @@ export async function GET(request: Request) {
       skus.length
         ? db.select().from(financeAccruals).where(eq(financeAccruals.accruedCategory, "ITEM"))
         : Promise.resolve([]),
-      skus.length
-        ? db.select({ ozonSku: externalItems.ozonSku, offerId: externalItems.offerId })
-          .from(externalItems).where(inArray(externalItems.ozonSku, skus))
-        : Promise.resolve([]),
     ]);
-    const offerIdsBySku = new Map<string, Set<string>>();
-    for (const item of relatedItems) {
-      if (!item.ozonSku || !item.offerId) continue;
-      const offerIds = offerIdsBySku.get(item.ozonSku) ?? new Set<string>();
-      offerIds.add(item.offerId);
-      offerIdsBySku.set(item.ozonSku, offerIds);
-    }
     const orderNumbersByKey = new Map<string, string[]>();
     for (const row of orderRows) orderNumbersByKey.set(row.externalKey, [...(orderNumbersByKey.get(row.externalKey) ?? []), row.postingNumber]);
     const returnsByKey = new Map(returnRows.map((row) => [row.externalKey, row]));
@@ -130,7 +119,7 @@ export async function GET(request: Request) {
       } else if (kind === "order") {
         details = { ...details, postingNumber: orderNumbers[0] ?? ref(raw.posting_number), quantity: raw.quantity ?? null, amount: raw.price ?? raw.seller_price_per_instance ?? null };
       }
-      return { ...item, productTitle: item.productId ? byId.get(item.productId)?.title ?? "" : "", relatedOfferIds: [...(offerIdsBySku.get(item.ozonSku) ?? [])], sourceInfo: details };
+      return { ...item, productTitle: item.productId ? byId.get(item.productId)?.title ?? "" : "", sourceInfo: details };
     });
     return { items: enriched, sourceCounts };
   });
@@ -204,7 +193,8 @@ export async function PATCH(request: Request) {
       let productId = body.action === "map" ? body.productId : "";
       const offerId = body.action === "create" ? body.offerId || external.offerId : external.offerId;
       const ozonSku = body.action === "create" ? body.ozonSku || external.ozonSku : external.ozonSku;
-      if (!offerId && !ozonSku) throw new Error("Укажите артикул продавца или SKU Ozon, чтобы связать товар с записью.");
+      if (!offerId && !ozonSku) throw new Error("В записи Ozon не указаны артикул и SKU.");
+      if (body.action === "create" && (!offerId || !ozonSku)) throw new Error("Для товара нужны артикул продавца и SKU Ozon.");
 
       if (body.action === "create") {
         const [created] = await tx.insert(products).values({ sku: offerId || ozonSku, title: body.title }).returning();
@@ -214,13 +204,30 @@ export async function PATCH(request: Request) {
       const [product] = await tx.select().from(products).where(eq(products.id, productId)).limit(1);
       if (!product) throw new Error("Сначала создайте товар в каталоге.");
 
-      const linked = offerId
-        ? await tx.select().from(productLinks).where(eq(productLinks.offerId, offerId))
-        : await tx.select().from(productLinks).where(eq(productLinks.ozonSku, ozonSku));
-      const conflict = linked.find((row) => (row.ozonSku ?? "") === ozonSku && row.productId !== productId);
-      if (conflict) throw new Error("Этот артикул Ozon уже связан с другим товаром.");
-      if (!linked.some((row) => (row.ozonSku ?? "") === ozonSku && row.productId === productId)) {
-        await tx.insert(productLinks).values({ productId, offerId, ozonSku: ozonSku || null });
+      const identifiers = [
+        offerId ? eq(productLinks.offerId, offerId) : undefined,
+        ozonSku ? eq(productLinks.ozonSku, ozonSku) : undefined,
+      ].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined);
+      const matchingLinks = identifiers.length
+        ? await tx.select().from(productLinks).where(or(...identifiers))
+        : [];
+      if (matchingLinks.some((link) => link.productId !== productId)) {
+        throw new Error("Этот артикул или SKU Ozon уже указан у другого товара.");
+      }
+      const [currentProductIdentifiers] = await tx.select().from(productLinks).where(eq(productLinks.productId, productId)).limit(1);
+      const offerIdConflict = Boolean(offerId && currentProductIdentifiers?.offerId && currentProductIdentifiers.offerId !== offerId);
+      const ozonSkuConflict = Boolean(ozonSku && currentProductIdentifiers?.ozonSku && currentProductIdentifiers.ozonSku !== ozonSku);
+      if (currentProductIdentifiers && (offerIdConflict || ozonSkuConflict)) {
+        throw new Error("У товара уже указаны другие артикул и SKU Ozon. Измените их в каталоге и повторите сопоставление.");
+      }
+      if (currentProductIdentifiers && (currentProductIdentifiers.offerId !== offerId || (currentProductIdentifiers.ozonSku ?? "") !== ozonSku)) {
+        await tx.update(productLinks).set({
+          offerId: currentProductIdentifiers.offerId || offerId,
+          ozonSku: currentProductIdentifiers.ozonSku || ozonSku,
+        }).where(eq(productLinks.id, currentProductIdentifiers.id));
+      } else if (!currentProductIdentifiers) {
+        if (!offerId || !ozonSku) throw new Error("Для товара нужны артикул продавца и SKU Ozon. Укажите их в каталоге и повторите сопоставление.");
+        await tx.insert(productLinks).values({ productId, offerId, ozonSku });
       }
 
       const disposition = body.action === "create" ? "created" : "mapped";

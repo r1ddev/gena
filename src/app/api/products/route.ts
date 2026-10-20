@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { productImages, productLinks, products } from "@/db/schema";
@@ -8,33 +8,29 @@ import { assertLocalMutation, errorResponse, handleLocalGet } from "../_lib/http
 
 const productSchema = z.object({
   title: z.string().trim().min(1).max(300),
-  offerId: z.string().trim().max(120).optional().default(""),
-  ozonSku: z.string().trim().max(40).optional().default(""),
-}).refine((body) => body.offerId || body.ozonSku, {
-  message: "Укажите артикул или SKU Ozon.",
-  path: ["offerId"],
+  offerId: z.string().trim().min(1, "Укажите артикул продавца.").max(120),
+  ozonSku: z.string().trim().min(1, "Укажите SKU Ozon.").max(40),
 });
 
 export async function GET(request: Request) {
   return handleLocalGet(request, async () => {
     const [snapshot, links, imageRows] = await Promise.all([
       getAccountingSnapshot(),
-      db.select().from(productLinks).orderBy(asc(productLinks.createdAt), asc(productLinks.id)),
+      db.select().from(productLinks),
       db.select({ productId: productImages.productId }).from(productImages),
     ]);
     const imageProductIds = new Set(imageRows.map(({ productId }) => productId));
+    const linkByProductId = new Map(links.map((link) => [link.productId, link]));
     return {
-      items: snapshot.products.map(({ archived: _archived, ...product }) => ({
-        ...product,
-        imageUrl: imageProductIds.has(product.id) ? `/api/products/${product.id}/image` : null,
-        offerId: "",
-        ozonSku: "",
-        ...links.filter((link) => link.productId === product.id).reduce<Record<string, unknown>>((result, link, index) => ({
-          ...result,
-          ...(index === 0 ? { offerId: link.offerId, ozonSku: link.ozonSku ?? "", primaryLinkId: link.id } : {}),
-          ozonLinks: [...((result.ozonLinks as unknown[] | undefined) ?? []), { id: link.id, offerId: link.offerId, ozonSku: link.ozonSku }],
-        }), {}),
-      })),
+      items: snapshot.products.map(({ archived: _archived, ...product }) => {
+        const link = linkByProductId.get(product.id);
+        return {
+          ...product,
+          imageUrl: imageProductIds.has(product.id) ? `/api/products/${product.id}/image` : null,
+          offerId: link?.offerId ?? "",
+          ozonSku: link?.ozonSku ?? "",
+        };
+      }),
     };
   });
 }
@@ -54,12 +50,14 @@ export async function POST(request: Request) {
     }
     const body = productSchema.parse(rawBody);
     const result = await db.transaction(async (tx) => {
-      const linked = body.offerId
-        ? await tx.select().from(productLinks).where(eq(productLinks.offerId, body.offerId))
-        : await tx.select().from(productLinks).where(eq(productLinks.ozonSku, body.ozonSku));
-      if (linked.some((link) => link.offerId === body.offerId && (link.ozonSku ?? "") === body.ozonSku)) {
-        throw new Error("Этот артикул и SKU Ozon уже есть в каталоге.");
-      }
+      const identifiers = [
+        body.offerId ? eq(productLinks.offerId, body.offerId) : undefined,
+        body.ozonSku ? eq(productLinks.ozonSku, body.ozonSku) : undefined,
+      ].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined);
+      const linked = identifiers.length
+        ? await tx.select().from(productLinks).where(or(...identifiers))
+        : [];
+      if (linked.length) throw new Error("Этот артикул или SKU Ozon уже указан у другого товара.");
 
       const [product] = await tx.insert(products).values({
         sku: body.offerId || body.ozonSku,
@@ -69,7 +67,7 @@ export async function POST(request: Request) {
       if (image) await tx.insert(productImages).values({ productId: product.id, ...image });
 
       if (body.offerId || body.ozonSku) {
-        await tx.insert(productLinks).values({ productId: product.id, offerId: body.offerId, ozonSku: body.ozonSku || null });
+        await tx.insert(productLinks).values({ productId: product.id, offerId: body.offerId, ozonSku: body.ozonSku });
       }
       return { ...product, imageUrl: image ? `/api/products/${product.id}/image` : null };
     });

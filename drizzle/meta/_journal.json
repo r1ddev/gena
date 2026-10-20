@@ -85,6 +85,20 @@
       "when": 1792519502466,
       "tag": "0011_product_images",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792523778199,
+      "tag": "0012_one_ozon_identifier_pair_per_product",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792524054598,
+      "tag": "0013_require_article_and_ozon_sku",
+      "breakpoints": true
     }
   ]
 }

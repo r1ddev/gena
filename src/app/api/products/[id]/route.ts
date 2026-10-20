@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { productImages, productLinks, products } from "@/db/schema";
@@ -7,13 +7,9 @@ import { assertLocalMutation, errorResponse } from "@/app/api/_lib/http";
 
 const productSchema = z.object({
   title: z.string().trim().min(1).max(300),
-  offerId: z.string().trim().max(120).optional().default(""),
-  ozonSku: z.string().trim().max(40).optional().default(""),
-  primaryLinkId: z.string().uuid().optional(),
+  offerId: z.string().trim().min(1, "Укажите артикул продавца.").max(120),
+  ozonSku: z.string().trim().min(1, "Укажите SKU Ozon.").max(40),
   removeImage: z.boolean().optional().default(false),
-}).refine((body) => body.offerId || body.ozonSku, {
-  message: "Укажите артикул или SKU Ozon.",
-  path: ["offerId"],
 });
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -28,7 +24,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         title: formData.get("title"),
         offerId: formData.get("offerId"),
         ozonSku: formData.get("ozonSku"),
-        primaryLinkId: formData.get("primaryLinkId") || undefined,
         removeImage: formData.get("removeImage") === "true",
       };
       image = await readProductImage(formData);
@@ -43,30 +38,26 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!product) throw new Error("Товар не найден.");
 
       const links = await tx.select().from(productLinks).where(eq(productLinks.productId, id));
-      const primaryLink = body.primaryLinkId
-        ? links.find((link) => link.id === body.primaryLinkId)
-        : links[0];
-      if (body.primaryLinkId && !primaryLink) throw new Error("Связь товара с Ozon больше не существует. Обновите каталог и повторите.");
-      const duplicateWithinProduct = links.find((link) =>
-        link.id !== primaryLink?.id && link.offerId === body.offerId && (link.ozonSku ?? "") === body.ozonSku,
-      );
-      if (duplicateWithinProduct) throw new Error("Такая пара артикула и SKU Ozon уже есть у этого товара.");
-
-      const duplicateLinks = await tx.select().from(productLinks).where(eq(productLinks.offerId, body.offerId));
-      const duplicate = duplicateLinks.find((link) =>
-        link.productId !== id && (link.ozonSku ?? "") === body.ozonSku,
-      );
-      if (duplicate) throw new Error("Эта пара артикула и SKU Ozon уже связана с другим товаром.");
+      const identifiers = [
+        body.offerId ? eq(productLinks.offerId, body.offerId) : undefined,
+        body.ozonSku ? eq(productLinks.ozonSku, body.ozonSku) : undefined,
+      ].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined);
+      const matchingLinks = identifiers.length
+        ? await tx.select().from(productLinks).where(or(...identifiers))
+        : [];
+      if (matchingLinks.some((link) => link.productId !== id)) {
+        throw new Error("Этот артикул или SKU Ozon уже указан у другого товара.");
+      }
       const productSku = body.offerId || body.ozonSku;
       const [duplicateProduct] = await tx.select({ id: products.id }).from(products)
         .where(and(eq(products.sku, productSku), ne(products.id, id))).limit(1);
       if (duplicateProduct) throw new Error("Этот артикул или SKU Ozon уже используется другим товаром.");
 
       await tx.update(products).set({ sku: productSku, title: body.title, updatedAt: new Date() }).where(eq(products.id, id));
-      if (primaryLink) {
-        await tx.update(productLinks).set({ offerId: body.offerId, ozonSku: body.ozonSku || null }).where(eq(productLinks.id, primaryLink.id));
+      if (links[0]) {
+        await tx.update(productLinks).set({ offerId: body.offerId, ozonSku: body.ozonSku }).where(eq(productLinks.id, links[0].id));
       } else {
-        await tx.insert(productLinks).values({ productId: id, offerId: body.offerId, ozonSku: body.ozonSku || null });
+        await tx.insert(productLinks).values({ productId: id, offerId: body.offerId, ozonSku: body.ozonSku });
       }
 
       if (image) {

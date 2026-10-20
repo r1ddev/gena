@@ -56,12 +56,14 @@ export const productLinks = pgTable(
     id: id(),
     productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
     offerId: text("offer_id").notNull(),
-    ozonSku: text("ozon_sku"),
+    ozonSku: text("ozon_sku").notNull(),
     createdAt: createdAt(),
   },
   (table) => [
-    uniqueIndex("product_links_external_idx").on(table.offerId, table.ozonSku),
-    index("product_links_product_idx").on(table.productId),
+    check("product_links_identifiers_present_check", sql`${table.offerId} <> '' AND ${table.ozonSku} <> ''`),
+    uniqueIndex("product_links_product_unique_idx").on(table.productId),
+    uniqueIndex("product_links_offer_id_unique_idx").on(table.offerId),
+    uniqueIndex("product_links_ozon_sku_unique_idx").on(table.ozonSku),
   ],
 );
 

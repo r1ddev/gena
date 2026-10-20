@@ -75,7 +75,7 @@ async function resolveExternalProduct(product: ExternalProduct, raw: JsonRecord)
 
   const link = exactLink
     ?? skuLinks.find((candidate) => candidate.ozonSku === sku)
-    ?? links.find((candidate) => !candidate.ozonSku);
+    ?? (!sku ? links[0] : undefined);
   const resolutionDisposition = exactLink
     ? dispositionAfterProductLink(previous?.disposition ?? "pending")
     : previous?.disposition ?? "pending";
@@ -458,7 +458,7 @@ async function importBuyoutReports(credentials: OzonCredentials, from: Date, to:
       const sku = asString(product.sku);
       const offerId = asString(product.offer_id);
       const links = await db.select().from(productLinks).where(eq(productLinks.offerId, offerId));
-      const link = links.find((entry) => entry.ozonSku === sku) ?? links.find((entry) => !entry.ozonSku);
+      const link = links.find((entry) => entry.ozonSku === sku) ?? (!sku ? links[0] : undefined);
       const posting = await db.select().from(postings).where(eq(postings.externalId, postingNumber)).limit(1);
       if (posting[0]) {
         const lineItems = await db.select().from(postingItems).where(eq(postingItems.postingId, posting[0].id));

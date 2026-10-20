@@ -27,11 +27,7 @@ const sourceCountForms: Record<string, [string, string, string]> = {
 
 function offerIdFor(row: JsonRecord) { return typeof row.offerId === "string" ? row.offerId : ""; }
 function ozonSkuFor(row: JsonRecord) { return typeof row.ozonSku === "string" ? row.ozonSku : ""; }
-function offerIdsFor(row: JsonRecord) {
-  const related = Array.isArray(row.relatedOfferIds) ? row.relatedOfferIds.filter((value): value is string => typeof value === "string" && value.length > 0) : [];
-  return [...new Set([offerIdFor(row), ...related].filter(Boolean))];
-}
-function articleFor(row: JsonRecord) { const offerId = offerIdFor(row); if (offerId) return offerId; const offerIds = offerIdsFor(row); return offerIds.length === 1 ? offerIds[0] : ""; }
+function articleFor(row: JsonRecord) { return offerIdFor(row); }
 function nameFor(row: JsonRecord) {
   const title = typeof row.title === "string" ? row.title.trim() : "";
   return title && title !== `Ozon SKU ${ozonSkuFor(row)}` ? title : "";
@@ -62,7 +58,7 @@ function sourceDetails(row: JsonRecord) {
 }
 
 const unmatchedColumns: TableColumn<JsonRecord>[] = [
-  { key: "article", label: "Артикул продавца / SKU Ozon", value: (row) => [...offerIdsFor(row), ozonSkuFor(row)].filter(Boolean).join(" ") },
+  { key: "article", label: "Артикул / SKU Ozon", value: (row) => [offerIdFor(row), ozonSkuFor(row)].filter(Boolean).join(" ") },
   { key: "source", label: "Источник и сумма", value: (row) => `${sourceLabels[String(sourceInfoFor(row).kind ?? "other")] ?? sourceLabels.other} ${sourceDetails(row)}` },
   { key: "firstSeenAt", label: "Впервые замечен", kind: "date" },
   { key: "action", label: "Действие", sortable: false, filterable: false },
@@ -164,14 +160,13 @@ export function UnmatchedItems() {
     {error && <div className="error-banner" role="alert" style={{ margin: "12px 18px 0" }}><AlertCircle size={14} />{error}</div>}{success && <div className="success-banner" role="status" style={{ margin: "12px 18px 0" }}><CheckCircle2 size={14} />{success}</div>}
     {loading ? <div className="panel-body"><div className="loading-line" /></div> : rows.length === 0 && !error ? <div className="empty-state" style={{ minHeight: 130 }}><div><div className="empty-icon"><CheckCircle2 size={18} /></div><div className="empty-title">Нет записей без связи с каталогом</div><p className="empty-description">Такие записи появятся после синхронизации Ozon.</p></div></div> : visibleRows.length === 0 && !error ? <div className="empty-state"><div><div className="empty-title">Нет записей по этим фильтрам</div><button type="button" className="button secondary small" style={{ marginTop: 12 }} onClick={() => setFilters({})}>Очистить фильтры</button></div></div> : <div className="table-wrap"><table><TableHead columns={unmatchedColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{visibleRows.map((row, index) => {
       const id = getId(row) ?? String(index); const currentMode = mode[id]; const ozonSku = ozonSkuFor(row); const article = articleFor(row); const productName = nameFor(row);
-      const offerIds = offerIdsFor(row);
       const defaults = { title: productName, offerId: article, ozonSku };
       const draft = productDrafts[id] ?? {};
       const values = { title: draft.title ?? defaults.title, offerId: draft.offerId ?? defaults.offerId, ozonSku: draft.ozonSku ?? defaults.ozonSku };
       const setDraftValue = (field: string, value: string) => setProductDrafts((current) => ({ ...current, [id]: { ...current[id], [field]: value } }));
       const source = sourceInfoFor(row); const sourceKind = String(source.kind ?? "other");
       return <Fragment key={id}>
-        <tr><td><span className="table-primary">Артикул продавца: {offerIds.length ? offerIds.join(", ") : "—"}</span><span className="table-secondary">SKU Ozon: {ozonSku || "—"}</span></td><td><span className="table-primary">{sourceLabels[sourceKind] ?? sourceLabels.other}</span><span className="table-secondary">{sourceDetails(row)}</span></td><td>{String(row.firstSeenAt ?? "—").slice(0, 10)}</td><td>
+        <tr><td><span className="table-primary">Артикул: {article || "—"}</span><span className="table-secondary">SKU Ozon: {ozonSku || "—"}</span></td><td><span className="table-primary">{sourceLabels[sourceKind] ?? sourceLabels.other}</span><span className="table-secondary">{sourceDetails(row)}</span></td><td>{String(row.firstSeenAt ?? "—").slice(0, 10)}</td><td>
           {currentMode === "map" ? <div className="toolbar"><select aria-label="Выберите товар каталога" value={selected[id] ?? ""} onChange={(event) => setSelected((current) => ({ ...current, [id]: event.target.value }))}><option value="">Выберите товар…</option>{products.map((product) => <option key={product.id} value={product.id}>{product.label}</option>)}</select><button className="button small" disabled={!selected[id] || busy === id} onClick={() => void decide(row, "map")}><Link2 size={12} />Связать</button><button className="icon-button" aria-label="Отмена" onClick={() => setMode((current) => ({ ...current, [id]: undefined as never }))}><XCircle size={14} /></button></div>
             : currentMode === "create" ? <span className="small-note">Форма создания ниже</span>
               : <div className="row-actions"><button className="button secondary small" disabled={products.length === 0} onClick={() => setMode((current) => ({ ...current, [id]: "map" }))}><Link2 size={12} />Сопоставить</button><button className="button secondary small" onClick={() => setMode((current) => ({ ...current, [id]: "create" }))}><Plus size={12} />Создать товар</button><button className="button secondary small" disabled={busy === id} onClick={() => void decide(row, "ignore")}><XCircle size={12} />Игнорировать</button></div>}
@@ -181,9 +176,9 @@ export function UnmatchedItems() {
             <div className="panel-head"><h2>Новый товар</h2><span className="small-note">Поля со звёздочкой обязательны</span></div>
             <form className="panel-body" onSubmit={(event) => void createProduct(event, row, id, defaults)}>
               <div className="form-grid">
-                <div className="field"><label htmlFor={`new-offer-id-${id}`}>Артикул</label><input id={`new-offer-id-${id}`} value={values.offerId} onChange={(event) => setDraftValue("offerId", event.target.value)} /></div>
+                <div className="field"><label htmlFor={`new-offer-id-${id}`}>Артикул *</label><input id={`new-offer-id-${id}`} value={values.offerId} required onChange={(event) => setDraftValue("offerId", event.target.value)} /></div>
                 <div className="field wide"><label htmlFor={`new-title-${id}`}>Название товара *</label><input id={`new-title-${id}`} value={values.title} required onChange={(event) => setDraftValue("title", event.target.value)} /></div>
-                <div className="field"><label htmlFor={`new-ozon-sku-${id}`}>SKU Ozon</label><input id={`new-ozon-sku-${id}`} value={values.ozonSku} onChange={(event) => setDraftValue("ozonSku", event.target.value)} /></div>
+                <div className="field"><label htmlFor={`new-ozon-sku-${id}`}>SKU Ozon *</label><input id={`new-ozon-sku-${id}`} value={values.ozonSku} required onChange={(event) => setDraftValue("ozonSku", event.target.value)} /></div>
               </div>
               <ProductImageInput id={`new-product-image-${id}`} value={productImages[id] ?? null} onChange={(file) => setProductImages((current) => ({ ...current, [id]: file }))} />
               <div className="form-actions"><button type="button" className="button secondary" onClick={() => setMode((current) => ({ ...current, [id]: undefined }))}>Отмена</button><button className="button" disabled={busy === id}>{busy === id ? "Сохраняем…" : "Сохранить"}</button></div>

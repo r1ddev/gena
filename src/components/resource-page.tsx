@@ -245,7 +245,6 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       if (body instanceof FormData) {
         Object.entries(payload).forEach(([key, value]) => body.append(key, String(value)));
         if (productImage) body.append("image", productImage, productImage.name || "product-image");
-        if (editing && editingRow && typeof editingRow.primaryLinkId === "string") body.append("primaryLinkId", editingRow.primaryLinkId);
         if (editing && removeExistingImage && !productImage) body.append("removeImage", "true");
       }
       const url = editing && editingRow ? config.editUrl?.(editingRow) : config.createUrl;
