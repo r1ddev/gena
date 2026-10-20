@@ -90,14 +90,9 @@ export function UnmatchedItems() {
   }, [refresh]);
   useEffect(() => {
     const refreshAfterSync = () => { void refresh(); };
-    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void refresh(); };
     window.addEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
-    window.addEventListener("focus", refreshAfterSync);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
-      window.removeEventListener("focus", refreshAfterSync);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [refresh]);
 

@@ -61,16 +61,11 @@ export function Dashboard() {
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
     const refreshAfterSync = () => { void refresh(); };
-    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void refresh(); };
-    window.addEventListener("focus", refreshAfterSync);
     window.addEventListener("popstate", refreshAfterSync);
     window.addEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
-      window.removeEventListener("focus", refreshAfterSync);
       window.removeEventListener("popstate", refreshAfterSync);
       window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [refresh]);
 
