@@ -9,14 +9,13 @@ export default function CatalogPage() {
     description: "Единый список товаров и их артикулов. Связи с Ozon нужны для автоматического распознавания заказов и возвратов.",
     collectionUrl: "/api/products", createUrl: "/api/products", createLabel: "Добавить товар",
     fields: [
-      { name: "sku", label: "Внутренний артикул *", required: true, placeholder: "Например, BAG-001" },
+      { name: "offerId", label: "Артикул", placeholder: "Артикул продавца" },
       { name: "title", label: "Название товара *", required: true, wide: true },
-      { name: "category", label: "Категория", placeholder: "Например, аксессуары" },
-      { name: "offerId", label: "Артикул Ozon" },
       { name: "ozonSku", label: "SKU Ozon" },
     ],
+    help: "Укажите артикул продавца или SKU Ozon.",
     columns: [
-      { key: "sku", label: "Артикул", primary: true }, { key: "title", label: "Название" }, { key: "category", label: "Категория" }, { key: "archived", label: "Статус" },
+      { key: "offerId", label: "Артикул", primary: true }, { key: "ozonSku", label: "SKU Ozon" }, { key: "title", label: "Название" }, { key: "archived", label: "Статус" },
       { key: "sellerStock", label: "Мой склад", kind: "quantity" }, { key: "ozonStock", label: "Склад Ozon", kind: "quantity" },
       { key: "landedUnitCost", label: "Полная себестоимость", kind: "money" },
     ],

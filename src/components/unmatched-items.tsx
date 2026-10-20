@@ -84,7 +84,12 @@ export function UnmatchedItems() {
   useEffect(() => {
     void refresh();
     requestJson("/api/products").then((value) => setProducts(findRows(value).map((row) => {
-      const id = getId(row); if (!id) return null; const code = typeof row.sku === "string" ? row.sku : ""; return { id, label: code ? `${String(row.title ?? "Товар")} · ${code}` : String(row.title ?? "Товар") };
+      const id = getId(row); if (!id) return null;
+      const identifiers = [
+        typeof row.offerId === "string" && row.offerId ? `Артикул ${row.offerId}` : "",
+        typeof row.ozonSku === "string" && row.ozonSku ? `SKU Ozon ${row.ozonSku}` : "",
+      ].filter(Boolean);
+      return { id, label: `${String(row.title ?? "Товар")}${identifiers.length ? ` · ${identifiers.join(" · ")}` : ""}` };
     }).filter((item): item is Option => item !== null))).catch(() => setProducts([]));
   }, [refresh]);
   useEffect(() => {
@@ -107,15 +112,13 @@ export function UnmatchedItems() {
     finally { setBusy(""); }
   }
 
-  async function createProduct(event: React.FormEvent<HTMLFormElement>, row: JsonRecord, id: string, defaults: { sku: string; title: string; category: string; offerId: string; ozonSku: string }) {
+  async function createProduct(event: React.FormEvent<HTMLFormElement>, row: JsonRecord, id: string, defaults: { title: string; offerId: string; ozonSku: string }) {
     event.preventDefault();
     setBusy(id); setError(""); setSuccess("");
     const draft = productDrafts[id] ?? {};
     const body = {
       action: "create",
-      sku: draft.sku ?? defaults.sku,
       title: draft.title ?? defaults.title,
-      category: (draft.category ?? defaults.category).trim() || "Без категории",
       offerId: draft.offerId ?? defaults.offerId,
       ozonSku: draft.ozonSku ?? defaults.ozonSku,
     };
@@ -140,9 +143,9 @@ export function UnmatchedItems() {
     {loading ? <div className="panel-body"><div className="loading-line" /></div> : rows.length === 0 && !error ? <div className="empty-state" style={{ minHeight: 130 }}><div><div className="empty-icon"><CheckCircle2 size={18} /></div><div className="empty-title">Нет записей без связи с каталогом</div><p className="empty-description">Такие записи появятся после синхронизации Ozon.</p></div></div> : <div className="table-wrap"><table><thead><tr><th>Артикул продавца / SKU Ozon</th><th>Источник и сумма</th><th>Впервые замечен</th><th>Действие</th></tr></thead><tbody>{rows.map((row, index) => {
       const id = getId(row) ?? String(index); const currentMode = mode[id]; const ozonSku = ozonSkuFor(row); const article = articleFor(row); const productName = nameFor(row);
       const offerIds = offerIdsFor(row);
-      const defaults = { sku: article, title: productName, category: "", offerId: article, ozonSku };
+      const defaults = { title: productName, offerId: article, ozonSku };
       const draft = productDrafts[id] ?? {};
-      const values = { sku: draft.sku ?? defaults.sku, title: draft.title ?? defaults.title, category: draft.category ?? defaults.category, offerId: draft.offerId ?? defaults.offerId, ozonSku: draft.ozonSku ?? defaults.ozonSku };
+      const values = { title: draft.title ?? defaults.title, offerId: draft.offerId ?? defaults.offerId, ozonSku: draft.ozonSku ?? defaults.ozonSku };
       const setDraftValue = (field: string, value: string) => setProductDrafts((current) => ({ ...current, [id]: { ...current[id], [field]: value } }));
       const source = sourceInfoFor(row); const sourceKind = String(source.kind ?? "other");
       return <Fragment key={id}>
@@ -156,10 +159,8 @@ export function UnmatchedItems() {
             <div className="panel-head"><h2>Новый товар</h2><span className="small-note">Поля со звёздочкой обязательны</span></div>
             <form className="panel-body" onSubmit={(event) => void createProduct(event, row, id, defaults)}>
               <div className="form-grid">
-                <div className="field"><label htmlFor={`new-sku-${id}`}>Внутренний артикул *</label><input id={`new-sku-${id}`} value={values.sku} required placeholder="Например, BAG-001" onChange={(event) => setDraftValue("sku", event.target.value)} /></div>
+                <div className="field"><label htmlFor={`new-offer-id-${id}`}>Артикул</label><input id={`new-offer-id-${id}`} value={values.offerId} onChange={(event) => setDraftValue("offerId", event.target.value)} /></div>
                 <div className="field wide"><label htmlFor={`new-title-${id}`}>Название товара *</label><input id={`new-title-${id}`} value={values.title} required onChange={(event) => setDraftValue("title", event.target.value)} /></div>
-                <div className="field"><label htmlFor={`new-category-${id}`}>Категория</label><input id={`new-category-${id}`} value={values.category} placeholder="Например, аксессуары" onChange={(event) => setDraftValue("category", event.target.value)} /></div>
-                <div className="field"><label htmlFor={`new-offer-id-${id}`}>Артикул Ozon</label><input id={`new-offer-id-${id}`} value={values.offerId} onChange={(event) => setDraftValue("offerId", event.target.value)} /></div>
                 <div className="field"><label htmlFor={`new-ozon-sku-${id}`}>SKU Ozon</label><input id={`new-ozon-sku-${id}`} value={values.ozonSku} onChange={(event) => setDraftValue("ozonSku", event.target.value)} /></div>
               </div>
               <div className="form-actions"><button type="button" className="button secondary" onClick={() => setMode((current) => ({ ...current, [id]: undefined }))}>Отмена</button><button className="button" disabled={busy === id}>{busy === id ? "Сохраняем…" : "Сохранить"}</button></div>

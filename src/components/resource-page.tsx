@@ -91,8 +91,11 @@ function productOptionsFrom(value: unknown) {
   return findRows(value).map((row) => {
     const id = getId(row);
     const title = typeof row.title === "string" ? row.title : "Товар";
-    const sku = typeof row.sku === "string" ? row.sku : "";
-    return id ? { value: id, label: sku ? `${title} · ${sku}` : title } : null;
+    const identifiers = [
+      typeof row.offerId === "string" && row.offerId ? `Артикул ${row.offerId}` : "",
+      typeof row.ozonSku === "string" && row.ozonSku ? `SKU Ozon ${row.ozonSku}` : "",
+    ].filter(Boolean);
+    return id ? { value: id, label: `${title}${identifiers.length ? ` · ${identifiers.join(" · ")}` : ""}` } : null;
   }).filter((option): option is { value: string; label: string } => option !== null);
 }
 
@@ -230,7 +233,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
           : visibleRows.length === 0 ? <div className="empty-state"><div><div className="empty-icon"><Package size={20} /></div><div className="empty-title">{config.remotePageSize && serverSearch ? "Ничего не найдено" : config.emptyTitle ?? "Пока нет записей"}</div><p className="empty-description">{config.remotePageSize && serverSearch ? `По запросу «${serverSearch}» совпадений нет. Измените запрос или очистите поиск.` : config.emptyDescription ?? "Добавьте первую запись — она появится в этом списке, а связанные итоги обновятся автоматически."}</p></div></div>
             : <div className="table-wrap"><table><thead><tr>{config.columns.map((column) => <th key={column.key}>{column.label}</th>)}{(config.deleteUrl || rowActions) && <th aria-label="Действия" />}</tr></thead><tbody>{visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
               const value = valueAt(row, column.key);
-              if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, column.kind)}</span>{typeof row.sku === "string" && column.key !== "sku" && <span className="table-secondary">{row.sku}</span>}</td>;
+              if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, column.kind)}</span>{typeof row.sku === "string" && column.key !== "sku" && column.key !== "offerId" && <span className="table-secondary">{row.sku}</span>}</td>;
               if (column.key === "article") return <td key={column.key}>{orderArticleText(row.items)}</td>;
               const rendered = column.key === "archived" ? (value ? "В архиве" : "Активен") : displayValue(value, column.kind);
               return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") || column.key === "archived" ? <><span className={`badge ${column.key === "archived" && !value ? "green" : ""}`}>{rendered}</span>{column.key === "status" && typeof row.returnState === "string" && <span className="table-secondary">{row.returnState}</span>}</> : rendered}</td>;

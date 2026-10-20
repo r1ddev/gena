@@ -48,9 +48,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("map"), productId: z.string().uuid() }),
   z.object({
     action: z.literal("create"),
-    sku: z.string().trim().min(1).max(100),
     title: z.string().trim().min(1).max(300),
-    category: z.string().trim().max(120).optional().default("Без категории"),
     offerId: z.string().trim().max(120).optional().default(""),
     ozonSku: z.string().trim().max(40).optional().default(""),
   }),
@@ -193,15 +191,16 @@ export async function PATCH(request: Request) {
 
     const item = await db.transaction(async (tx) => {
       let productId = body.action === "map" ? body.productId : "";
+      const offerId = body.action === "create" ? body.offerId || external.offerId : external.offerId;
+      const ozonSku = body.action === "create" ? body.ozonSku || external.ozonSku : external.ozonSku;
+      if (!offerId && !ozonSku) throw new Error("Укажите артикул продавца или SKU Ozon, чтобы связать товар с записью.");
+
       if (body.action === "create") {
-        const [created] = await tx.insert(products).values({ sku: body.sku, title: body.title, category: body.category }).returning();
+        const [created] = await tx.insert(products).values({ sku: offerId || ozonSku, title: body.title }).returning();
         productId = created.id;
       }
       const [product] = await tx.select().from(products).where(eq(products.id, productId)).limit(1);
       if (!product) throw new Error("Сначала создайте товар в каталоге.");
-      const offerId = body.action === "create" ? body.offerId || external.offerId : external.offerId;
-      const ozonSku = body.action === "create" ? body.ozonSku || external.ozonSku : external.ozonSku;
-      if (!offerId && !ozonSku) throw new Error("Укажите артикул продавца или SKU Ozon, чтобы связать товар с записью.");
 
       const linked = offerId
         ? await tx.select().from(productLinks).where(eq(productLinks.offerId, offerId))
