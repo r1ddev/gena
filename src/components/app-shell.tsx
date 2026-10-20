@@ -68,7 +68,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         <header className="topbar">
           <div className="topbar-left">
             <button className="mobile-menu" aria-label={mobileOpen ? "Закрыть меню" : "Открыть меню"} onClick={() => setMobileOpen((open) => !open)}>{mobileOpen ? <X size={17} /> : <Menu size={17} />}</button>
-            <span className="topbar-label">Управление товарами, продажами и финансами</span>
           </div>
         </header>
         <main className="page-content">{children}</main>
