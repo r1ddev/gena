@@ -15,6 +15,12 @@ const supplySchema = z.object({
   })).min(1),
 });
 
+function assertUniqueProductLines(lines: { productId: string }[]) {
+  if (new Set(lines.map((line) => line.productId)).size !== lines.length) {
+    throw new Error("В одной поставке товар должен быть указан одной строкой.");
+  }
+}
+
 export async function GET(request: Request) {
   return handleLocalGet(request, async () => {
     const [headers, lines, catalog] = await Promise.all([
@@ -43,8 +49,7 @@ export async function POST(request: Request) {
   try {
     assertLocalMutation(request);
     const body = await parseBody(request, supplySchema);
-    const productIds = new Set(body.lines.map((line) => line.productId));
-    if (productIds.size !== body.lines.length) throw new Error("В одной поставке товар должен быть указан одной строкой.");
+    assertUniqueProductLines(body.lines);
     const item = await db.transaction(async (tx) => {
       const [header] = await tx.insert(supplies).values({
         suppliedAt: body.suppliedAt,
@@ -55,6 +60,29 @@ export async function POST(request: Request) {
       return header;
     });
     return Response.json({ item }, { status: 201 });
+  } catch (error) { return errorResponse(error); }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    assertLocalMutation(request);
+    const id = new URL(request.url).searchParams.get("id");
+    if (!id) throw new Error("Не указан идентификатор поставки.");
+    const supplyId = z.string().uuid().parse(id);
+    const body = await parseBody(request, supplySchema);
+    assertUniqueProductLines(body.lines);
+    const item = await db.transaction(async (tx) => {
+      const [updated] = await tx.update(supplies).set({
+        suppliedAt: body.suppliedAt,
+        shippingCost: body.shippingCost,
+        note: body.note,
+      }).where(eq(supplies.id, supplyId)).returning();
+      if (!updated) throw new Error("Поставка не найдена.");
+      await tx.delete(supplyLines).where(eq(supplyLines.supplyId, supplyId));
+      await tx.insert(supplyLines).values(body.lines.map((line) => ({ supplyId, ...line })));
+      return updated;
+    });
+    return Response.json({ item });
   } catch (error) { return errorResponse(error); }
 }
 
