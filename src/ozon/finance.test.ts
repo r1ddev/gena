@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { financeAccrualRowContainsSku, financeRowContainsSku, postingContainsMarketplaceBuyout } from "./finance";
+import { financeAccrualPostingNumber, financeAccrualRowContainsSku, financeRowContainsSku, matchBuyoutLines, postingContainsMarketplaceBuyout, staleOzonAccrualKeys } from "./finance";
 
 describe("financeRowContainsSku", () => {
   it("matches the exact Ozon SKU in ITEM fees", () => {
@@ -38,5 +38,53 @@ describe("postingContainsMarketplaceBuyout", () => {
     expect(postingContainsMarketplaceBuyout({ products: [{ is_marketplace_buyout: false, price: "-10" }] })).toBe(false);
     expect(postingContainsMarketplaceBuyout({ products: [{ price: "-10" }] })).toBe(false);
     expect(postingContainsMarketplaceBuyout({ products: "invalid" })).toBe(false);
+  });
+});
+
+describe("matchBuyoutLines", () => {
+  const lines = [
+    { id: "exact", offerId: "shared-offer", ozonSku: "100" },
+    { id: "other-sku", offerId: "shared-offer", ozonSku: "200" },
+  ];
+
+  it("requires an exact SKU when the report includes one", () => {
+    expect(matchBuyoutLines(lines, { sku: "missing", offerId: "shared-offer" })).toEqual([]);
+    expect(matchBuyoutLines(lines, { sku: "100", offerId: "shared-offer" })).toEqual([lines[0]]);
+  });
+
+  it("uses offer ID only when SKU is absent and the match is unique", () => {
+    expect(matchBuyoutLines(lines, { sku: "", offerId: "shared-offer" })).toEqual([]);
+    expect(matchBuyoutLines(lines.slice(0, 1), { sku: "", offerId: "shared-offer" })).toEqual([lines[0]]);
+  });
+});
+
+describe("staleOzonAccrualKeys", () => {
+  it("reconciles only Ozon rows for the requested day after complete pagination", () => {
+    expect(staleOzonAccrualKeys(
+      "2026-10-20",
+      ["legacy-sale:order-1:sku-1", "2026-10-20:POSTING:1:old:", "2026-10-19:POSTING:2:old:"],
+      new Set(["2026-10-20:POSTING:3:seen:"]),
+      true,
+    )).toEqual(["2026-10-20:POSTING:1:old:"]);
+  });
+
+  it("keeps every existing row when pagination is incomplete", () => {
+    expect(staleOzonAccrualKeys(
+      "2026-10-20",
+      ["2026-10-20:POSTING:1:old:"],
+      new Set(),
+      false,
+    )).toEqual([]);
+  });
+});
+
+describe("financeAccrualPostingNumber", () => {
+  it("keeps posting and item accruals linked to their shipment", () => {
+    expect(financeAccrualPostingNumber("POSTING", "post-1")).toBe("post-1");
+    expect(financeAccrualPostingNumber("ITEM", "post-1")).toBe("post-1");
+  });
+
+  it("does not interpret account-level service IDs as shipments", () => {
+    expect(financeAccrualPostingNumber("NON_ITEM", "campaign-1")).toBeNull();
   });
 });
