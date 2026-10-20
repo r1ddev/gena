@@ -75,8 +75,18 @@ export function displayValue(value: unknown, kind?: "money" | "quantity" | "date
       const row = asRecord(item);
       if (!row) return String(item);
       const title = String(row.title ?? row.name ?? row.sku ?? "");
-      return title ? `${title}${row.quantity != null ? ` × ${displayValue(row.quantity, "quantity")}` : ""}` : JSON.stringify(item);
-    }).join(", ") || "—";
+      const internalSku = stringValue(row.sku);
+      const offerId = stringValue(row.offerId);
+      const ozonSku = stringValue(row.ozonSku);
+      const article = internalSku ?? offerId ?? ozonSku;
+      const articleLabel = article ? ` · Артикул ${article}` : "";
+      const secondaryIdentifiers = [
+        offerId && offerId !== article ? `Артикул продавца ${offerId}` : null,
+        ozonSku && ozonSku !== article && ozonSku !== offerId ? `SKU Ozon ${ozonSku}` : null,
+      ].filter((identifier): identifier is string => identifier !== null);
+      const otherIdentifiers = secondaryIdentifiers.length ? ` · ${secondaryIdentifiers.join(" · ")}` : "";
+      return title ? `${title}${articleLabel}${otherIdentifiers}${row.quantity != null ? ` × ${displayValue(row.quantity, "quantity")}` : ""}` : JSON.stringify(item);
+    }).join("; ") || "—";
   }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);

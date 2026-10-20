@@ -1,5 +1,5 @@
 const API_ROOT = "https://api-seller.ozon.ru";
-const MIN_REQUEST_INTERVAL_MS = 1_000;
+const MIN_REQUEST_INTERVAL_MS = 2_000;
 let lastRequestAt = 0;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -17,8 +17,8 @@ export function ozonRetryDelay(attempt: number, retryAfter?: string | null, nowM
   const serverDelay = Number.isFinite(retryNumber) && retryNumber >= 0
     ? retryNumber * 1_000
     : Number.isFinite(retryDate) ? Math.max(0, retryDate - nowMs) : 0;
-  const backoff = 1_000 * (2 ** Math.max(0, Math.floor(attempt)));
-  return Math.min(30_000, Math.max(backoff, serverDelay));
+  const backoff = 2_000 * (2 ** Math.max(0, Math.floor(attempt)));
+  return Math.max(Math.min(120_000, backoff), serverDelay);
 }
 
 export function ozonRequestWait(previousRequestAt: number, nowMs = Date.now()) {
@@ -28,7 +28,7 @@ export function ozonRequestWait(previousRequestAt: number, nowMs = Date.now()) {
 
 export async function ozonPost<T>(path: string, body: unknown, credentials: { clientId: string; apiKey: string }): Promise<T> {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 7; attempt += 1) {
     try {
       await sleep(ozonRequestWait(lastRequestAt));
       lastRequestAt = Date.now();
@@ -58,7 +58,7 @@ export async function ozonPost<T>(path: string, body: unknown, credentials: { cl
     } catch (error) {
       lastError = error;
       const retryable = error instanceof OzonApiError ? error.status === 429 || (error.status ?? 0) >= 500 : true;
-      if (!retryable || attempt === 4) break;
+      if (!retryable || attempt === 6) break;
       const retryAfter = error instanceof OzonApiError ? error.retryAfter : null;
       await new Promise((resolve) => setTimeout(resolve, ozonRetryDelay(attempt, retryAfter)));
     }

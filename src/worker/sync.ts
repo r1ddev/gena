@@ -30,6 +30,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const asString = (value: unknown, fallback = "") => value === undefined || value === null ? fallback : String(value);
 const asNumber = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const moneyAmount = (value: unknown) => asNumber(typeof value === "object" && value !== null && "amount" in value ? (value as { amount?: unknown }).amount : value);
+const marketplaceBuyoutAmount = (product: JsonRecord) => {
+  if (product.amount === undefined || product.amount === null || !Number.isFinite(Number(product.amount))) return null;
+  return Number(product.amount).toFixed(2);
+};
 const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
 const addDays = (date: Date, amount: number) => new Date(date.getTime() + amount * 24 * 60 * 60 * 1000);
 const MAX_HISTORY_RANGE_DAYS = 365;
@@ -164,6 +168,7 @@ async function upsertFboPosting(posting: FboPosting) {
         price: String(Math.max(0, moneyAmount(product.price))),
         isMarketplaceBuyout,
         marketplaceBuyoutAt: previous?.marketplaceBuyoutAt ?? (existing?.isMarketplaceBuyout ? existing.marketplaceBuyoutAt : null),
+        marketplaceBuyoutAmount: previous?.marketplaceBuyoutAmount ?? null,
         raw: product as JsonRecord,
       };
     }));
@@ -461,6 +466,10 @@ async function importBuyoutReports(credentials: OzonCredentials, from: Date, to:
             isMarketplaceBuyout: true,
             marketplaceBuyoutAt: sql`COALESCE(${postingItems.marketplaceBuyoutAt}, ${observedAt})`,
           }).where(inArray(postingItems.id, matchingItems.map((item) => item.id)));
+          const amount = marketplaceBuyoutAmount(product);
+          if (amount !== null) {
+            await db.update(postingItems).set({ marketplaceBuyoutAmount: amount }).where(eq(postingItems.id, matchingItems[0].id));
+          }
           const refreshedItems = await db.select().from(postingItems).where(eq(postingItems.postingId, posting[0].id));
           const allItemsAreMarketplaceBuyouts = refreshedItems.length > 0 && refreshedItems.every((item) => item.isMarketplaceBuyout);
           await db.update(postings).set({
@@ -562,25 +571,36 @@ export async function syncOzonData(jobId: string) {
   };
   const run = async (label: string, task: () => Promise<unknown>) => {
     try {
-      summary[label] = await task();
+      const result = await task();
+      summary[label] = result;
+      return { ok: true as const, result };
     } catch (error) {
       errors.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
       summary[label] = "ошибка";
+      return { ok: false as const, result: null };
+    }
+  };
+  const syncBuyoutReports = async (ordersImported: boolean) => {
+    const needsBackfill = settingsRow.marketplaceBuyoutReportStartDate !== startDate;
+    const reportFrom = needsBackfill ? new Date(`${startDate}T00:00:00.000Z`) : from;
+    const buyoutRun = await run("buyouts", () => importBuyoutReports(credentials, reportFrom, to, progress));
+    if (needsBackfill && ordersImported && buyoutRun.ok) {
+      await db.update(appSettings).set({ marketplaceBuyoutReportStartDate: startDate, updatedAt: new Date() }).where(eq(appSettings.id, 1));
     }
   };
 
   const fullSync = ["scheduled", "manual", "full"].includes(kind);
   if (kind === "orders") {
-    await run("orders", () => importPostings(credentials, from, to, progress));
-    await run("buyouts", () => importBuyoutReports(credentials, from, to, progress));
+    const ordersRun = await run("orders", () => importPostings(credentials, from, to, progress));
+    await syncBuyoutReports(ordersRun.ok);
     await run("accruals", () => importDailyAccruals(credentials, from, to, progress));
   } else if (kind === "returns") {
     await run("returns", () => importReturns(credentials, from, to, progress));
     await run("accruals", () => importDailyAccruals(credentials, from, to, progress));
   } else {
-    await run("orders", () => importPostings(credentials, from, to, progress));
+    const ordersRun = await run("orders", () => importPostings(credentials, from, to, progress));
     await run("returns", () => importReturns(credentials, from, to, progress));
-    await run("buyouts", () => importBuyoutReports(credentials, from, to, progress));
+    await syncBuyoutReports(ordersRun.ok);
     await run("accruals", () => importDailyAccruals(credentials, from, to, progress));
     await run("writeoffs", () => importWriteoffs(credentials, from, to, progress));
   }

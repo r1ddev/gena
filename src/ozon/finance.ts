@@ -27,6 +27,41 @@ export function financeAccrualPostingNumber(category: string, unitNumber: string
   return ["POSTING", "ITEM"].includes(category.toUpperCase()) ? unitNumber || null : null;
 }
 
+export function financePostingSaleSkus(raw: OzonFinanceRow): string[] {
+  const posting = raw.posting;
+  if (!posting || typeof posting !== "object") return [];
+  const products = (posting as { products?: unknown }).products;
+  if (!Array.isArray(products)) return [];
+  const totalAmount = financeMoneyCents(raw.total_amount);
+  if (totalAmount === null || products.length === 0) return [];
+  let reconstructedCents = 0;
+  const skus: string[] = [];
+  for (const candidate of products) {
+    if (!candidate || typeof candidate !== "object") return [];
+    const product = candidate as { sku?: unknown; commission?: unknown; delivery?: unknown };
+    if (product.sku === undefined || product.sku === null || !product.commission || typeof product.commission !== "object") return [];
+    const commission = product.commission as Record<string, unknown>;
+    const saleCents = financeMoneyCents(commission.sale_amount);
+    const commissionCents = financeMoneyCents(commission.commission);
+    const delivery = product.delivery && typeof product.delivery === "object" ? product.delivery as Record<string, unknown> : {};
+    const deliveryCents = delivery.total_accrued === undefined || delivery.total_accrued === null
+      ? 0
+      : financeMoneyCents(delivery.total_accrued);
+    if (saleCents === null || commissionCents === null || deliveryCents === null) return [];
+    reconstructedCents += saleCents + commissionCents + deliveryCents;
+    skus.push(String(product.sku));
+  }
+  return reconstructedCents === totalAmount ? [...new Set(skus)] : [];
+}
+
+function financeMoneyCents(value: unknown): number | null {
+  const amount = value && typeof value === "object" && "amount" in value
+    ? (value as { amount?: unknown }).amount
+    : value;
+  if (amount === undefined || amount === null || !Number.isFinite(Number(amount))) return null;
+  return Math.round(Number(amount) * 100);
+}
+
 export function groupFinanceItemFees(fees: unknown[]) {
   const totalsByType = new Map<string, number>();
   for (const candidate of fees) {

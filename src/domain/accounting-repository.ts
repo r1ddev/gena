@@ -17,7 +17,7 @@ import {
   supplyLines,
 } from "@/db/schema";
 import { calculateAccounting, hasAccountablePostingItems } from "./accounting";
-import { isOzonWriteoffCompensation } from "@/ozon/finance";
+import { financePostingSaleSkus, isOzonWriteoffCompensation } from "@/ozon/finance";
 
 export async function getAccountingSnapshot(now = new Date()) {
   const [productRows, purchaseRows, receiptRows, supplyRows, supplyLineRows, expenseRows, postingRows, postingItemRows, financeRows, returnRows, manualRows, ozonWriteoffRows, adjustmentRows, externalRows] = await Promise.all([
@@ -38,6 +38,11 @@ export async function getAccountingSnapshot(now = new Date()) {
   ]);
 
   const postingIdByExternalId = new Map(postingRows.map((posting) => [posting.externalId, posting.id]));
+  const postingById = new Map(postingRows.map((posting) => [posting.id, posting]));
+  const financeSaleSkuKeys = new Set(financeRows.flatMap((row) => {
+    const postingId = row.postingNumber ? postingIdByExternalId.get(row.postingNumber) : null;
+    return postingId ? financePostingSaleSkus(row.raw).map((sku) => `${postingId}\u0000${sku}`) : [];
+  }));
   const postingProductPairs = new Set(postingItemRows.flatMap((item) => item.productId ? [`${item.postingId}\u0000${item.productId}`] : []));
   const productIdByPurchaseId = new Map(purchaseRows.map((purchase) => [purchase.id, purchase.productId]));
   const dispositionByExternalKey = new Map(externalRows.map((item) => [item.externalKey, item.disposition]));
@@ -91,7 +96,22 @@ export async function getAccountingSnapshot(now = new Date()) {
         isOzonWriteoffCompensation: isOzonWriteoffCompensation({ typeId, raw }),
         ignored: Boolean(ozonSku && ignoredOzonSkus.has(ozonSku) && !productId),
       };
-    }),
+    }).concat(postingItemRows.flatMap((item) => {
+      const posting = postingById.get(item.postingId);
+      const buyoutAt = item.marketplaceBuyoutAt ?? posting?.marketplaceBuyoutAt;
+      if (!item.isMarketplaceBuyout || item.marketplaceBuyoutAmount === null || !buyoutAt) return [];
+      if (item.ozonSku && financeSaleSkuKeys.has(`${item.postingId}\u0000${item.ozonSku}`)) return [];
+      return [{
+        postingId: item.postingId,
+        productId: item.productId,
+        ozonSku: item.ozonSku,
+        amount: item.marketplaceBuyoutAmount,
+        category: "ITEM",
+        accrualDate: buyoutAt.toISOString(),
+        isOzonWriteoffCompensation: false,
+        ignored: dispositionByExternalKey.get(item.externalKey) === "ignored",
+      }];
+    })),
     returns: returnRows.map(({ externalId, postingNumber, productId, quantity, destination, returnedAt, receivedBySellerAt, availableAtOzon }) => {
       const candidatePostingId = postingNumber ? postingIdByExternalId.get(postingNumber) ?? null : null;
       const postingId = candidatePostingId && productId && postingProductPairs.has(`${candidatePostingId}\u0000${productId}`) ? candidatePostingId : null;

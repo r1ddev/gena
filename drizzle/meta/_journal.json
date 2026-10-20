@@ -64,6 +64,20 @@
       "when": 1792489286369,
       "tag": "0008_dizzy_magma",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792506254678,
+      "tag": "0009_marketplace_buyout_amount",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792506826386,
+      "tag": "0010_marketplace_buyout_backfill",
+      "breakpoints": true
     }
   ]
 }
