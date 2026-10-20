@@ -264,7 +264,7 @@ export function PurchasesWorkspace() {
         { name: "note", label: "Комментарий", type: "textarea", wide: true },
       ],
       columns: [
-        { key: "purchasedAt", label: "Дата", kind: "date" }, { key: "title", label: "Товар", primary: true }, { key: "sku", label: "Артикул" },
+        { key: "purchasedAt", label: "Дата", kind: "date" }, { key: "title", label: "Товар" }, { key: "sku", label: "Артикул", primary: true },
         { key: "orderedQuantity", label: "Заказано", kind: "quantity" }, { key: "receivedQuantity", label: "Принято", kind: "quantity" },
         { key: "expectedQuantity", label: "Ожидается", kind: "quantity" }, { key: "amountPaid", label: "Оплачено", kind: "money" }, { key: "receiptStatus", label: "Приёмка", kind: "status" }, { key: "note", label: "Комментарий" },
       ],
