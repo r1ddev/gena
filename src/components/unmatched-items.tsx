@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Link2, Plus, RefreshCw, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Link2, Plus, XCircle } from "lucide-react";
 import { findRows, getId, requestJson, type JsonRecord } from "./api";
+import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 
 type Option = { id: string; label: string };
 
@@ -30,6 +31,18 @@ export function UnmatchedItems() {
       const id = getId(row); if (!id) return null; const code = typeof row.sku === "string" ? row.sku : ""; return { id, label: code ? `${String(row.title ?? "Товар")} · ${code}` : String(row.title ?? "Товар") };
     }).filter((item): item is Option => item !== null))).catch(() => setProducts([]));
   }, [refresh]);
+  useEffect(() => {
+    const refreshAfterSync = () => { void refresh(); };
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void refresh(); };
+    window.addEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
+    window.addEventListener("focus", refreshAfterSync);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
+      window.removeEventListener("focus", refreshAfterSync);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [refresh]);
 
   async function decide(row: JsonRecord, action: "map" | "create" | "ignore") {
     const id = getId(row); if (!id) return;
@@ -44,7 +57,7 @@ export function UnmatchedItems() {
   }
 
   return <section id="unmatched-ozon-items" className="panel" style={{ marginTop: 16 }}>
-    <div className="panel-head"><div><h2>Несопоставленные товары Ozon</h2><span className="small-note">Выбор сохраняется и применяется при следующих обновлениях</span></div><div className="toolbar"><span className="badge orange">{rows.length}</span><button className="icon-button" aria-label="Обновить список" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} /></button></div></div>
+    <div className="panel-head"><div><h2>Несопоставленные товары Ozon</h2><span className="small-note">Список обновляется вместе с синхронизацией продаж и возвратов</span></div><span className="badge orange">{rows.length}</span></div>
     {error && <div className="error-banner" role="alert" style={{ margin: "12px 18px 0" }}><AlertCircle size={14} />{error}</div>}{success && <div className="success-banner" role="status" style={{ margin: "12px 18px 0" }}><CheckCircle2 size={14} />{success}</div>}
     {loading ? <div className="panel-body"><div className="loading-line" /></div> : rows.length === 0 && !error ? <div className="empty-state" style={{ minHeight: 130 }}><div><div className="empty-icon"><CheckCircle2 size={18} /></div><div className="empty-title">Все товары сопоставлены</div><p className="empty-description">Новые неизвестные артикулы появятся здесь после синхронизации.</p></div></div> : <div className="table-wrap"><table><thead><tr><th>Артикул / SKU Ozon</th><th>Название из Ozon</th><th>Впервые замечен</th><th>Действие</th></tr></thead><tbody>{rows.map((row, index) => {
       const id = getId(row) ?? String(index); const currentMode = mode[id];
