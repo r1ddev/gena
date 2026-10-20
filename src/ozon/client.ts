@@ -1,4 +1,8 @@
 const API_ROOT = "https://api-seller.ozon.ru";
+const MIN_REQUEST_INTERVAL_MS = 1_000;
+let lastRequestAt = 0;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class OzonApiError extends Error {
   constructor(message: string, readonly status?: number, readonly retryAfter?: string | null) {
@@ -17,10 +21,17 @@ export function ozonRetryDelay(attempt: number, retryAfter?: string | null, nowM
   return Math.min(30_000, Math.max(backoff, serverDelay));
 }
 
+export function ozonRequestWait(previousRequestAt: number, nowMs = Date.now()) {
+  if (previousRequestAt <= 0) return 0;
+  return Math.max(0, MIN_REQUEST_INTERVAL_MS - (nowMs - previousRequestAt));
+}
+
 export async function ozonPost<T>(path: string, body: unknown, credentials: { clientId: string; apiKey: string }): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
+      await sleep(ozonRequestWait(lastRequestAt));
+      lastRequestAt = Date.now();
       const response = await fetch(`${API_ROOT}${path}`, {
         method: "POST",
         headers: {
