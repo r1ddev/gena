@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { productImages, productLinks, products } from "@/db/schema";
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   return handleLocalGet(request, async () => {
     const [snapshot, links, imageRows] = await Promise.all([
       getAccountingSnapshot(),
-      db.select().from(productLinks),
+      db.select().from(productLinks).orderBy(asc(productLinks.createdAt), asc(productLinks.id)),
       db.select({ productId: productImages.productId }).from(productImages),
     ]);
     const imageProductIds = new Set(imageRows.map(({ productId }) => productId));
@@ -31,8 +31,8 @@ export async function GET(request: Request) {
         ozonSku: "",
         ...links.filter((link) => link.productId === product.id).reduce<Record<string, unknown>>((result, link, index) => ({
           ...result,
-          ...(index === 0 ? { offerId: link.offerId, ozonSku: link.ozonSku ?? "" } : {}),
-          ozonLinks: [...((result.ozonLinks as unknown[] | undefined) ?? []), { offerId: link.offerId, ozonSku: link.ozonSku }],
+          ...(index === 0 ? { offerId: link.offerId, ozonSku: link.ozonSku ?? "", primaryLinkId: link.id } : {}),
+          ozonLinks: [...((result.ozonLinks as unknown[] | undefined) ?? []), { id: link.id, offerId: link.offerId, ozonSku: link.ozonSku }],
         }), {}),
       })),
     };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, Package, Plus, Search, Trash2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Package, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { asRecord, displayValue, findRows, getId, localToday, requestJson, stringValue, valueAt, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
@@ -38,6 +38,7 @@ export type ResourceConfig = {
   emptyTitle?: string;
   emptyDescription?: string;
   deleteUrl?: (row: JsonRecord) => string | null;
+  editUrl?: (row: JsonRecord) => string | null;
   help?: string;
 };
 
@@ -121,7 +122,10 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const [loadError, setLoadError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [editingRow, setEditingRow] = useState<JsonRecord | null>(null);
+  const [editingValues, setEditingValues] = useState<Record<string, string>>({});
   const [productImage, setProductImage] = useState<File | null>(null);
+  const [removeExistingImage, setRemoveExistingImage] = useState(false);
   const [productOptions, setProductOptions] = useState<{ value: string; label: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -214,21 +218,49 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     if (config.remotePageSize) setPage(1);
   }
 
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
+  function openEdit(row: JsonRecord) {
+    if (!config.editUrl?.(row)) return;
+    setFormOpen(false);
+    setEditingRow(row);
+    setEditingValues(Object.fromEntries(config.fields.map((field) => [field.name, typeof row[field.name] === "string" ? row[field.name] as string : ""])));
+    setProductImage(null);
+    setRemoveExistingImage(false);
+    setError(""); setSuccess("");
+  }
+
+  function closeEdit() {
+    setEditingRow(null);
+    setEditingValues({});
+    setProductImage(null);
+    setRemoveExistingImage(false);
+    setError("");
+  }
+
+  async function submitRecord(event: React.FormEvent<HTMLFormElement>, editing: boolean) {
     event.preventDefault();
     setBusy(true); setError(""); setSuccess("");
-    const payload = buildResourcePayload(config.fields, formValues, localToday());
+    const payload = buildResourcePayload(config.fields, editing ? editingValues : formValues, localToday());
     try {
       const body = config.imageUpload ? new FormData() : JSON.stringify(payload);
       if (body instanceof FormData) {
         Object.entries(payload).forEach(([key, value]) => body.append(key, String(value)));
         if (productImage) body.append("image", productImage, productImage.name || "product-image");
+        if (editing && editingRow && typeof editingRow.primaryLinkId === "string") body.append("primaryLinkId", editingRow.primaryLinkId);
+        if (editing && removeExistingImage && !productImage) body.append("removeImage", "true");
       }
-      await requestJson(config.createUrl, { method: "POST", body });
-      setFormValues({}); setProductImage(null); setFormOpen(false); setSuccess("Запись добавлена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh();
+      const url = editing && editingRow ? config.editUrl?.(editingRow) : config.createUrl;
+      if (!url) throw new Error("Не удалось определить запись для редактирования.");
+      await requestJson(url, { method: editing ? "PATCH" : "POST", body });
+      setFormValues({}); setProductImage(null); setFormOpen(false);
+      if (editing) closeEdit();
+      setSuccess(editing ? "Товар сохранён." : "Запись добавлена. Связанные итоги обновлены автоматически."); onMutation?.(); await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось сохранить запись"); }
     finally { setBusy(false); }
   }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) { await submitRecord(event, false); }
+
+  async function submitEdit(event: React.FormEvent<HTMLFormElement>) { await submitRecord(event, true); }
 
   async function remove(row: JsonRecord) {
     if (!config.deleteUrl) return;
@@ -245,7 +277,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   return <>
     <PageHeader eyebrow={config.eyebrow ?? "Учёт операций"} title={config.title} description={config.description} actions={<div className="toolbar">{actions}{!config.hideCreate && <button className="button" onClick={() => { setFormOpen((open) => !open); setError(""); setSuccess(""); }}><Plus size={15} />{formOpen ? "Закрыть форму" : config.createLabel}</button>}</div>} />
     {config.showSoldQuantity && <section className="panel metric-card" style={{ "--metric-bg": "#eef5fa", marginBottom: 16 } as React.CSSProperties} aria-label="Проданные товары"><Package className="metric-icon" size={18} /><div className="metric-label">Продано товаров</div><div className="metric-value">{soldQuantity === null ? loading ? "…" : "—" : `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(soldQuantity)} шт.`}</div><div className="metric-help">Доставленные и выкупленные Ozon товары за всё время, за вычетом возвратов</div></section>}
-    {error && <div className="error-banner" role="alert"><AlertCircle size={16} />{error}</div>}
+    {error && !editingRow && <div className="error-banner" role="alert"><AlertCircle size={16} />{error}</div>}
     {success && <div className="success-banner" role="status"><CheckCircle2 size={16} />{success}</div>}
     {formOpen && <section className="panel form-panel" aria-label={`Новая запись: ${config.title}`}>
       <div className="panel-head"><h2>Новая запись</h2><span className="small-note">Поля со звёздочкой обязательны</span></div>
@@ -257,6 +289,24 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
         <div className="form-actions"><button type="button" className="button secondary" onClick={() => setFormOpen(false)}>Отмена</button><button className="button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></div>
       </form>
     </section>}
+    {editingRow && <div className="product-edit-backdrop">
+      <section className="panel product-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="product-edit-title">
+        <div className="panel-head"><div><h2 id="product-edit-title">Редактирование товара</h2><span className="small-note">Поля со звёздочкой обязательны</span></div><button type="button" className="icon-button" aria-label="Закрыть редактирование" onClick={closeEdit}><X size={15} /></button></div>
+        <form className="panel-body" onSubmit={submitEdit}>
+          {error && <div className="error-banner" role="alert"><AlertCircle size={16} />{error}</div>}
+          <div className="form-grid">{config.fields.map((field) => <Field key={field.name} config={field} value={editingValues[field.name] ?? ""} productOptions={productOptions} onChange={(value) => setEditingValues((current) => ({ ...current, [field.name]: value }))} />)}</div>
+          {config.imageUpload && <ProductImageInput
+            id="edit-product-image"
+            value={productImage}
+            existingImageUrl={!removeExistingImage && typeof editingRow.imageUrl === "string" ? editingRow.imageUrl : undefined}
+            onChange={(file) => { setProductImage(file); if (file) setRemoveExistingImage(false); }}
+            onRemoveExisting={() => setRemoveExistingImage(true)}
+          />}
+          {config.help && <p className="form-help">{config.help}</p>}
+          <div className="form-actions"><button type="button" className="button secondary" onClick={closeEdit}>Отмена</button><button className="button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></div>
+        </form>
+      </section>
+    </div>}
     {beforeTable}
     <section className="panel">
       <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Загружаем список…" : config.remotePageSize ? `${pagination?.total ?? 0} записей` : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder={config.remotePageSize ? "Поиск по заказам" : "Поиск"} value={search} onChange={(event) => setSearch(event.target.value)} /></div></div></div>
@@ -269,14 +319,14 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
               value: column.key === "article" ? (row: JsonRecord) => orderArticleText(row.items)
                 : column.key === "status" ? (row: JsonRecord) => [row.status, row.returnState].filter(Boolean).join(" ")
                   : (row: JsonRecord) => valueAt(row, column.key),
-            }))} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || rowActions ? ["Действия"] : []} /><tbody>{visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
+            }))} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || config.editUrl || rowActions ? ["Действия"] : []} /><tbody>{visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
               const value = valueAt(row, column.key);
               const displayKind = column.kind === "date" || column.kind === "money" || column.kind === "quantity" || column.kind === "status" ? column.kind : undefined;
               if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, displayKind)}</span>{typeof row.sku === "string" && column.key !== "sku" && column.key !== "offerId" && <span className="table-secondary">{row.sku}</span>}</td>;
               if (column.key === "article") return <td key={column.key}>{orderArticleText(row.items)}</td>;
               const rendered = displayValue(value, displayKind);
               return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") ? <><span className="badge">{rendered}</span>{column.key === "status" && typeof row.returnState === "string" && <span className="table-secondary">{row.returnState}</span>}</> : rendered}</td>;
-            })}{(config.deleteUrl || rowActions) && <td><div className="row-actions">{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
+            })}{(config.deleteUrl || config.editUrl || rowActions) && <td><div className="row-actions">{config.editUrl?.(row) && <button type="button" className="icon-button" aria-label={`Редактировать товар ${index + 1}`} onClick={() => openEdit(row)} disabled={busy}><Pencil size={14} /></button>}{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
       {pagination && pagination.totalPages > 1 && <nav className="pagination-controls" aria-label={`Страницы: ${config.title}`} aria-busy={loading}>
         {pageItems(pagination.page, pagination.totalPages).map((item, index) => item === "ellipsis"
           ? <span className="pagination-ellipsis" key={`ellipsis-${index}`} aria-hidden="true">…</span>

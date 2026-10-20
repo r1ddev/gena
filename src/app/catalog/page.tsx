@@ -1,3 +1,5 @@
+"use client";
+
 import { ResourcePage } from "@/components/resource-page";
 
 export default function CatalogPage() {
@@ -5,6 +7,7 @@ export default function CatalogPage() {
     title: "Каталог товаров", eyebrow: "Справочники",
     description: "Единый список товаров и их артикулов. Связи с Ozon нужны для автоматического распознавания заказов и возвратов.",
     collectionUrl: "/api/products", createUrl: "/api/products", createLabel: "Добавить товар",
+    editUrl: (row) => typeof row.id === "string" ? `/api/products/${encodeURIComponent(row.id)}` : null,
     imageUpload: true,
     fields: [
       { name: "offerId", label: "Артикул", placeholder: "Артикул продавца" },

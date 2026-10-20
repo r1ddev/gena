@@ -119,6 +119,9 @@ tbody tr:hover { background: #fcfdfc; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .form-panel { margin-bottom: 17px; }
+.product-edit-backdrop { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(15, 29, 21, .42); }
+.product-edit-dialog { width: min(850px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
+.product-edit-dialog .form-actions { padding-top: 4px; }
 .form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; }
 .field { display: grid; gap: 6px; min-width: 0; }
 .field.wide { grid-column: span 2; }
@@ -197,4 +200,6 @@ tbody tr:hover { background: #fcfdfc; }
   .field.wide, .field.full { grid-column: auto; }
   .line-item { grid-template-columns: 1fr 80px auto; }
   .search-box { width: 100%; }
+  .product-edit-backdrop { padding: 8px; }
+  .product-edit-dialog { max-height: calc(100vh - 16px); }
 }
