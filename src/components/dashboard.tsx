@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, Boxes, CircleDollarSign, Clock3, ShoppingBag, TrendingUp, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, Boxes, CircleDollarSign, Clock3, Info, ShoppingBag, TrendingUp, Wallet } from "lucide-react";
 import { asRecord, displayValue, findRows, requestJson, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { UnmatchedItems } from "./unmatched-items";
@@ -27,9 +27,10 @@ function signedMetric(value: unknown) {
   return `${prefix}${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(Math.abs(amount))} ₽`;
 }
 
-function BreakdownCard({ title, description, breakdown, labels }: {
+function BreakdownCard({ title, tooltipId, explanation, breakdown, labels }: {
   title: string;
-  description: string;
+  tooltipId: string;
+  explanation: string;
   breakdown: JsonRecord | null;
   labels: Record<string, string>;
 }) {
@@ -41,14 +42,16 @@ function BreakdownCard({ title, description, breakdown, labels }: {
   const total = breakdown.total;
   if (!rows.length && total === undefined) return null;
   return <section className="panel">
-    <div className="panel-head"><div><h2>{title}</h2><span className="small-note">{description}</span></div></div>
+    <div className="panel-head"><div className="breakdown-heading"><h2>{title}</h2><span className="breakdown-info">
+      <button className="breakdown-info-button" type="button" aria-label={`Как рассчитывается: ${title}`} aria-describedby={tooltipId}><Info size={14} aria-hidden="true" /></button>
+      <span className="breakdown-tooltip" role="tooltip" id={tooltipId}>{explanation}</span>
+    </span></div></div>
     <div className="panel-body mini-stat-list">
       {rows.map(({ key, label, value }) => {
         const amount = numeric(value);
         return <div className="mini-stat" key={key}><span className="mini-stat-label">{label}</span><span className="mini-stat-value number" style={{ color: amount < 0 ? "var(--red)" : amount > 0 ? "var(--green-dark)" : "var(--muted)" }}>{signedMetric(value)}</span></div>;
       })}
       {total !== undefined && <div className="mini-stat" style={{ marginTop: 3, paddingTop: 14, borderTop: "1px solid var(--line)", borderBottom: 0 }}><span className="mini-stat-label" style={{ color: "var(--ink)", fontWeight: 800 }}>Итого</span><span className="mini-stat-value number" style={{ color: numeric(total) < 0 ? "var(--red)" : "var(--ink)", fontSize: 15 }}>{metric(total)}</span></div>}
-      <p className="form-help" style={{ marginBottom: 0 }}>Знак показывает влияние суммы на итог: плюс увеличивает, минус уменьшает.</p>
     </div>
   </section>;
 }
@@ -120,14 +123,14 @@ export function Dashboard() {
       </div>
 
       {(cashBreakdown || profitBreakdown) && <div className="dashboard-grid" style={{ marginBottom: 16 }}>
-        <BreakdownCard title="Из чего складывается баланс" description="Компенсации выделены из начислений Ozon и не прибавляются повторно" breakdown={cashBreakdown} labels={{
+        <BreakdownCard title="Из чего складывается баланс" tooltipId="breakdown-balance" explanation="Суммы начислений и удержаний Ozon по признанным заказам, включая комиссии и логистику. Компенсации за списания Ozon показаны отдельной строкой и уже входят в эти суммы. Минус внесённые закупки, общие расходы и доставка поставок. Продажа признаётся через 21 день после доставки покупателю, выкуп Ozon — по финансовому отчёту. Плюс увеличивает баланс, минус уменьшает." breakdown={cashBreakdown} labels={{
           recognizedOzonOther: "Прочие признанные начисления Ozon",
           ozonWriteoffCompensation: "Компенсации Ozon",
           purchases: "Закупки",
           expenses: "Общие расходы",
           supplyShipping: "Доставка поставок",
         }} />
-        <BreakdownCard title="Из чего складывается прибыль" description="Компенсации выделены из начислений Ozon и не прибавляются повторно" breakdown={profitBreakdown} labels={{
+        <BreakdownCard title="Из чего складывается прибыль" tooltipId="breakdown-profit" explanation="Начисления и удержания Ozon по признанным заказам, включая комиссии и логистику, плюс компенсации за списания Ozon. Минус закупочная себестоимость проданных товаров и товаров, списанных вручную или Ozon, а также доля общих расходов. Расходы и доставка поставок распределяются между товарами по коэффициенту: их общая сумма делится на стоимость полученных закупок. Продажа признаётся через 21 день после доставки покупателю, выкуп Ozon — по финансовому отчёту. Плюс увеличивает прибыль, минус уменьшает." breakdown={profitBreakdown} labels={{
           recognizedOzonOther: "Прочие начисления Ozon",
           ozonWriteoffCompensation: "Компенсации Ozon",
           soldPurchaseCost: "Закупочная себестоимость продаж",

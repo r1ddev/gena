@@ -58,6 +58,12 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .icon-button:hover { color: var(--ink); background: #f5f8f5; }
 .panel { border: 1px solid var(--line); border-radius: 14px; background: var(--white); box-shadow: var(--shadow); }
 .panel-head { display: flex; min-height: 57px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 18px; border-bottom: 1px solid #edf0ed; }
+.breakdown-heading { display: flex; align-items: center; gap: 8px; }
+.breakdown-info { position: relative; display: inline-flex; align-items: center; }
+.breakdown-info-button { display: inline-grid; width: 18px; height: 18px; place-items: center; padding: 0; border: 1px solid #c9d4cc; border-radius: 50%; color: #738078; background: white; cursor: help; }
+.breakdown-info-button:hover, .breakdown-info-button:focus-visible { border-color: var(--green); color: var(--green-dark); outline: none; }
+.breakdown-tooltip { position: absolute; z-index: 50; top: calc(100% + 8px); right: 0; width: min(360px, calc(100vw - 40px)); padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: white; box-shadow: 0 8px 24px rgba(24, 50, 40, .16); font-size: 11px; font-weight: 500; line-height: 1.55; opacity: 0; visibility: hidden; transform: translateY(-3px); transition: opacity .12s ease, transform .12s ease, visibility .12s ease; }
+.breakdown-info:hover .breakdown-tooltip, .breakdown-info-button:focus-visible + .breakdown-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .panel-body { padding: 18px; }
 .metrics-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; margin-bottom: 18px; }
 .metric-card { position: relative; min-height: 135px; overflow: hidden; padding: 17px 18px; }
