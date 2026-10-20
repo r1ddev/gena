@@ -35,6 +35,16 @@ export type ResourceConfig = {
   help?: string;
 };
 
+export function buildResourcePayload(fields: FieldConfig[], formValues: Record<string, string>, defaultDate: string): Record<string, string | number> {
+  const payload: Record<string, string | number> = {};
+  for (const field of fields) {
+    const value = formValues[field.name] ?? (field.type === "date" ? defaultDate : "");
+    if (value === "") continue;
+    payload[field.name] = field.type === "number" ? Number(value) : value;
+  }
+  return payload;
+}
+
 function labelFor(key: string) {
   const labels: Record<string, string> = {
     sku: "Артикул", title: "Товар", category: "Категория", offerId: "Артикул Ozon", ozonSku: "SKU Ozon",
@@ -104,12 +114,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true); setError(""); setSuccess("");
-    const payload: Record<string, string | number> = {};
-    for (const field of config.fields) {
-      const value = formValues[field.name] ?? "";
-      if (value === "") continue;
-      payload[field.name] = field.type === "number" ? Number(value) : value;
-    }
+    const payload = buildResourcePayload(config.fields, formValues, localToday());
     try {
       await requestJson(config.createUrl, { method: "POST", body: JSON.stringify(payload) });
       setFormValues({}); setFormOpen(false); setSuccess("Запись добавлена. Итоги пересчитаны."); onMutation?.(); await refresh();
