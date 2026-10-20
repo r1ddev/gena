@@ -21,6 +21,17 @@ function recordOf(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function uniqueOfferIdsBySku(rows: { offerId: string; ozonSku: string }[]) {
+  const candidates = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (!row.offerId || !row.ozonSku) continue;
+    const offerIds = candidates.get(row.ozonSku) ?? new Set<string>();
+    offerIds.add(row.offerId);
+    candidates.set(row.ozonSku, offerIds);
+  }
+  return new Map([...candidates].flatMap(([sku, offerIds]) => offerIds.size === 1 ? [[sku, [...offerIds][0]] as const] : []));
+}
+
 function feeFacts(raw: Record<string, unknown>, sku: string) {
   const rows = Array.isArray(raw.fees)
     ? raw.fees
@@ -69,7 +80,7 @@ export async function GET(request: Request) {
     const byId = new Map(catalog.map((product) => [product.id, product]));
     const externalKeys = [...new Set(items.map((item) => item.externalKey))];
     const skus = [...new Set(items.map((item) => item.ozonSku).filter(Boolean))];
-    const [orderRows, returnRows, writeoffRows, itemAccruals] = await Promise.all([
+    const [orderRows, returnRows, writeoffRows, itemAccruals, knownOrderProducts, knownReturnProducts, knownWriteoffProducts, knownExternalProducts, knownProductLinks] = await Promise.all([
       externalKeys.length
         ? db.select({ externalKey: postingItems.externalKey, postingNumber: postings.externalId })
           .from(postingItems).innerJoin(postings, eq(postingItems.postingId, postings.id)).where(inArray(postingItems.externalKey, externalKeys))
@@ -85,6 +96,28 @@ export async function GET(request: Request) {
       skus.length
         ? db.select().from(financeAccruals).where(eq(financeAccruals.accruedCategory, "ITEM"))
         : Promise.resolve([]),
+      skus.length
+        ? db.select({ offerId: postingItems.offerId, ozonSku: postingItems.ozonSku }).from(postingItems).where(inArray(postingItems.ozonSku, skus))
+        : Promise.resolve([]),
+      skus.length
+        ? db.select({ offerId: returns.offerId, ozonSku: returns.ozonSku }).from(returns).where(inArray(returns.ozonSku, skus))
+        : Promise.resolve([]),
+      skus.length
+        ? db.select({ offerId: ozonWriteoffs.offerId, ozonSku: ozonWriteoffs.ozonSku }).from(ozonWriteoffs).where(inArray(ozonWriteoffs.ozonSku, skus))
+        : Promise.resolve([]),
+      skus.length
+        ? db.select({ offerId: externalItems.offerId, ozonSku: externalItems.ozonSku }).from(externalItems).where(inArray(externalItems.ozonSku, skus))
+        : Promise.resolve([]),
+      skus.length
+        ? db.select({ offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks).where(inArray(productLinks.ozonSku, skus))
+        : Promise.resolve([]),
+    ]);
+    const offerIdBySku = uniqueOfferIdsBySku([
+      ...knownOrderProducts,
+      ...knownReturnProducts,
+      ...knownWriteoffProducts,
+      ...knownExternalProducts,
+      ...knownProductLinks,
     ]);
     const orderNumbersByKey = new Map<string, string[]>();
     for (const row of orderRows) orderNumbersByKey.set(row.externalKey, [...(orderNumbersByKey.get(row.externalKey) ?? []), row.postingNumber]);
@@ -122,7 +155,13 @@ export async function GET(request: Request) {
       } else if (kind === "order") {
         details = { ...details, postingNumber: orderNumbers[0] ?? ref(raw.posting_number), quantity: raw.quantity ?? null, amount: raw.price ?? raw.seller_price_per_instance ?? null };
       }
-      return { ...item, productTitle: item.productId ? byId.get(item.productId)?.title ?? "" : "", sourceInfo: details };
+      const rawOfferId = typeof raw.offer_id === "string" ? raw.offer_id : "";
+      return {
+        ...item,
+        offerId: item.offerId || rawOfferId || offerIdBySku.get(item.ozonSku) || "",
+        productTitle: item.productId ? byId.get(item.productId)?.title ?? "" : "",
+        sourceInfo: details,
+      };
     });
     return { items: enriched, sourceCounts };
   });
