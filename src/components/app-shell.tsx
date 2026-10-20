@@ -48,7 +48,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside className={`sidebar ${mobileOpen ? "open" : ""}`} aria-label="Основная навигация">
         <Link className="brand" href="/" onClick={() => setMobileOpen(false)}>
           <Image className="brand-mark" src="/icon.png" alt="" width={44} height={44} priority aria-hidden="true" />
-          <span><span className="brand-name">Gena</span><span className="brand-caption" style={{ display: "block" }}>учёт продавца</span></span>
+          <span className="brand-name">Gena</span>
         </Link>
         {navSections.map((section) => (
           <div key={section.label}>
