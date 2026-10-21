@@ -1,3 +1,5 @@
+import { isOzonWriteOffStatus } from "../ozon/return-status";
+
 export function unmatchedItemsNotice(unmatchedItemCount: number, excludedFinanceAmount: string | number | null | undefined) {
   const count = Math.max(0, Math.trunc(unmatchedItemCount));
   if (count === 0) return null;
@@ -10,8 +12,8 @@ export function unmatchedItemsNotice(unmatchedItemCount: number, excludedFinance
   };
 }
 
-export function returnsNeedingAction<T extends { destination?: unknown; receivedBySellerAt?: unknown }>(rows: T[]) {
-  return rows.filter((row) => row.destination === "unknown" || (row.destination === "seller" && !row.receivedBySellerAt));
+export function returnsNeedingAction<T extends { destination?: unknown; receivedBySellerAt?: unknown; status?: unknown; raw?: unknown }>(rows: T[]) {
+  return rows.filter((row) => !isOzonWriteOffStatus(row.status, row.raw) && (row.destination === "unknown" || (row.destination === "seller" && !row.receivedBySellerAt)));
 }
 
 export function latestOzonSyncNotice(jobValue: unknown) {

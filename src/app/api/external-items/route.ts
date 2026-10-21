@@ -8,6 +8,9 @@ import { readProductImage } from "../_lib/product-image";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 
 function sourceKind(raw: Record<string, unknown>, hasOrderRow: boolean) {
+  const visual = raw.visual && typeof raw.visual === "object" && !Array.isArray(raw.visual) ? raw.visual as Record<string, unknown> : {};
+  const status = visual.status && typeof visual.status === "object" && !Array.isArray(visual.status) ? visual.status as Record<string, unknown> : {};
+  if (String(status.sys_name ?? "").toLowerCase() === "writeoff") return "writeoff";
   if (Array.isArray(raw.fees) || raw.item_fees) return "finance";
   if ("target_place" in raw || "return_clearing_id" in raw) return "return";
   if ("compensation_price" in raw || "dispose_reason" in raw) return "writeoff";

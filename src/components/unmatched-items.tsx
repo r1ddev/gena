@@ -8,6 +8,7 @@ import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type Table
 import { ProductImageInput } from "./product-image-input";
 import { notifyProductCatalogChanged, ProductArticle } from "./product-hover-card";
 import { OzonOrderLink } from "./ozon-order-link";
+import { ozonReturnStatusLabel } from "@/ozon/return-status";
 
 type Option = { id: string; label: string };
 type DispositionView = "pending" | "ignored";
@@ -60,7 +61,7 @@ function sourceDetailParts(row: JsonRecord) {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateValue) ? dateValue.split("-").reverse().join(".") : dateValue;
   const quantity = source.quantity != null ? `${String(source.quantity)} шт.` : "";
   const destination = source.destination === "seller" ? "возврат тебе" : source.destination === "ozon" ? "возврат на склад Ozon" : "";
-  const status = typeof source.status === "string" && source.status ? source.status : "";
+  const status = source.kind === "return" ? ozonReturnStatusLabel(source.status, row.raw) : typeof source.status === "string" && source.status ? source.status : "";
   return { postingNumbers, otherDetails: [amount, quantity, destination, status, date].filter(Boolean) };
 }
 function sourceDetailsText(row: JsonRecord) {

@@ -10,6 +10,7 @@ import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type Table
 import { ProductArticle } from "./product-hover-card";
 import { OzonOrderLink } from "./ozon-order-link";
 import { OzonReturnLink } from "./ozon-return-link";
+import { isOzonWriteOffStatus, ozonReturnStatusLabel } from "@/ozon/return-status";
 
 function returnLabel(row: JsonRecord) {
   if (row.destination === "seller") return "Мне";
@@ -24,26 +25,12 @@ function returnLabel(row: JsonRecord) {
   return String(target.name ?? target.address ?? "—");
 }
 
-function returnStatusLabel(value: unknown) {
-  const labels: Record<string, string> = {
-    WriteOff: "Списали товар",
-    PotentiallyLost: "Ищем товар",
-    WaitingShipment: "Ожидает отправки",
-    ReceivedBySeller: "Едет к вам",
-    MovingToSeller: "Едет к вам",
-    ReturningToSellerByCourier: "Едет к вам",
-    ReturnedToOzon: "Едет на склад Ozon",
-    MovingToOzon: "Едет на склад Ozon",
-  };
-  return typeof value === "string" ? labels[value] ?? value : "Ожидает подтверждения";
-}
-
 const returnColumns: TableColumn<JsonRecord>[] = [
   { key: "externalId", label: "Возврат", kind: "identifier", value: (row) => row.externalId ?? row.postingNumber ?? row.id },
   { key: "product", label: "Товар", value: (row) => [row.title ?? row.productName, row.offerId, row.sku, row.ozonSku].filter(Boolean).join(" ") },
   { key: "quantity", label: "Количество", kind: "quantity" },
   { key: "destination", label: "Куда", value: returnLabel },
-  { key: "status", label: "Статус", value: (row) => [row.destination === "seller" && row.receivedBySellerAt ? "Получен" : returnStatusLabel(row.status), row.profitReconciliationNeeded ? "Прибыль требует сверки" : ""].filter(Boolean).join(" ") },
+  { key: "status", label: "Статус", value: (row) => [row.destination === "seller" && row.receivedBySellerAt ? "Получен" : ozonReturnStatusLabel(row.status, row.raw), row.profitReconciliationNeeded ? "Прибыль требует сверки" : ""].filter(Boolean).join(" ") },
   { key: "returnedAt", label: "Дата", kind: "date", value: (row) => row.returnedAt ?? row.updatedAt },
   { key: "action", label: "Действие", sortable: false, filterable: false },
 ];
@@ -69,7 +56,7 @@ export function ReturnsWorkspace() {
 
   const refresh = useCallback(async () => {
     setLoading(true); setLoadError("");
-    try { setRows(findRows(await requestJson("/api/returns")).filter((row) => row.destination !== "ozon")); }
+    try { setRows(findRows(await requestJson("/api/returns")).filter((row) => row.destination !== "ozon" && !isOzonWriteOffStatus(row.status, row.raw))); }
     catch (reason) { setRows([]); setLoadError(reason instanceof Error ? reason.message : "Не удалось загрузить возвраты"); }
     finally { setLoading(false); }
   }, []);
@@ -138,7 +125,7 @@ export function ReturnsWorkspace() {
           </td>
           <td className="number">{String(row.quantity ?? "—")}</td>
           <td>{returnLabel(row)}</td>
-          <td><span className={`badge ${sellerDone ? "green" : "orange"}`}>{sellerDone ? "Получен" : returnStatusLabel(row.status)}</span>{profitNeedsReconciliation && <span className="badge orange" style={{ marginTop: 5 }}>Прибыль требует сверки</span>}</td>
+          <td><span className={`badge ${sellerDone ? "green" : "orange"}`}>{sellerDone ? "Получен" : ozonReturnStatusLabel(row.status, row.raw)}</span>{profitNeedsReconciliation && <span className="badge orange" style={{ marginTop: 5 }}>Прибыль требует сверки</span>}</td>
           <td>{String(row.returnedAt ?? row.updatedAt ?? "—").slice(0, 10)}</td>
           <td><div className="row-actions">{!sellerDone && <button className="button secondary small" disabled={busyId === id} onClick={() => void markReceived(row)}>Получил я</button>}{postingMatched && !isEditingPosting ? <><span className="table-secondary">Отправление <OzonOrderLink postingNumber={postingNumber} /></span><button className="button secondary small" disabled={busyId === id} onClick={() => editPosting(row)}>Изменить связь</button></> : <><input aria-label="Номер отправления Ozon" placeholder={postingNumber ? `Текущий номер: ${postingNumber}` : "Номер отправления"} value={postingNumbers[id] ?? ""} onChange={(event) => setPostingNumbers((current) => ({ ...current, [id]: event.target.value }))} style={{ minWidth: 150, minHeight: 30, padding: "5px 8px", border: "1px solid #dfe5e0", borderRadius: 7, fontSize: 11 }} /><button className="button secondary small" disabled={busyId === id} onClick={() => void linkPosting(row)}>{postingNumber ? "Сохранить связь" : "Связать заказ"}</button>{isEditingPosting && postingMatched && <button className="button secondary small" disabled={busyId === id} onClick={() => setEditingPosting((current) => ({ ...current, [id]: false }))}>Отмена</button>}</>}</div></td>
         </tr>;
