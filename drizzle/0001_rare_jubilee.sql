@@ -1,0 +1,1 @@
+ALTER TABLE "import_batches" ADD COLUMN "content_hash" text DEFAULT '' NOT NULL;
