@@ -1,7 +1,7 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { products, stockAdjustments, stocktakeLines, stocktakes } from "@/db/schema";
+import { productLinks, products, stockAdjustments, stocktakeLines, stocktakes } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, nonNegativeInteger } from "../_lib/validation";
@@ -25,7 +25,9 @@ export async function GET(request: Request) {
     return { items: headers.map((header) => ({
       ...header,
       lines: lines.filter((line) => line.stocktakeId === header.id).map((line) => ({
-        ...line, sku: productById.get(line.productId)?.sku ?? "", title: productById.get(line.productId)?.title ?? "Товар удалён",
+        ...line,
+        sku: productById.get(line.productId)?.sku ?? line.productSkuSnapshot,
+        title: productById.get(line.productId)?.title ?? (line.productTitleSnapshot || "Товар удалён"),
       })),
     })) };
   });
@@ -40,12 +42,18 @@ export async function POST(request: Request) {
     const snapshot = await getAccountingSnapshot(new Date(`${body.countedAt}T23:59:59.999Z`));
     const currentById = new Map(snapshot.products.map((product) => [product.productId, product]));
     const header = await db.transaction(async (tx) => {
+      const productRows = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId })
+        .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(inArray(products.id, [...ids]));
+      if (productRows.length !== ids.size) throw new Error("Один из выбранных товаров не найден.");
+      const productById = new Map(productRows.map((product) => [product.id, product]));
       const [created] = await tx.insert(stocktakes).values({ warehouse: body.warehouse, countedAt: body.countedAt, note: body.note })
         .onConflictDoNothing().returning();
       if (!created) throw new Error("Инвентаризация этого склада за эту дату уже существует.");
       await tx.insert(stocktakeLines).values(body.lines.map((line) => ({
         stocktakeId: created.id,
         productId: line.productId,
+        productSkuSnapshot: productById.get(line.productId)!.offerId || productById.get(line.productId)!.sku,
+        productTitleSnapshot: productById.get(line.productId)!.title,
         expectedQuantity: currentById.get(line.productId)?.[body.warehouse === "seller" ? "sellerStock" : "ozonStock"] ?? "0",
         actualQuantity: line.actualQuantity,
       })));
@@ -70,12 +78,21 @@ export async function PATCH(request: Request) {
       await tx.insert(stockAdjustments).values({
         stocktakeLineId: id,
         productId: line.productId,
+        productSkuSnapshot: line.productSkuSnapshot,
+        productTitleSnapshot: line.productTitleSnapshot,
         warehouse: header.warehouse,
         actualQuantity: line.actualQuantity,
         adjustedAt: header.countedAt,
       }).onConflictDoUpdate({
         target: stockAdjustments.stocktakeLineId,
-        set: { productId: line.productId, warehouse: header.warehouse, actualQuantity: line.actualQuantity, adjustedAt: header.countedAt },
+        set: {
+          productId: line.productId,
+          productSkuSnapshot: line.productSkuSnapshot,
+          productTitleSnapshot: line.productTitleSnapshot,
+          warehouse: header.warehouse,
+          actualQuantity: line.actualQuantity,
+          adjustedAt: header.countedAt,
+        },
       });
     });
     return Response.json({ resolved: id, adjustedAt: header.countedAt });

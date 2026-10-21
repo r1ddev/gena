@@ -146,7 +146,7 @@ export async function GET(request: Request) {
         : Promise.resolve([]),
       productLinkConditions.length
         ? db.select({ offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks)
-          .innerJoin(products, and(eq(products.id, productLinks.productId), eq(products.reassignmentPending, false)))
+          .innerJoin(products, eq(products.id, productLinks.productId))
           .where(or(...productLinkConditions))
         : Promise.resolve([]),
     ]);

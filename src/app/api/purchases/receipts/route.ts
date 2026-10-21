@@ -1,7 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { products, purchaseReceiptLines, purchaseReceipts, purchases } from "@/db/schema";
+import { productLinks, products, purchaseReceiptLines, purchaseReceipts, purchases } from "@/db/schema";
 import { assertLocalMutation, errorResponse, parseBody } from "../../_lib/http";
 import { isoDate, positiveInteger } from "../../_lib/validation";
 
@@ -28,8 +28,13 @@ const receiptUpdateSchema = z.object({
 
 async function ensureProductsExist(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], lines: z.infer<typeof linesSchema>) {
   const productIds = lines.map((line) => line.productId);
-  const existing = await tx.select({ id: products.id }).from(products).where(inArray(products.id, productIds));
+  const existing = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId })
+    .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(inArray(products.id, productIds));
   if (existing.length !== productIds.length) throw new Error("Один из выбранных товаров не найден.");
+  return new Map(existing.map((product) => [product.id, {
+    productSkuSnapshot: product.offerId || product.sku,
+    productTitleSnapshot: product.title,
+  }]));
 }
 
 export async function POST(request: Request) {
@@ -39,13 +44,13 @@ export async function POST(request: Request) {
     const item = await db.transaction(async (tx) => {
       const purchase = (await tx.select({ id: purchases.id }).from(purchases).where(eq(purchases.id, body.purchaseId)).limit(1))[0];
       if (!purchase) throw new Error("Закупка не найдена.");
-      await ensureProductsExist(tx, body.lines);
+      const productSnapshots = await ensureProductsExist(tx, body.lines);
       const [receipt] = await tx.insert(purchaseReceipts).values({
         purchaseId: body.purchaseId,
         receivedAt: body.receivedAt,
         note: body.note,
       }).returning();
-      await tx.insert(purchaseReceiptLines).values(body.lines.map((line) => ({ receiptId: receipt.id, ...line })));
+      await tx.insert(purchaseReceiptLines).values(body.lines.map((line) => ({ receiptId: receipt.id, ...line, ...productSnapshots.get(line.productId)! })));
       return { ...receipt, lines: body.lines };
     });
     return Response.json({ item }, { status: 201 });
@@ -61,10 +66,10 @@ export async function PATCH(request: Request) {
     const item = await db.transaction(async (tx) => {
       const [existing] = await tx.select({ id: purchaseReceipts.id }).from(purchaseReceipts).where(eq(purchaseReceipts.id, id)).limit(1);
       if (!existing) throw new Error("Приёмка не найдена.");
-      await ensureProductsExist(tx, body.lines);
+      const productSnapshots = await ensureProductsExist(tx, body.lines);
       const [receipt] = await tx.update(purchaseReceipts).set({ receivedAt: body.receivedAt, note: body.note }).where(eq(purchaseReceipts.id, id)).returning();
       await tx.delete(purchaseReceiptLines).where(eq(purchaseReceiptLines.receiptId, id));
-      await tx.insert(purchaseReceiptLines).values(body.lines.map((line) => ({ receiptId: id, ...line })));
+      await tx.insert(purchaseReceiptLines).values(body.lines.map((line) => ({ receiptId: id, ...line, ...productSnapshots.get(line.productId)! })));
       return { ...receipt, lines: body.lines };
     });
     return Response.json({ item });

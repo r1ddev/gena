@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import Decimal from "decimal.js";
 import { z } from "zod";
 import { db } from "@/db";
-import { products, purchaseReceiptLines, purchaseReceipts, purchases, purchaseStatusEnum } from "@/db/schema";
+import { productLinks, products, purchaseReceiptLines, purchaseReceipts, purchases, purchaseStatusEnum } from "@/db/schema";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, nonNegativeDecimal, positiveInteger } from "../_lib/validation";
 
@@ -34,13 +34,13 @@ export async function GET(request: Request) {
       const product = productById.get(purchase.productId);
       return {
         ...purchase,
-        sku: product?.sku ?? "",
-        title: product?.title ?? "Товар удалён",
+        sku: product?.sku ?? purchase.productSkuSnapshot,
+        title: product?.title ?? (purchase.productTitleSnapshot || "Товар удалён"),
         receipts: purchaseReceiptsForRow.map((receipt) => ({
           ...receipt,
           lines: (linesByReceiptId.get(receipt.id) ?? []).map((line) => {
             const actualProduct = productById.get(line.productId);
-            return { ...line, sku: actualProduct?.sku ?? "", title: actualProduct?.title ?? "Товар удалён" };
+            return { ...line, sku: actualProduct?.sku ?? line.productSkuSnapshot, title: actualProduct?.title ?? (line.productTitleSnapshot || "Товар удалён") };
           }),
         })),
         receivedQuantity: received.toFixed(3),
@@ -55,7 +55,14 @@ export async function POST(request: Request) {
   try {
     assertLocalMutation(request);
     const body = await parseBody(request, purchaseSchema);
-    const [item] = await db.insert(purchases).values(body).returning();
+    const [product] = await db.select({ sku: products.sku, title: products.title, offerId: productLinks.offerId })
+      .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(eq(products.id, body.productId)).limit(1);
+    if (!product) throw new Error("Товар не найден.");
+    const [item] = await db.insert(purchases).values({
+      ...body,
+      productSkuSnapshot: product.offerId || product.sku,
+      productTitleSnapshot: product.title,
+    }).returning();
     return Response.json({ item }, { status: 201 });
   } catch (error) { return errorResponse(error); }
 }

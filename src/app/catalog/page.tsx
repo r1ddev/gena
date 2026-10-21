@@ -1,16 +1,14 @@
 "use client";
 
 import { ResourcePage } from "@/components/resource-page";
-import { ProductReassignmentQueue } from "@/components/product-reassignment-queue";
 
 export default function CatalogPage() {
-  return <>
-    <ResourcePage config={{
+  return <ResourcePage config={{
       title: "Каталог товаров",
       description: "Список товаров с артикулами и SKU Ozon.",
       collectionUrl: "/api/products", createUrl: "/api/products", createLabel: "Добавить товар",
       deleteUrl: (row) => typeof row.id === "string" ? `/api/products/${encodeURIComponent(row.id)}` : null,
-      deleteConfirm: "Удалить товар из каталога? Если есть связанные операции, перед удалением покажу их список и предложу перераспределить.",
+      deleteConfirm: "Удалить товар из каталога? История учёта сохранится.",
       deleteSuccess: "Товар удалён из каталога.",
       editUrl: (row) => typeof row.id === "string" ? `/api/products/${encodeURIComponent(row.id)}` : null,
       imageUpload: true,
@@ -26,7 +24,5 @@ export default function CatalogPage() {
         { key: "landedUnitCost", label: "Полная себестоимость", kind: "money" },
       ],
       emptyTitle: "Каталог пока пуст", emptyDescription: "Добавьте первый товар — после этого можно будет вносить закупки, поставки и находить связанные операции Ozon.",
-    }} />
-    <ProductReassignmentQueue embedded />
-  </>;
+    }} />;
 }

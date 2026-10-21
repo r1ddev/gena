@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     return { items: [
       ...manual.map((row) => {
         const product = byId.get(row.productId);
-        return { ...row, kind: "manual", compensationStatus: "—", compensationAmount: null, sku: product?.sku ?? "", title: product?.title ?? "Товар удалён" };
+        return { ...row, kind: "manual", compensationStatus: "—", compensationAmount: null, sku: product?.sku ?? row.productSkuSnapshot, title: product?.title ?? (row.productTitleSnapshot || "Товар удалён") };
       }),
       ...ozon.map((row) => {
         const link = linkBySku.get(row.ozonSku);
@@ -70,7 +70,14 @@ export async function POST(request: Request) {
   try {
     assertLocalMutation(request);
     const body = await parseBody(request, writeoffSchema);
-    const [item] = await db.insert(manualWriteoffs).values(body).returning();
+    const [product] = await db.select({ sku: products.sku, title: products.title, offerId: productLinks.offerId })
+      .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(eq(products.id, body.productId)).limit(1);
+    if (!product) throw new Error("Товар не найден.");
+    const [item] = await db.insert(manualWriteoffs).values({
+      ...body,
+      productSkuSnapshot: product.offerId || product.sku,
+      productTitleSnapshot: product.title,
+    }).returning();
     return Response.json({ item }, { status: 201 });
   } catch (error) { return errorResponse(error); }
 }

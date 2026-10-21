@@ -127,6 +127,13 @@
       "when": 1792536788374,
       "tag": "0017_product_reassignment_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792545519293,
+      "tag": "0018_product_deletion_history",
+      "breakpoints": true
     }
   ]
 }

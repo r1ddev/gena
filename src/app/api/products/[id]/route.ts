@@ -1,4 +1,4 @@
-import { and, eq, ne, or, sql } from "drizzle-orm";
+import { and, eq, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { externalItems, productImages, productLinks, products } from "@/db/schema";
@@ -35,7 +35,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const result = await db.transaction(async (tx) => {
       const [product] = await tx.select({ id: products.id }).from(products)
-        .where(and(eq(products.id, id), eq(products.reassignmentPending, false))).limit(1);
+        .where(eq(products.id, id)).limit(1);
       if (!product) throw new Error("Товар не найден.");
 
       const links = await tx.select().from(productLinks).where(eq(productLinks.productId, id));
@@ -51,7 +51,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
       const productSku = body.offerId || body.ozonSku;
       const [duplicateProduct] = await tx.select({ id: products.id }).from(products)
-        .where(and(eq(products.sku, productSku), eq(products.reassignmentPending, false), ne(products.id, id))).limit(1);
+        .where(and(eq(products.sku, productSku), ne(products.id, id))).limit(1);
       if (duplicateProduct) throw new Error("Этот артикул или SKU Ozon уже используется другим товаром.");
 
       await tx.update(products).set({ sku: productSku, title: body.title, updatedAt: new Date() }).where(eq(products.id, id));
@@ -92,60 +92,18 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     assertLocalMutation(request);
     const id = z.string().uuid().parse((await context.params).id);
-    const force = new URL(request.url).searchParams.get("force") === "true";
     const outcome = await db.transaction(async (tx) => {
-      const [product] = await tx.select({ id: products.id, sku: products.sku, title: products.title, reassignmentPending: products.reassignmentPending }).from(products)
+      const [product] = await tx.select({ id: products.id }).from(products)
         .where(eq(products.id, id)).for("update").limit(1);
-      if (!product) return "not-found" as const;
-      if (product.reassignmentPending) return "already-pending" as const;
-
-      const [references] = await tx.select({
-        purchases: sql<number>`(select count(*)::int from purchases where product_id = ${id})`,
-        purchaseReceipts: sql<number>`(select count(*)::int from purchase_receipt_lines where product_id = ${id})`,
-        supplies: sql<number>`(select count(*)::int from supply_lines where product_id = ${id})`,
-        orders: sql<number>`(select count(*)::int from ozon_posting_items where product_id = ${id})`,
-        accruals: sql<number>`(select count(*)::int from ozon_finance_accruals where product_id = ${id})`,
-        returns: sql<number>`(select count(*)::int from ozon_returns where product_id = ${id})`,
-        manualWriteoffs: sql<number>`(select count(*)::int from manual_writeoffs where product_id = ${id})`,
-        ozonWriteoffs: sql<number>`(select count(*)::int from ozon_writeoffs where product_id = ${id})`,
-        stocktakes: sql<number>`(select count(*)::int from stocktake_lines where product_id = ${id})`,
-        stockAdjustments: sql<number>`(select count(*)::int from stock_adjustments where product_id = ${id})`,
-        ozonItems: sql<number>`(select count(*)::int from external_items where product_id = ${id})`,
-      }).from(products).where(eq(products.id, id)).limit(1);
-
-      const blockerLabels: Record<string, string> = {
-        purchases: "Закупки", purchaseReceipts: "Приёмки закупок", supplies: "Поставки на Ozon",
-        orders: "Заказы", accruals: "Денежные операции Ozon", returns: "Возвраты",
-        manualWriteoffs: "Списания продавцом", ozonWriteoffs: "Списания Ozon",
-        stocktakes: "Инвентаризации", stockAdjustments: "Корректировки остатков", ozonItems: "Связанные записи Ozon",
-      };
-      const blockers = Object.entries(references ?? {}).map(([key, count]) => ({
-        key, label: blockerLabels[key] ?? key, count: Number(count),
-      })).filter((item) => item.count > 0);
-      if (blockers.length && !force) {
-        const [link] = await tx.select().from(productLinks).where(eq(productLinks.productId, id)).limit(1);
-        return { kind: "needs-force" as const, product: { id, sku: product.sku, title: product.title, offerId: link?.offerId ?? "", ozonSku: link?.ozonSku ?? "" }, blockers };
-      }
-      if (blockers.length && force) {
-        const [link] = await tx.select().from(productLinks).where(eq(productLinks.productId, id)).limit(1);
-        await tx.update(products).set({
-          reassignmentPending: true,
-          reassignmentOfferId: link?.offerId ?? "",
-          reassignmentOzonSku: link?.ozonSku ?? "",
-          updatedAt: new Date(),
-        }).where(eq(products.id, id));
-        await tx.delete(productLinks).where(eq(productLinks.productId, id));
-        return { kind: "queued" as const, blockers };
-      }
-      await tx.update(externalItems).set({ productId: null, disposition: "pending" }).where(eq(externalItems.productId, id));
+      if (!product) return false;
+      await tx.update(externalItems)
+        .set({ productId: null, disposition: "mapped" })
+        .where(eq(externalItems.productId, id));
       await tx.delete(products).where(eq(products.id, id));
-      return { kind: "deleted" as const };
+      return true;
     });
 
-    if (outcome === "not-found") return json({ error: "Товар не найден." }, 404);
-    if (outcome === "already-pending") return json({ error: "Товар уже находится в списке перераспределения." }, 409);
-    if (outcome.kind === "needs-force") return Response.json({ requiresForceDelete: true, ...outcome });
-    if (outcome.kind === "queued") return Response.json({ success: true, reassignmentPending: true, blockers: outcome.blockers });
+    if (!outcome) return json({ error: "Товар не найден." }, 404);
     return json({ success: true });
   } catch (error) {
     return errorResponse(error);

@@ -1,7 +1,7 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { products, supplies, supplyLines } from "@/db/schema";
+import { productLinks, products, supplies, supplyLines } from "@/db/schema";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, nonNegativeDecimal, positiveInteger } from "../_lib/validation";
 
@@ -35,10 +35,11 @@ export async function GET(request: Request) {
         ...supply,
         lines: matching.map((line) => ({
           ...line,
-          sku: productById.get(line.productId)?.sku ?? "",
+          sku: productById.get(line.productId)?.sku ?? line.productSkuSnapshot,
+          title: productById.get(line.productId)?.title ?? line.productTitleSnapshot,
         })),
         articles: matching.map((line) => {
-          const article = productById.get(line.productId)?.sku || "Артикул не указан";
+          const article = productById.get(line.productId)?.sku || line.productSkuSnapshot || "Артикул не указан";
           const quantity = Number(line.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 0 });
           return `${article} × ${quantity}`;
         }).join(", "),
@@ -54,12 +55,13 @@ export async function POST(request: Request) {
     const body = await parseBody(request, supplySchema);
     assertUniqueProductLines(body.lines);
     const item = await db.transaction(async (tx) => {
+      const productsById = await loadProductSnapshots(tx, body.lines);
       const [header] = await tx.insert(supplies).values({
         suppliedAt: body.suppliedAt,
         shippingCost: body.shippingCost,
         note: body.note,
       }).returning();
-      await tx.insert(supplyLines).values(body.lines.map((line) => ({ supplyId: header.id, ...line })));
+      await tx.insert(supplyLines).values(body.lines.map((line) => ({ supplyId: header.id, ...line, ...productsById.get(line.productId)! })));
       return header;
     });
     return Response.json({ item }, { status: 201 });
@@ -75,6 +77,7 @@ export async function PATCH(request: Request) {
     const body = await parseBody(request, supplySchema);
     assertUniqueProductLines(body.lines);
     const item = await db.transaction(async (tx) => {
+      const productsById = await loadProductSnapshots(tx, body.lines);
       const [updated] = await tx.update(supplies).set({
         suppliedAt: body.suppliedAt,
         shippingCost: body.shippingCost,
@@ -82,11 +85,22 @@ export async function PATCH(request: Request) {
       }).where(eq(supplies.id, supplyId)).returning();
       if (!updated) throw new Error("Поставка не найдена.");
       await tx.delete(supplyLines).where(eq(supplyLines.supplyId, supplyId));
-      await tx.insert(supplyLines).values(body.lines.map((line) => ({ supplyId, ...line })));
+      await tx.insert(supplyLines).values(body.lines.map((line) => ({ supplyId, ...line, ...productsById.get(line.productId)! })));
       return updated;
     });
     return Response.json({ item });
   } catch (error) { return errorResponse(error); }
+}
+
+async function loadProductSnapshots(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], lines: { productId: string }[]) {
+  const productIds = lines.map((line) => line.productId);
+  const rows = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId })
+    .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(inArray(products.id, productIds));
+  if (rows.length !== productIds.length) throw new Error("Один из выбранных товаров не найден.");
+  return new Map(rows.map((product) => [product.id, {
+    productSkuSnapshot: product.offerId || product.sku,
+    productTitleSnapshot: product.title,
+  }]));
 }
 
 export async function DELETE(request: Request) {
