@@ -1,7 +1,22 @@
+import { isIP } from "node:net";
 import { NextResponse } from "next/server";
 import { ZodError, type ZodType } from "zod";
 
 const localHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+function isPrivateNetworkHost(host: string) {
+  if (isIP(host) === 4) {
+    const [first, second] = host.split(".").map(Number);
+    return first === 10 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168) || (first === 169 && second === 254);
+  }
+
+  const ipv6 = host.replace(/^\[|\]$/g, "");
+  return isIP(ipv6) === 6 && (/^(fc|fd)/.test(ipv6) || /^fe[89ab]/.test(ipv6));
+}
+
+function isAllowedLocalHost(host: string) {
+  return localHosts.has(host) || isPrivateNetworkHost(host);
+}
 
 export function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status, headers: { "Cache-Control": "no-store" } });
@@ -43,7 +58,7 @@ export function assertLocalRequest(request: Request) {
   const rawHost = request.headers.get("host");
   let host = "";
   try { host = new URL(`http://${rawHost ?? ""}`).hostname.toLowerCase(); } catch { /* reject below */ }
-  if (!host || !localHosts.has(host)) throw new Error("Приложение принимает изменения только с локального компьютера.");
+  if (!host || !isAllowedLocalHost(host)) throw new Error("Приложение доступно только на этом компьютере и в локальной сети.");
 }
 
 export function assertLocalMutation(request: Request) {
@@ -61,7 +76,7 @@ export function assertLocalMutation(request: Request) {
     }
     const originHost = originUrl.hostname.toLowerCase();
     if (
-      !localHosts.has(originHost) ||
+      !isAllowedLocalHost(originHost) ||
       originUrl.origin !== expectedOrigin ||
       originUrl.username ||
       originUrl.password ||
