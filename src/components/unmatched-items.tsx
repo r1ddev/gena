@@ -6,8 +6,9 @@ import { asRecord, findRows, getId, requestJson, type JsonRecord } from "./api";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
-import { notifyProductCatalogChanged, ProductArticle } from "./product-hover-card";
+import { notifyProductCatalogChanged, PRODUCT_CATALOG_CHANGED_EVENT, ProductArticle } from "./product-hover-card";
 import { OzonOrderLink } from "./ozon-order-link";
+import { OzonAccrualLink } from "./ozon-accrual-link";
 import { ozonReturnStatusLabel } from "@/ozon/return-status";
 
 type Option = { id: string; label: string };
@@ -51,7 +52,13 @@ function money(value: unknown) {
 }
 function sourceDetailParts(row: JsonRecord) {
   const source = sourceInfoFor(row);
-  const orderNumbers = [
+  const isFinance = source.kind === "finance";
+  const accrualNumber = isFinance
+    ? typeof source.accrualNumber === "string" && source.accrualNumber
+      ? source.accrualNumber
+      : typeof source.postingNumber === "string" ? source.postingNumber : ""
+    : "";
+  const orderNumbers = isFinance ? [] : [
     ...(typeof source.postingNumber === "string" && source.postingNumber ? [source.postingNumber] : []),
     ...(Array.isArray(source.orderNumbers) ? source.orderNumbers.filter((value): value is string => typeof value === "string" && value.length > 0) : []),
   ];
@@ -62,15 +69,20 @@ function sourceDetailParts(row: JsonRecord) {
   const quantity = source.quantity != null ? `${String(source.quantity)} шт.` : "";
   const destination = source.destination === "seller" ? "возврат тебе" : source.destination === "ozon" ? "возврат на склад Ozon" : "";
   const status = source.kind === "return" ? ozonReturnStatusLabel(source.status, row.raw) : typeof source.status === "string" && source.status ? source.status : "";
-  return { postingNumbers, otherDetails: [amount, quantity, destination, status, date].filter(Boolean) };
+  return { accrualNumber, postingNumbers, otherDetails: [amount, quantity, destination, status, date].filter(Boolean) };
 }
 function sourceDetailsText(row: JsonRecord) {
-  const { postingNumbers, otherDetails } = sourceDetailParts(row);
-  return [...postingNumbers.map((number) => `Заказ ${number}`), ...otherDetails].join(" · ") || "Источник указан Ozon";
+  const { accrualNumber, postingNumbers, otherDetails } = sourceDetailParts(row);
+  return [
+    ...(accrualNumber ? [`Начисление ${accrualNumber}`] : []),
+    ...postingNumbers.map((number) => `Заказ ${number}`),
+    ...otherDetails,
+  ].join(" · ") || "Источник указан Ozon";
 }
 function sourceDetails(row: JsonRecord) {
-  const { postingNumbers, otherDetails } = sourceDetailParts(row);
+  const { accrualNumber, postingNumbers, otherDetails } = sourceDetailParts(row);
   const parts = [
+    ...(accrualNumber ? [<span key="accrual">Начисление <OzonAccrualLink accrualNumber={accrualNumber} /></span>] : []),
     ...postingNumbers.map((postingNumber) => <span key={`posting-${postingNumber}`}>Заказ <OzonOrderLink postingNumber={postingNumber} /></span>),
     ...otherDetails,
   ];
@@ -145,8 +157,10 @@ export function UnmatchedItems() {
   useEffect(() => {
     const refreshAfterSync = () => { void refresh(); };
     window.addEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
+    window.addEventListener(PRODUCT_CATALOG_CHANGED_EVENT, refreshAfterSync);
     return () => {
       window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
+      window.removeEventListener(PRODUCT_CATALOG_CHANGED_EVENT, refreshAfterSync);
     };
   }, [refresh]);
 

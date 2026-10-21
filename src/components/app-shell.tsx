@@ -7,7 +7,7 @@ import { useState, type ReactNode } from "react";
 import {
   Archive, ArrowLeftRight, Banknote, Boxes, Calculator, ChartNoAxesCombined,
   ChevronRight, CircleDollarSign, ClipboardList, LayoutDashboard,
-  Menu, Package, PackageCheck, RotateCcw, Settings2, ShoppingCart, Truck,
+  Menu, Package, RotateCcw, Settings2, ShoppingCart, Truck,
   Wallet, X,
 } from "lucide-react";
 import { ProductCatalogProvider } from "./product-hover-card";
@@ -18,7 +18,6 @@ const navSections = [
     links: [
       { href: "/", label: "Обзор", icon: LayoutDashboard },
       { href: "/catalog", label: "Каталог", icon: Boxes },
-      { href: "/reassignments", label: "Распределить операции", icon: PackageCheck },
       { href: "/purchases", label: "Закупки", icon: ShoppingCart },
       { href: "/supplies", label: "Поставки на Ozon", icon: Truck },
       { href: "/expenses", label: "Расходы", icon: Wallet },

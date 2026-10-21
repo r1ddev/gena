@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { externalItems, financeAccruals, ozonWriteoffs, postingItems, postings, productImages, productLinks, products, returns } from "@/db/schema";
@@ -83,6 +83,15 @@ export async function GET(request: Request) {
     const byId = new Map(catalog.map((product) => [product.id, product]));
     const externalKeys = [...new Set(items.map((item) => item.externalKey))];
     const skus = [...new Set(items.map((item) => item.ozonSku).filter(Boolean))];
+    const offerIds = [...new Set(items.flatMap((item) => {
+      const rawOfferId = recordOf(item.raw).offer_id;
+      const offerId = item.offerId || (typeof rawOfferId === "string" ? rawOfferId : "");
+      return offerId ? [offerId] : [];
+    }))];
+    const productLinkConditions = [
+      offerIds.length ? inArray(productLinks.offerId, offerIds) : undefined,
+      skus.length ? inArray(productLinks.ozonSku, skus) : undefined,
+    ].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined);
     const [orderRows, returnRows, writeoffRows, itemAccruals, knownOrderProducts, knownReturnProducts, knownWriteoffProducts, knownExternalProducts, knownProductLinks] = await Promise.all([
       externalKeys.length
         ? db.select({ externalKey: postingItems.externalKey, postingNumber: postings.externalId })
@@ -111,10 +120,21 @@ export async function GET(request: Request) {
       skus.length
         ? db.select({ offerId: externalItems.offerId, ozonSku: externalItems.ozonSku }).from(externalItems).where(inArray(externalItems.ozonSku, skus))
         : Promise.resolve([]),
-      skus.length
-        ? db.select({ offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks).where(inArray(productLinks.ozonSku, skus))
+      productLinkConditions.length
+        ? db.select({ offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks)
+          .innerJoin(products, and(eq(products.id, productLinks.productId), eq(products.reassignmentPending, false)))
+          .where(or(...productLinkConditions))
         : Promise.resolve([]),
     ]);
+    const visibleItems = disposition === "pending" ? items.filter((item) => {
+      const rawOfferId = recordOf(item.raw).offer_id;
+      const offerId = item.offerId || (typeof rawOfferId === "string" ? rawOfferId : "");
+      return !knownProductLinks.some((link) => {
+        if (item.ozonSku) return link.ozonSku === item.ozonSku;
+        return Boolean(offerId && link.offerId === offerId);
+      });
+    }) : items;
+    const visibleExternalKeys = [...new Set(visibleItems.map((item) => item.externalKey))];
     const offerIdBySku = uniqueOfferIdsBySku([
       ...knownOrderProducts,
       ...knownReturnProducts,
@@ -123,11 +143,11 @@ export async function GET(request: Request) {
       ...knownProductLinks,
     ]);
     const orderNumbersByKey = new Map<string, string[]>();
-    for (const row of orderRows) orderNumbersByKey.set(row.externalKey, [...(orderNumbersByKey.get(row.externalKey) ?? []), row.postingNumber]);
+    for (const row of orderRows.filter((item) => visibleExternalKeys.includes(item.externalKey))) orderNumbersByKey.set(row.externalKey, [...(orderNumbersByKey.get(row.externalKey) ?? []), row.postingNumber]);
     const returnsByKey = new Map(returnRows.map((row) => [row.externalKey, row]));
     const writeoffsByKey = new Map(writeoffRows.map((row) => [row.externalKey, row]));
     const sourceCounts: Record<string, number> = {};
-    const enriched = items.map((item) => {
+    const enriched = visibleItems.map((item) => {
       const raw = item.raw as Record<string, unknown>;
       const orderNumbers = orderNumbersByKey.get(item.externalKey) ?? [];
       const kind = sourceKind(raw, orderNumbers.length > 0);
@@ -146,9 +166,12 @@ export async function GET(request: Request) {
       let details: Record<string, unknown> = { kind, orderNumbers };
       if (kind === "finance") {
         const facts = feeFacts(raw, item.ozonSku);
-        const postingNumber = ref(raw.unit_number) || candidateAccruals.find((row) => row.postingNumber)?.postingNumber || "";
+        const accrualNumber = ref(raw.unit_number)
+          || ref(candidateAccruals.find((row) => ref(row.raw.unit_number))?.raw.unit_number)
+          || candidateAccruals.find((row) => row.postingNumber)?.postingNumber
+          || "";
         const accrualDate = ref(raw.accrual_date) || candidateAccruals[0]?.accrualDate || "";
-        details = { ...details, amount: facts.amount, postingNumber, accrualDate, typeId: ref(raw.type_id) || candidateAccruals[0]?.typeId || "" };
+        details = { ...details, amount: facts.amount, accrualNumber, accrualDate, typeId: ref(raw.type_id) || candidateAccruals[0]?.typeId || "" };
       } else if (kind === "return") {
         details = { ...details, postingNumber: ref(raw.posting_number) || returnRow?.postingNumber || "", status: returnRow?.status ?? "", destination: returnRow?.destination ?? "" };
       } else if (kind === "writeoff") {
@@ -286,10 +309,25 @@ export async function PATCH(request: Request) {
       }
 
       const disposition = body.action === "create" ? "created" : "mapped";
-      const [updated] = await tx.update(externalItems).set({ productId, disposition }).where(eq(externalItems.id, id)).returning();
-      await tx.update(postingItems).set({ productId }).where(eq(postingItems.externalKey, external.externalKey));
-      await tx.update(returns).set({ productId, updatedAt: new Date() }).where(eq(returns.externalKey, external.externalKey));
-      await tx.update(ozonWriteoffs).set({ productId, updatedAt: new Date() }).where(eq(ozonWriteoffs.externalKey, external.externalKey));
+      const siblingRows = ozonSku
+        ? await tx.select({ id: externalItems.id, externalKey: externalItems.externalKey }).from(externalItems)
+          .where(and(eq(externalItems.ozonSku, ozonSku), ne(externalItems.disposition, "ignored")))
+        : [];
+      const relatedExternalIds = [...new Set([external.id, ...siblingRows.map((row) => row.id)])];
+      const relatedExternalKeys = [...new Set([external.externalKey, ...siblingRows.map((row) => row.externalKey)])];
+      const [updated] = await tx.update(externalItems).set({ productId, disposition }).where(inArray(externalItems.id, relatedExternalIds)).returning();
+      const orderCondition = ozonSku
+        ? or(eq(postingItems.ozonSku, ozonSku), inArray(postingItems.externalKey, relatedExternalKeys))
+        : inArray(postingItems.externalKey, relatedExternalKeys);
+      const returnCondition = ozonSku
+        ? or(eq(returns.ozonSku, ozonSku), inArray(returns.externalKey, relatedExternalKeys))
+        : inArray(returns.externalKey, relatedExternalKeys);
+      const writeoffCondition = ozonSku
+        ? or(eq(ozonWriteoffs.ozonSku, ozonSku), inArray(ozonWriteoffs.externalKey, relatedExternalKeys))
+        : inArray(ozonWriteoffs.externalKey, relatedExternalKeys);
+      await tx.update(postingItems).set({ productId }).where(orderCondition);
+      await tx.update(returns).set({ productId, updatedAt: new Date() }).where(returnCondition);
+      await tx.update(ozonWriteoffs).set({ productId, updatedAt: new Date() }).where(writeoffCondition);
       const itemAccruals = await tx.select({ id: financeAccruals.id, externalKey: financeAccruals.externalKey, raw: financeAccruals.raw })
         .from(financeAccruals)
         .where(eq(financeAccruals.accruedCategory, "ITEM"));

@@ -284,9 +284,19 @@ export function PurchasesWorkspace() {
         { name: "note", label: "Комментарий", type: "textarea", wide: true },
       ],
       columns: [
-        { key: "purchasedAt", label: "Дата", kind: "date" }, { key: "title", label: "Товар" }, { key: "sku", label: "Артикул", primary: true },
-        { key: "orderedQuantity", label: "Заказано", kind: "quantity" }, { key: "receivedQuantity", label: "Принято", kind: "quantity" },
-        { key: "expectedQuantity", label: "Ожидается", kind: "quantity" }, { key: "amountPaid", label: "Оплачено", kind: "money" }, { key: "receiptStatus", label: "Приёмка", kind: "status" }, { key: "note", label: "Комментарий" },
+        { key: "purchasedAt", label: "Дата", kind: "date" }, { key: "title", label: "Товар", primary: true },
+        {
+          key: "quantities",
+          label: "Количество",
+          kind: "text",
+          sortable: true,
+          value: (row) => `${row.orderedQuantity ?? 0} ${row.receivedQuantity ?? 0} ${row.expectedQuantity ?? 0}`,
+          render: (row) => <div className="purchase-quantity-summary">
+            <strong>Заказано {formatPurchaseQuantity(row.orderedQuantity)} шт.</strong>
+            <span>Принято {formatPurchaseQuantity(row.receivedQuantity)} · осталось {formatPurchaseQuantity(row.expectedQuantity)}</span>
+          </div>,
+        },
+        { key: "amountPaid", label: "Оплачено", kind: "money" }, { key: "receiptStatus", label: "Приёмка", kind: "status" }, { key: "note", label: "Комментарий" },
       ],
       deleteUrl: (row) => typeof row.id === "string" ? `/api/purchases?id=${encodeURIComponent(row.id)}` : null,
       emptyTitle: "Закупок пока нет", emptyDescription: "Создайте закупку. Приёмка сразу добавит товар на склад, а средняя себестоимость начнёт учитывать её после завершения закупки.",

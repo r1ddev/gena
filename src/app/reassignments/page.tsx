@@ -1,5 +1,5 @@
-import { ProductReassignmentQueue } from "@/components/product-reassignment-queue";
+import { redirect } from "next/navigation";
 
 export default function ReassignmentsPage() {
-  return <ProductReassignmentQueue />;
+  redirect("/catalog");
 }

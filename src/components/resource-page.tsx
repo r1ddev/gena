@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, CheckCircle2, Package, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { asRecord, displayValue, findRows, getId, localToday, requestJson, stringValue, valueAt, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
@@ -24,7 +24,7 @@ export type FieldConfig = {
   optionsFrom?: string;
 };
 
-export type ColumnConfig = { key: string; label: string; kind?: "identifier" | "money" | "quantity" | "date" | "status" | "number" | "time"; primary?: boolean; sortable?: boolean; filterable?: boolean; linkToOzonPosting?: boolean };
+export type ColumnConfig = { key: string; label: string; kind?: "identifier" | "money" | "quantity" | "date" | "status" | "number" | "time" | "text"; primary?: boolean; sortable?: boolean; filterable?: boolean; linkToOzonPosting?: boolean; value?: (row: JsonRecord) => unknown; render?: (row: JsonRecord, value: unknown) => ReactNode };
 export type ResourceConfig = {
   title: string;
   eyebrow?: string;
@@ -333,7 +333,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       }
       if (config.collectionUrl === "/api/products") notifyProductCatalogChanged();
       setSuccess(response?.reassignmentPending === true
-        ? "Товар удалён из каталога. Связанные записи сохранены в списке перераспределения."
+        ? "Товар удалён из каталога."
         : config.deleteSuccess ?? "Запись удалена. Связанные итоги обновлены автоматически.");
       onMutation?.(); await refresh();
     }
@@ -350,7 +350,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       setForceDeletePrompt(null);
       if (config.collectionUrl === "/api/products") notifyProductCatalogChanged();
       setSuccess(response?.reassignmentPending === true
-        ? "Товар удалён из каталога. Связанные записи сохранены в списке перераспределения."
+        ? "Товар удалён из каталога."
         : config.deleteSuccess ?? "Запись удалена. Связанные итоги обновлены автоматически.");
       onMutation?.(); await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось удалить запись"); }
@@ -422,16 +422,17 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
             : <div className="table-wrap"><table><TableHead columns={config.columns.map((column) => ({
               ...column,
               kind: column.kind ?? (column.key === "id" || column.key === "externalId" ? "identifier" : "text"),
-              value: column.key === "article" ? (row: JsonRecord) => orderArticleText(row.items)
+              value: column.value ?? (column.key === "article" ? (row: JsonRecord) => orderArticleText(row.items)
                 : column.key === "status" ? (row: JsonRecord) => [row.status, row.returnState].filter(Boolean).join(" ")
-                  : (row: JsonRecord) => valueAt(row, column.key),
+                  : (row: JsonRecord) => valueAt(row, column.key)),
             }))} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || config.editUrl || rowActions ? ["Действия"] : []} /><tbody>{loadError ? <TableEmptyRow colSpan={tableColumnCount} message={loadError} /> : config.remotePageSize && loading ? <TableEmptyRow colSpan={tableColumnCount} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={tableColumnCount} message="По заданным условиям совпадений нет." onClear={clearTableFilters} /> : visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
-              const value = valueAt(row, column.key);
+              const value = column.value ? column.value(row) : valueAt(row, column.key);
               const displayKind = column.kind === "date" || column.kind === "money" || column.kind === "quantity" || column.kind === "status" ? column.kind : undefined;
+              if (column.render) return <td key={column.key}>{column.render(row, value)}</td>;
               if (["sku", "offerId", "ozonSku"].includes(column.key)) {
                 const identifier = stringValue(value);
                 const productId = stringValue(row.productId) ?? (["offerId", "ozonSku"].includes(column.key) ? getId(row) : null);
-                const label = column.key === "ozonSku" || (column.key === "sku" && row.kind === "ozon" && !productId) ? "SKU Ozon" : "Артикул";
+                const label = column.key === "ozonSku" || (column.key === "sku" && row.kind === "ozon" && !productId && !stringValue(row.offerId)) ? "SKU Ozon" : "Артикул";
                 const article = identifier ? <ProductArticle identifier={identifier} productId={productId} identifierLabel={label} fallback={row} /> : "—";
                 return <td key={column.key}>{column.primary ? <span className="table-primary">{article}</span> : article}</td>;
               }
