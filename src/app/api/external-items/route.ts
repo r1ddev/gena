@@ -1,9 +1,11 @@
 import { and, desc, eq, inArray, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { externalItems, financeAccruals, ozonWriteoffs, postingItems, postings, productImages, productLinks, products, returns } from "@/db/schema";
+import { appSettings, externalItems, financeAccruals, ozonWriteoffs, postingItems, postings, productImages, productLinks, products, returns } from "@/db/schema";
 import { externalItemIgnorePlan, externalProductKey } from "@/ozon/external-product";
 import { financeAccrualRowContainsSku, financeRowContainsSku } from "@/ozon/finance";
+import { ozonPost } from "@/ozon/client";
+import { decryptSecret } from "@/security/secrets";
 import { readProductImage } from "../_lib/product-image";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 
@@ -33,6 +35,28 @@ function uniqueOfferIdsBySku(rows: { offerId: string; ozonSku: string }[]) {
     candidates.set(row.ozonSku, offerIds);
   }
   return new Map([...candidates].flatMap(([sku, offerIds]) => offerIds.size === 1 ? [[sku, [...offerIds][0]] as const] : []));
+}
+
+async function fetchOfferIdsBySku(skus: string[]) {
+  if (skus.length === 0) return new Map<string, string>();
+  const [settings] = await db.select().from(appSettings).limit(1);
+  if (!settings?.ozonClientId || !settings.ozonApiKeyEncrypted) return new Map<string, string>();
+
+  const credentials = { clientId: settings.ozonClientId, apiKey: decryptSecret(settings.ozonApiKeyEncrypted) };
+  const offerIds = new Map<string, string>();
+  for (let index = 0; index < skus.length; index += 1000) {
+    const response = await ozonPost<{ items?: { sku?: unknown; offer_id?: unknown }[] }>(
+      "/v3/product/info/list",
+      { sku: skus.slice(index, index + 1000) },
+      credentials,
+    );
+    for (const product of response.items ?? []) {
+      const sku = product.sku === undefined || product.sku === null ? "" : String(product.sku);
+      const offerId = typeof product.offer_id === "string" ? product.offer_id : "";
+      if (sku && offerId) offerIds.set(sku, offerId);
+    }
+  }
+  return offerIds;
 }
 
 function feeFacts(raw: Record<string, unknown>, sku: string) {
@@ -142,6 +166,25 @@ export async function GET(request: Request) {
       ...knownExternalProducts,
       ...knownProductLinks,
     ]);
+    const unresolvedSkus = [...new Set(visibleItems.flatMap((item) => {
+      const rawOfferId = recordOf(item.raw).offer_id;
+      return item.ozonSku && !item.offerId && !(typeof rawOfferId === "string" && rawOfferId) && !offerIdBySku.has(item.ozonSku)
+        ? [item.ozonSku]
+        : [];
+    }))];
+    let ozonOfferIdBySku = new Map<string, string>();
+    try {
+      ozonOfferIdBySku = await fetchOfferIdsBySku(unresolvedSkus);
+      if (ozonOfferIdBySku.size) {
+        await db.transaction(async (tx) => {
+          for (const [sku, offerId] of ozonOfferIdBySku) {
+            await tx.update(externalItems).set({ offerId }).where(and(eq(externalItems.ozonSku, sku), eq(externalItems.offerId, "")));
+          }
+        });
+      }
+    } catch (error) {
+      console.error("Could not load seller articles for Ozon SKUs", error);
+    }
     const orderNumbersByKey = new Map<string, string[]>();
     for (const row of orderRows.filter((item) => visibleExternalKeys.includes(item.externalKey))) orderNumbersByKey.set(row.externalKey, [...(orderNumbersByKey.get(row.externalKey) ?? []), row.postingNumber]);
     const returnsByKey = new Map(returnRows.map((row) => [row.externalKey, row]));
@@ -184,7 +227,7 @@ export async function GET(request: Request) {
       const rawOfferId = typeof raw.offer_id === "string" ? raw.offer_id : "";
       return {
         ...item,
-        offerId: item.offerId || rawOfferId || offerIdBySku.get(item.ozonSku) || "",
+        offerId: item.offerId || rawOfferId || offerIdBySku.get(item.ozonSku) || ozonOfferIdBySku.get(item.ozonSku) || "",
         productTitle: item.productId ? byId.get(item.productId)?.title ?? "" : "",
         sourceInfo: details,
       };
