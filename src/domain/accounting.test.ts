@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { calculateAccounting, hasAccountablePostingItems, type AccountingInput } from "./accounting";
+import { calculateFinalPostingProfitCents } from "./order-profit";
 
 const base = (overrides: Partial<AccountingInput> = {}): AccountingInput => ({
   products: [{ id: "p1", sku: "BAG-1", title: "Сумка" }],
@@ -246,6 +247,73 @@ describe("calculateAccounting", () => {
 
     expect(result.products[0].sellerStock).toBe("1.000");
     expect(result.products[0].ozonStock).toBe("0.000");
+  });
+
+  it("keeps a written-off return out of seller stock and charges its landed cost once", () => {
+    const result = calculateAccounting(
+      base({
+        expenses: [{ amount: "10", spentAt: "2026-10-01" }],
+        receipts: [{ productId: "p1", quantity: "1", unitCost: "50", receivedAt: "2026-09-01" }],
+        supplies: [{ productId: "p1", quantity: "1", shippingCost: "0", suppliedAt: "2026-09-02" }],
+        postings: [{ id: "post-1", status: "delivered", deliveredAt: "2026-09-20T10:00:00Z", isMarketplaceBuyout: false }],
+        postingItems: [{ postingId: "post-1", productId: "p1", quantity: "1", price: "300" }],
+        financeAccruals: [{ postingId: "post-1", amount: "300" }],
+        returns: [{
+          postingId: "post-1",
+          productId: "p1",
+          quantity: "1",
+          destination: "seller",
+          receivedBySellerAt: "2026-10-01T10:00:00Z",
+          writtenOffAt: "2026-10-20T10:00:00Z",
+          availableAtOzon: null,
+        }],
+      }),
+      new Date("2026-10-20T12:00:00Z"),
+    );
+
+    expect(result.products[0].sellerStock).toBe("0.000");
+    expect(result.confirmedProfit).toBe("245.00");
+    expect(result.profitBreakdown.orderProfit).toBe("245.00");
+    expect(result.profitBreakdown.manualLossPurchaseCost).toBe("-50.00");
+    expect(result.profitBreakdown.manualLossSharedCosts).toBe("-5.00");
+  });
+
+  it("charges a written-off return for a cancelled order even though no sale cost was recognized", () => {
+    const result = calculateAccounting(
+      base({
+        receipts: [{ productId: "p1", quantity: "1", unitCost: "50", receivedAt: "2026-09-01" }],
+        supplies: [{ productId: "p1", quantity: "1", shippingCost: "0", suppliedAt: "2026-09-02" }],
+        postings: [{ id: "cancelled", status: "cancelled", deliveredAt: null, isMarketplaceBuyout: false }],
+        postingItems: [{ postingId: "cancelled", productId: "p1", quantity: "1", price: "300" }],
+        financeAccruals: [{ postingId: "cancelled", amount: "-5", category: "POSTING" }],
+        returns: [{
+          postingId: "cancelled",
+          productId: "p1",
+          quantity: "1",
+          destination: "seller",
+          receivedBySellerAt: null,
+          writtenOffAt: "2026-10-20T10:00:00Z",
+          availableAtOzon: null,
+        }],
+      }),
+      new Date("2026-10-20T12:00:00Z"),
+    );
+
+    expect(result.products[0].sellerStock).toBe("0.000");
+    expect(result.confirmedProfit).toBe("-55.00");
+    expect(result.profitBreakdown.orderProfit).toBe("-55.00");
+  });
+
+  it("includes the product cost of a written-off item in a cancelled posting's profit", () => {
+    const result = calculateFinalPostingProfitCents({
+      status: "cancelled",
+      amountCents: -500,
+      items: [{ productId: "p1", quantity: "1", unitCost: "50" }],
+      returns: [],
+      writeoffs: [{ productId: "p1", quantity: "1" }],
+    });
+
+    expect(result).toEqual({ profitCents: -5500, productCostCents: 5000, missingCost: false });
   });
 
   it("does not reverse COGS or stock before a return becomes effective", () => {
