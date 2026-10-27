@@ -16,6 +16,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { OzonCompensationReportLine } from "@/ozon/compensation";
 
 const id = () => uuid("id").defaultRandom().primaryKey();
 const createdAt = () => timestamp("created_at", { withTimezone: true }).defaultNow().notNull();
@@ -150,6 +151,8 @@ export const supplyLines = pgTable(
     productId: uuid("product_id").notNull(),
     productSkuSnapshot: text("product_sku_snapshot").notNull().default(""),
     productTitleSnapshot: text("product_title_snapshot").notNull().default(""),
+    purchaseUnitCostSnapshot: numeric("purchase_unit_cost_snapshot", { precision: 16, scale: 2 }),
+    landedUnitCostSnapshot: numeric("landed_unit_cost_snapshot", { precision: 16, scale: 2 }),
     quantity: quantity("quantity"),
     sourceKey: text("source_key").unique(),
   },
@@ -180,6 +183,7 @@ export const postings = pgTable(
     orderDate: timestamp("order_date", { withTimezone: true }),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     marketplaceBuyoutAt: timestamp("marketplace_buyout_at", { withTimezone: true }),
+    addedCostRatePercent: numeric("added_cost_rate_percent", { precision: 12, scale: 8 }),
     isMarketplaceBuyout: boolean("is_marketplace_buyout").notNull().default(false),
     raw: jsonb("raw").$type<Record<string, unknown>>().notNull().default({}),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -221,10 +225,34 @@ export const financeAccruals = pgTable(
     accruedCategory: text("accrued_category").notNull().default("unknown"),
     typeId: text("type_id").notNull().default(""),
     amount: money("amount"),
+    relatedSkus: jsonb("related_skus").$type<string[]>(),
     raw: jsonb("raw").$type<Record<string, unknown>>().notNull().default({}),
     importedAt: createdAt(),
   },
   (table) => [index("finance_accruals_posting_idx").on(table.postingNumber), index("finance_accruals_date_idx").on(table.accrualDate)],
+);
+
+export const ozonCompensationReports = pgTable("ozon_compensation_reports", {
+  reportMonth: text("report_month").primaryKey(),
+  reportNumber: text("report_number").notNull().default(""),
+  lines: jsonb("lines").$type<OzonCompensationReportLine[]>().notNull().default([]),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const ozonPayouts = pgTable(
+  "ozon_payouts",
+  {
+    id: id(),
+    externalKey: text("external_key").notNull().unique(),
+    periodId: text("period_id").notNull(),
+    periodBegin: date("period_begin").notNull(),
+    periodEnd: date("period_end").notNull(),
+    currencyCode: text("currency_code").notNull().default("RUB"),
+    amount: money("amount"),
+    raw: jsonb("raw").$type<Record<string, unknown>>().notNull().default({}),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("ozon_payouts_period_idx").on(table.periodId)],
 );
 
 export const returns = pgTable(
@@ -242,8 +270,10 @@ export const returns = pgTable(
     status: text("status").notNull().default("unknown"),
     returnedAt: timestamp("returned_at", { withTimezone: true }),
     receivedBySellerAt: timestamp("received_by_seller_at", { withTimezone: true }),
+    writtenOffAt: timestamp("written_off_at", { withTimezone: true }),
     availableAtOzon: timestamp("available_at_ozon", { withTimezone: true }),
     manualReconciliationFields: text("manual_reconciliation_fields").array().notNull().default(sql`ARRAY[]::text[]`),
+    note: text("note").notNull().default(""),
     raw: jsonb("raw").$type<Record<string, unknown>>().notNull().default({}),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -327,6 +357,9 @@ export const appSettings = pgTable(
     ozonClientId: text("ozon_client_id"),
     ozonApiKeyEncrypted: text("ozon_api_key_encrypted"),
     accountingStartDate: date("accounting_start_date").notNull().default("2025-10-20"),
+    ozonSharedExpenseHistoryStartDate: date("ozon_shared_expense_history_start_date"),
+    ozonPayoutHistoryStartDate: date("ozon_payout_history_start_date"),
+    ozonCompensationReportHistoryStartDate: date("ozon_compensation_report_history_start_date"),
     marketplaceBuyoutReportStartDate: date("marketplace_buyout_report_start_date"),
     syncIntervalHours: integer("sync_interval_hours").notNull().default(24),
     lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
@@ -374,4 +407,18 @@ export const importRows = pgTable(
     createdAt: createdAt(),
   },
   (table) => [index("import_rows_batch_idx").on(table.batchId)],
+);
+
+export const scenarioCalculations = pgTable(
+  "scenario_calculations",
+  {
+    id: id(),
+    comment: text("comment").notNull(),
+    inputs: jsonb("inputs").$type<Record<string, number>>().notNull(),
+    profit: numeric("profit", { precision: 16, scale: 2 }).notNull(),
+    profitShare: numeric("profit_share", { precision: 12, scale: 4 }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("scenario_calculations_created_idx").on(table.createdAt)],
 );

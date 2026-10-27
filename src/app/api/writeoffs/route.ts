@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { externalItems, manualWriteoffs, ozonWriteoffs, productLinks, products } from "@/db/schema";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, positiveInteger } from "../_lib/validation";
+import { buildCatalogProductWhitelist, resolveCatalogProductId } from "@/ozon/catalog-whitelist";
 
 const writeoffSchema = z.object({
   productId: z.string().uuid(),
@@ -14,20 +15,28 @@ const writeoffSchema = z.object({
 
 export async function GET(request: Request) {
   return handleLocalGet(request, async () => {
-    const [manual, ozon, catalog] = await Promise.all([
+    const [manualRows, ozonRows, catalog, links, externalRows] = await Promise.all([
       db.select().from(manualWriteoffs).orderBy(desc(manualWriteoffs.writtenOffAt), desc(manualWriteoffs.createdAt)),
       db.select().from(ozonWriteoffs).orderBy(desc(ozonWriteoffs.occurredAt), desc(ozonWriteoffs.updatedAt)),
       db.select().from(products),
+      db.select({ productId: productLinks.productId, offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks),
+      db.select({ externalKey: externalItems.externalKey, offerId: externalItems.offerId, ozonSku: externalItems.ozonSku, productId: externalItems.productId }).from(externalItems),
     ]);
-    const byId = new Map(catalog.map((product) => [product.id, product]));
+    const whitelist = buildCatalogProductWhitelist(catalog, links, externalRows);
+    const manual = manualRows.filter((row) => whitelist.productIds.has(row.productId));
+    const ozon = ozonRows.flatMap((row) => {
+      const productId = resolveCatalogProductId(whitelist, row);
+      return productId ? [{ ...row, productId }] : [];
+    });
+    const byId = new Map(catalog.filter((product) => whitelist.productIds.has(product.id)).map((product) => [product.id, product]));
     const skus = [...new Set(ozon.map((row) => row.ozonSku).filter(Boolean))];
-    const [links, externalProducts] = await Promise.all([
+    const [skuLinks, externalProducts] = await Promise.all([
       skus.length ? db.select().from(productLinks).where(inArray(productLinks.ozonSku, skus)) : Promise.resolve([]),
       skus.length ? db.select().from(externalItems).where(inArray(externalItems.ozonSku, skus)).orderBy(desc(externalItems.lastSeenAt)) : Promise.resolve([]),
     ]);
-    const linkBySku = new Map(links.map((link) => [link.ozonSku, link]));
+    const linkBySku = new Map(skuLinks.map((link) => [link.ozonSku, link]));
     const offersBySku = new Map<string, Set<string>>();
-    for (const item of [...ozon, ...links, ...externalProducts]) {
+    for (const item of [...ozon, ...skuLinks, ...externalProducts]) {
       const sku = "ozonSku" in item ? item.ozonSku : "";
       const offerId = "offerId" in item ? item.offerId : "";
       if (!sku || !offerId) continue;
@@ -70,9 +79,9 @@ export async function POST(request: Request) {
   try {
     assertLocalMutation(request);
     const body = await parseBody(request, writeoffSchema);
-    const [product] = await db.select({ sku: products.sku, title: products.title, offerId: productLinks.offerId })
+    const [product] = await db.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
       .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(eq(products.id, body.productId)).limit(1);
-    if (!product) throw new Error("Товар не найден.");
+    if (!product || product.archived) throw new Error("Выберите товар из текущего каталога.");
     const [item] = await db.insert(manualWriteoffs).values({
       ...body,
       productSkuSnapshot: product.offerId || product.sku,

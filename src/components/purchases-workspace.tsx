@@ -5,7 +5,8 @@ import { AlertCircle, CheckCircle2, PackageCheck, Pencil, Plus, RotateCcw, Searc
 import { asRecord, findRows, getId, localToday, requestJson, stringValue, type JsonRecord } from "./api";
 import { ResourcePage } from "./resource-page";
 import { ProductArticle } from "./product-hover-card";
-import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { ProductSelect, productSelectOptions } from "./product-select";
+import { cycleTableSort, filterAndSortRows, paginateRows, TableEmptyRow, TableHead, TablePagination, TABLE_PAGE_SIZE, type TableColumn, type TableSort } from "./table-controls";
 import { ConfirmationModal } from "./confirmation-modal";
 
 function formatPurchaseQuantity(value: unknown): string {
@@ -149,6 +150,7 @@ export function PurchasesWorkspace() {
   const [historyPurchaseId, setHistoryPurchaseId] = useState("");
   const [historyFilters, setHistoryFilters] = useState<Record<string, string>>({});
   const [historySort, setHistorySort] = useState<TableSort>(null);
+  const [historyPage, setHistoryPage] = useState(1);
   const catalog = products.filter((product) => typeof product.id === "string");
 
   const refreshPurchases = useCallback(async () => {
@@ -192,12 +194,24 @@ export function PurchasesWorkspace() {
   const historyPurchase = purchases.find((purchase) => getId(purchase) === historyPurchaseId) ?? null;
   const receiptRowsForHistory = historyPurchaseId ? receiptRows.filter((receipt) => receipt.purchaseId === historyPurchaseId) : receiptRows;
   const visibleReceiptRows = filterAndSortRows(receiptRowsForHistory, historyColumns, historyFilters, historySort);
+  const receiptPagination = paginateRows(visibleReceiptRows, historyPage);
+
+  function updateHistoryFilter(key: string, value: string) {
+    setHistoryFilters((current) => ({ ...current, [key]: value }));
+    setHistoryPage(1);
+  }
+
+  function updateHistorySort(key: string) {
+    setHistorySort((current) => cycleTableSort(current, key));
+    setHistoryPage(1);
+  }
 
   function showPurchaseReceipts(purchase: JsonRecord) {
     const id = getId(purchase);
     if (!id) return;
     setHistoryPurchaseId(id);
     setHistoryFilters({});
+    setHistoryPage(1);
     document.getElementById("receipt-history")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -299,6 +313,7 @@ export function PurchasesWorkspace() {
         { key: "amountPaid", label: "Оплачено", kind: "money" }, { key: "receiptStatus", label: "Приёмка", kind: "status" }, { key: "note", label: "Комментарий" },
       ],
       deleteUrl: (row) => typeof row.id === "string" ? `/api/purchases?id=${encodeURIComponent(row.id)}` : null,
+      editUrl: (row) => typeof row.id === "string" ? `/api/purchases?id=${encodeURIComponent(row.id)}` : null,
       emptyTitle: "Закупок пока нет", emptyDescription: "Создайте закупку. Приёмка сразу добавит товар на склад, а средняя себестоимость начнёт учитывать её после завершения закупки.",
     }} rowActions={(row) => {
       const completed = row.status === "completed";
@@ -326,9 +341,7 @@ export function PurchasesWorkspace() {
         <div className="receipt-lines-editor">
           <div className="receipt-lines-title"><strong>Фактически приехало</strong><button type="button" className="button secondary small" onClick={() => setLines((current) => [...current, { productId: "", quantity: "" }])}><Plus size={14} /> Добавить товар</button></div>
           {lines.map((line, index) => <div className="receipt-line-editor" key={`${editingReceiptId || selectedId}-${index}`}>
-            <div className="field"><label htmlFor={`receipt-product-${index}`}>Товар *</label><select id={`receipt-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, productId: event.target.value } : item))}>
-              <option value="">Выберите артикул…</option>{catalog.map((product) => <option key={String(product.id)} value={String(product.id)}>{String(product.sku ?? "Артикул не указан")} · {String(product.title ?? "Товар")}</option>)}
-            </select></div>
+            <div className="field"><label htmlFor={`receipt-product-${index}`}>Товар *</label><ProductSelect id={`receipt-product-${index}`} required value={line.productId} products={productSelectOptions(catalog)} onChange={(productId) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, productId } : item))} /></div>
             <div className="field"><label htmlFor={`receipt-quantity-${index}`}>Количество, шт. *</label><input id={`receipt-quantity-${index}`} type="number" min="1" step="1" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: event.target.value } : item))} /></div>
             <button type="button" className="icon-button receipt-line-remove" aria-label="Убрать товар из приёмки" disabled={lines.length <= 1} onClick={() => setLines((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={15} /></button>
           </div>)}
@@ -344,10 +357,10 @@ export function PurchasesWorkspace() {
     </section>
 
     <section className="panel" id="receipt-history" style={{ marginTop: 16 }}>
-      <div className="panel-head"><div><h2>{historyPurchaseId ? `Приёмки закупки ${String(historyPurchase?.sku ?? "")}` : "История приёмок"}</h2><span className="small-note">{receiptRowsForHistory.length} записей</span></div>{historyPurchaseId && <button type="button" className="button secondary small" onClick={() => setHistoryPurchaseId("")}>Все приёмки</button>}</div>
+      <div className="panel-head"><div><h2>{historyPurchaseId ? `Приёмки закупки ${String(historyPurchase?.sku ?? "")}` : "История приёмок"}</h2><span className="small-note">{receiptRowsForHistory.length} записей</span></div>{historyPurchaseId && <button type="button" className="button secondary small" onClick={() => { setHistoryPurchaseId(""); setHistoryPage(1); }}>Все приёмки</button>}</div>
       <div className="table-wrap"><table>
-        <TableHead columns={historyColumns} filters={historyFilters} onFilter={(key, value) => setHistoryFilters((current) => ({ ...current, [key]: value }))} sort={historySort} onSort={(key) => setHistorySort((current) => cycleTableSort(current, key))} trailingHeaders={["Действия"]} />
-        <tbody>{visibleReceiptRows.length === 0 ? <TableEmptyRow colSpan={6} message={receiptRowsForHistory.length === 0 ? historyPurchaseId ? "У этой закупки пока нет приёмок." : "Приёмок пока нет." : "По фильтрам ничего не найдено."} onClear={Object.values(historyFilters).some(Boolean) ? () => setHistoryFilters({}) : undefined} /> : visibleReceiptRows.map((receipt) => <tr key={String(receipt.id)}>
+        <TableHead columns={historyColumns} rows={receiptRowsForHistory} filters={historyFilters} onFilter={updateHistoryFilter} sort={historySort} onSort={updateHistorySort} trailingHeaders={["Действия"]} />
+        <tbody>{visibleReceiptRows.length === 0 ? <TableEmptyRow colSpan={6} message={receiptRowsForHistory.length === 0 ? historyPurchaseId ? "У этой закупки пока нет приёмок." : "Приёмок пока нет." : "По фильтрам ничего не найдено."} onClear={Object.values(historyFilters).some(Boolean) ? () => { setHistoryFilters({}); setHistoryPage(1); } : undefined} /> : receiptPagination.rows.map((receipt) => <tr key={String(receipt.id)}>
           <td className="number">{formatPurchaseDate(receipt.receivedAt)}</td>
           <td><ProductArticle identifier={String(receipt.purchaseSku || "Артикул не указан")} productId={typeof receipt.purchaseProductId === "string" ? receipt.purchaseProductId : null} fallback={receipt} /></td>
           <td><div className="supply-article-list">{(Array.isArray(receipt.actualLines) ? receipt.actualLines : []).map((value, index) => { const line = asRecord(value); if (!line) return null; return <span className="supply-article-chip" key={String(line.id ?? index)}><ProductArticle identifier={String(line.sku || "Артикул не указан")} productId={typeof line.productId === "string" ? line.productId : null} fallback={line} /><strong>× {formatPurchaseQuantity(line.quantity)}</strong></span>; })}</div></td>
@@ -356,6 +369,7 @@ export function PurchasesWorkspace() {
           <td><div className="row-actions"><button type="button" className="icon-button" aria-label="Изменить приёмку" onClick={() => editReceipt(receipt)}><Pencil size={14} /></button><button type="button" className="icon-button danger" aria-label="Удалить приёмку" disabled={busy} onClick={() => void deleteReceipt(receipt)}><Trash2 size={14} /></button></div></td>
         </tr>)}</tbody>
       </table></div>
+      <TablePagination page={receiptPagination.page} pageSize={TABLE_PAGE_SIZE} total={visibleReceiptRows.length} label="История приёмок" onPageChange={setHistoryPage} />
     </section>
     <ConfirmationModal
       open={Boolean(receiptDeleteId)}

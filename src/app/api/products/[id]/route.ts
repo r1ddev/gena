@@ -97,7 +97,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
         .where(eq(products.id, id)).for("update").limit(1);
       if (!product) return false;
       await tx.update(externalItems)
-        .set({ productId: null, disposition: "mapped" })
+        .set({ productId: null, disposition: "pending" })
         .where(eq(externalItems.productId, id));
       await tx.delete(products).where(eq(products.id, id));
       return true;

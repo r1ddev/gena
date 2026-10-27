@@ -1,0 +1,1 @@
+ALTER TABLE "ozon_returns" ADD COLUMN "written_off_at" timestamp with time zone;

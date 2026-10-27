@@ -13,7 +13,7 @@ RUN npm run build
 FROM node:22 AS runtime
 WORKDIR /app
 RUN apt-get update \
-  && apt-get install --yes --no-install-recommends ca-certificates curl gnupg tzdata \
+  && apt-get install --yes --no-install-recommends ca-certificates curl gnupg tzdata unzip \
   && install -d /usr/share/postgresql-common/pgdg \
   && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg \
   && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \

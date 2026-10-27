@@ -34,7 +34,10 @@ async function enqueueScheduledSync(now = new Date()) {
   const latestRequest = latestScheduled[0]?.requestedAt;
   const baseline = !settings.lastSyncAt || (latestRequest && latestRequest > settings.lastSyncAt) ? latestRequest : settings.lastSyncAt;
   if (baseline && now.getTime() - baseline.getTime() < intervalMs) return;
-  await db.insert(syncJobs).values({ kind: "scheduled", status: "queued", summary: { intervalHours: settings.syncIntervalHours } });
+  const [job] = await db.insert(syncJobs)
+    .values({ kind: "scheduled", status: "queued", summary: { intervalHours: settings.syncIntervalHours } })
+    .returning({ id: syncJobs.id });
+  if (job) process.stdout.write(`Scheduled sync queued (${settings.syncIntervalHours}h interval).\n`);
 }
 
 async function processJob() {
@@ -43,12 +46,17 @@ async function processJob() {
   try {
     const jobId = await claimNextJob();
     if (!jobId) return;
+    const startedAt = Date.now();
+    process.stdout.write(`Sync job ${jobId} started.\n`);
     try {
       const summary = await syncOzonData(jobId);
       const warnings = Array.isArray(summary.warnings) ? summary.warnings : [];
       await db.update(syncJobs).set({ status: "completed", finishedAt: new Date(), heartbeatAt: new Date(), summary, error: warnings.length ? warnings.join("\n") : null }).where(eq(syncJobs.id, jobId));
+      process.stdout.write(`Sync job ${jobId} completed in ${Math.round((Date.now() - startedAt) / 1000)}s${warnings.length ? ` with ${warnings.length} warning(s)` : ""}.\n`);
     } catch (error) {
-      await db.update(syncJobs).set({ status: "failed", finishedAt: new Date(), heartbeatAt: new Date(), error: error instanceof Error ? error.message : String(error) }).where(eq(syncJobs.id, jobId));
+      const message = error instanceof Error ? error.message : String(error);
+      await db.update(syncJobs).set({ status: "failed", finishedAt: new Date(), heartbeatAt: new Date(), error: message }).where(eq(syncJobs.id, jobId));
+      process.stderr.write(`Sync job ${jobId} failed: ${message}\n`);
     }
   } finally {
     working = false;
@@ -65,7 +73,7 @@ async function failInterruptedSyncJobs() {
 }
 
 async function run() {
-  process.stdout.write(`Worker started (${timezone}).\n`);
+  process.stdout.write(`Worker started (${timezone}); checks the sync schedule every 30 seconds.\n`);
   await failInterruptedSyncJobs();
   while (!stopping) {
     const { day, hour } = zonedParts();

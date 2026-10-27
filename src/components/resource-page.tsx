@@ -5,10 +5,12 @@ import { AlertCircle, CheckCircle2, Package, Pencil, Plus, Search, Trash2, X } f
 import { asRecord, displayValue, findRows, getId, localToday, requestJson, stringValue, valueAt, type JsonRecord } from "./api";
 import { PageHeader } from "./page-header";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
-import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableSort } from "./table-controls";
+import { cycleTableSort, filterAndSortRows, paginateRows, TableEmptyRow, TableHead, TablePagination, TABLE_PAGE_SIZE, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
 import { notifyProductCatalogChanged, ProductArticle } from "./product-hover-card";
+import { ProductSelect, productSelectOptions, type ProductSelectOption } from "./product-select";
 import { OzonOrderLink } from "./ozon-order-link";
+import { OzonReturnLink } from "./ozon-return-link";
 import { ConfirmationModal } from "./confirmation-modal";
 
 export type FieldConfig = {
@@ -24,7 +26,7 @@ export type FieldConfig = {
   optionsFrom?: string;
 };
 
-export type ColumnConfig = { key: string; label: string; kind?: "identifier" | "money" | "quantity" | "date" | "status" | "number" | "time" | "text"; primary?: boolean; sortable?: boolean; filterable?: boolean; linkToOzonPosting?: boolean; value?: (row: JsonRecord) => unknown; render?: (row: JsonRecord, value: unknown) => ReactNode };
+export type ColumnConfig = { key: string; label: string; kind?: "identifier" | "money" | "quantity" | "percent" | "date" | "status" | "number" | "time" | "text"; primary?: boolean; sortable?: boolean; filterable?: boolean; linkToOzonPosting?: boolean; value?: (row: JsonRecord) => unknown; render?: (row: JsonRecord, value: unknown) => ReactNode };
 export type ResourceConfig = {
   title: string;
   eyebrow?: string;
@@ -37,7 +39,9 @@ export type ResourceConfig = {
   fields: FieldConfig[];
   columns: ColumnConfig[];
   remotePageSize?: number;
+  filterOptionsUrl?: string;
   showSoldQuantity?: boolean;
+  showOrderSummary?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
   deleteUrl?: (row: JsonRecord) => string | null;
@@ -46,6 +50,81 @@ export type ResourceConfig = {
   editUrl?: (row: JsonRecord) => string | null;
   help?: string;
 };
+
+type OrderSummary = {
+  soldQuantity: number;
+  returnQuantity: number;
+  returnCount: number;
+  purchaseQuantity: number;
+  successfulPurchasePercent: number | null;
+  successfulDeliveryQuantity: number;
+  attemptedDeliveryQuantity: number;
+  profitTotal: number;
+  profitPostingCount: number;
+  profitIncompleteCount: number;
+  filteredPostingCount: number;
+};
+
+function formatSummaryQuantity(value: number | null | undefined) {
+  return value === null || value === undefined ? "—" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(value);
+}
+
+function formatSummaryPercent(value: number | null | undefined) {
+  return value === null || value === undefined ? "—" : `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(value)}%`;
+}
+
+function formatSummaryMoney(value: number) {
+  return `${new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)} ₽`;
+}
+
+function formatReturnCount(value: number) {
+  const lastTwoDigits = value % 100;
+  const lastDigit = value % 10;
+  const word = lastTwoDigits >= 11 && lastTwoDigits <= 14 ? "возвратов"
+    : lastDigit === 1 ? "возврат"
+      : lastDigit >= 2 && lastDigit <= 4 ? "возврата" : "возвратов";
+  return `${formatSummaryQuantity(value)} ${word}`;
+}
+
+function OrderSummaryCards({ summary, loading, hasActiveFilters }: { summary: OrderSummary | null; loading: boolean; hasActiveFilters: boolean }) {
+  const value = (current: number | null | undefined, formatter: (value: number | null | undefined) => string) => loading ? "…" : summary ? formatter(current) : "—";
+  const scope = loading ? "Пересчитываю текущую выборку…"
+    : `${hasActiveFilters ? "По текущим фильтрам" : "По всей таблице"} · ${formatSummaryQuantity(summary?.filteredPostingCount)} отправлений`;
+  const successfulHelp = summary?.successfulPurchasePercent === null || !summary
+    ? "Нет отправлений с итоговым статусом"
+    : `${formatSummaryQuantity(summary.successfulDeliveryQuantity)} из ${formatSummaryQuantity(summary.attemptedDeliveryQuantity)} шт. со статусом «Доставлен» или «Отменён»`;
+  const profitClass = !loading && summary && summary.profitTotal < 0 ? "order-summary-value negative" : "order-summary-value";
+  return <section className="sales-summary" aria-label="Итоги по текущей выборке">
+    <div className="sales-summary-scope">{scope}</div>
+    <div className="sales-summary-grid">
+      <article className="panel metric-card sales-summary-card" aria-label="Продано">
+        <div className="metric-label">Продано</div>
+        <div className="metric-value">{value(summary?.soldQuantity, (current) => `${formatSummaryQuantity(current)} шт.`)}</div>
+        <div className="metric-help">Доставлено за вычетом возвратов</div>
+      </article>
+      <article className="panel metric-card sales-summary-card" aria-label="Возвраты">
+        <div className="metric-label">Возвраты</div>
+        <div className="metric-value">{value(summary?.returnQuantity, (current) => `${formatSummaryQuantity(current)} шт.`)}</div>
+        <div className="metric-help">{loading ? "…" : summary ? formatReturnCount(summary.returnCount) : "—"}</div>
+      </article>
+      <article className="panel metric-card sales-summary-card" aria-label="Покупки, включая возвраты">
+        <div className="metric-label">Покупки, включая возвраты</div>
+        <div className="metric-value">{value(summary?.purchaseQuantity, (current) => `${formatSummaryQuantity(current)} шт.`)}</div>
+        <div className="metric-help">Продано + возвращено</div>
+      </article>
+      <article className="panel metric-card sales-summary-card" aria-label="Успешные покупки">
+        <div className="metric-label">Успешные покупки</div>
+        <div className="metric-value">{value(summary?.successfulPurchasePercent, formatSummaryPercent)}</div>
+        <div className="metric-help">{loading ? "…" : successfulHelp}</div>
+      </article>
+      <article className="panel metric-card sales-summary-card" aria-label="Прибыль после себестоимости">
+        <div className="metric-label">Прибыль после себестоимости</div>
+        <div className={profitClass}>{value(summary?.profitTotal, (current) => formatSummaryMoney(current ?? 0))}</div>
+        <div className="metric-help">{loading ? "…" : summary ? `По ${formatSummaryQuantity(summary.profitPostingCount)} финальным отправлениям${summary.profitIncompleteCount ? ` · ${formatSummaryQuantity(summary.profitIncompleteCount)} без себестоимости` : ""}` : "—"}</div>
+      </article>
+    </div>
+  </section>;
+}
 
 export function buildResourcePayload(fields: FieldConfig[], formValues: Record<string, string>, defaultDate: string): Record<string, string | number> {
   const payload: Record<string, string | number> = {};
@@ -102,6 +181,11 @@ function supplyArticleList(row: JsonRecord) {
     {lines.map((line) => <span className="supply-article-chip" role="listitem" key={line.key}>
       <ProductArticle identifier={line.sku} productId={line.productId} fallback={line.details} className="supply-article-code" />
       <strong>× {line.quantity}</strong>
+      <small className="supply-article-costs">
+        {line.details.purchaseUnitCostSnapshot == null && line.details.landedUnitCostSnapshot == null
+          ? "Стоимость на момент создания не сохранена"
+          : `Закупка ${displayValue(line.details.purchaseUnitCostSnapshot, "money")}/шт. · с добавочной ${displayValue(line.details.landedUnitCostSnapshot, "money")}/шт.`}
+      </small>
     </span>)}
   </div>;
 }
@@ -119,44 +203,23 @@ function labelFor(key: string) {
   return labels[key] ?? key;
 }
 
-function Field({ config, value, onChange, productOptions }: { config: FieldConfig; value: string; onChange: (value: string) => void; productOptions: { value: string; label: string }[] }) {
+function Field({ config, value, onChange, productOptions }: { config: FieldConfig; value: string; onChange: (value: string) => void; productOptions: ProductSelectOption[] }) {
   const type = config.type ?? "text";
   const fieldClass = config.wide ? "field wide" : "field";
   if (type === "textarea") return <div className={fieldClass}><label htmlFor={config.name}>{config.label}</label><textarea id={config.name} value={value} placeholder={config.placeholder} required={config.required} onChange={(event) => onChange(event.target.value)} /></div>;
+  if (config.optionsFrom === "/api/products") return <div className={fieldClass}><label htmlFor={config.name}>{config.label}</label><ProductSelect id={config.name} value={value} products={productOptions} required={config.required} onChange={onChange} /></div>;
   if (type === "select") {
-    const options = config.optionsFrom ? productOptions : config.options ?? [];
+    const options = config.options ?? [];
     return <div className={fieldClass}><label htmlFor={config.name}>{config.label}</label><select id={config.name} value={value} required={config.required} onChange={(event) => onChange(event.target.value)}><option value="">Выберите…</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>;
   }
   return <div className={fieldClass}><label htmlFor={config.name}>{config.label}</label><input id={config.name} type={type} value={value} required={config.required} min={config.min ?? (type === "number" ? "0" : undefined)} step={config.step} placeholder={config.placeholder} onChange={(event) => onChange(event.target.value)} /></div>;
-}
-
-function productOptionsFrom(value: unknown) {
-  return findRows(value).map((row) => {
-    const id = getId(row);
-    const title = typeof row.title === "string" ? row.title : "Товар";
-    const identifiers = [
-      typeof row.offerId === "string" && row.offerId ? `Артикул ${row.offerId}` : "",
-      typeof row.ozonSku === "string" && row.ozonSku ? `SKU Ozon ${row.ozonSku}` : "",
-    ].filter(Boolean);
-    return id ? { value: id, label: `${title}${identifiers.length ? ` · ${identifiers.join(" · ")}` : ""}` } : null;
-  }).filter((option): option is { value: string; label: string } => option !== null);
-}
-
-type PageItem = number | "ellipsis";
-
-function pageItems(currentPage: number, totalPages: number): PageItem[] {
-  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1);
-  if (currentPage <= 4) return [1, 2, 3, 4, 5, "ellipsis", totalPages];
-  if (currentPage >= totalPages - 3) {
-    return [1, "ellipsis", totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
-  }
-  return [1, "ellipsis", currentPage - 1, currentPage, currentPage + 1, "ellipsis", totalPages];
 }
 
 export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActions, onMutation }: { config: ResourceConfig; actions?: React.ReactNode; beforeTable?: React.ReactNode; refreshKey?: string | number; rowActions?: (row: JsonRecord, refresh: () => Promise<void>) => React.ReactNode; onMutation?: () => void }) {
   const [rows, setRows] = useState<JsonRecord[]>([]);
   const [pagination, setPagination] = useState<{ page: number; pageSize: number; total: number; totalPages: number } | null>(null);
   const [soldQuantity, setSoldQuantity] = useState<number | null>(null);
+  const [orderSummary, setOrderSummary] = useState<OrderSummary | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -166,7 +229,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const [editingValues, setEditingValues] = useState<Record<string, string>>({});
   const [productImage, setProductImage] = useState<File | null>(null);
   const [removeExistingImage, setRemoveExistingImage] = useState(false);
-  const [productOptions, setProductOptions] = useState<{ value: string; label: string }[]>([]);
+  const [productOptions, setProductOptions] = useState<ProductSelectOption[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -175,6 +238,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const [serverSearch, setServerSearch] = useState("");
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [serverFilters, setServerFilters] = useState<Record<string, string>>({});
+  const [serverFilterOptions, setServerFilterOptions] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<TableSort>(null);
   const requestSequence = useRef(0);
 
@@ -196,6 +260,32 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
       setRows(findRows(result));
       const summary = asRecord(asRecord(result)?.summary);
       setSoldQuantity(typeof summary?.soldQuantity === "number" && Number.isFinite(summary.soldQuantity) ? summary.soldQuantity : null);
+      const orderSummaryFields = summary ? {
+        soldQuantity: summary.soldQuantity,
+        returnQuantity: summary.returnQuantity,
+        returnCount: summary.returnCount,
+        purchaseQuantity: summary.purchaseQuantity,
+        successfulPurchasePercent: summary.successfulPurchasePercent,
+        successfulDeliveryQuantity: summary.successfulDeliveryQuantity,
+        attemptedDeliveryQuantity: summary.attemptedDeliveryQuantity,
+        profitTotal: summary.profitTotal,
+        profitPostingCount: summary.profitPostingCount,
+        profitIncompleteCount: summary.profitIncompleteCount,
+        filteredPostingCount: summary.filteredPostingCount,
+      } : null;
+      setOrderSummary(orderSummaryFields &&
+        typeof orderSummaryFields.soldQuantity === "number" && Number.isFinite(orderSummaryFields.soldQuantity) &&
+        typeof orderSummaryFields.returnQuantity === "number" && Number.isFinite(orderSummaryFields.returnQuantity) &&
+        typeof orderSummaryFields.returnCount === "number" && Number.isFinite(orderSummaryFields.returnCount) &&
+        typeof orderSummaryFields.purchaseQuantity === "number" && Number.isFinite(orderSummaryFields.purchaseQuantity) &&
+        (orderSummaryFields.successfulPurchasePercent === null || typeof orderSummaryFields.successfulPurchasePercent === "number" && Number.isFinite(orderSummaryFields.successfulPurchasePercent)) &&
+        typeof orderSummaryFields.successfulDeliveryQuantity === "number" && Number.isFinite(orderSummaryFields.successfulDeliveryQuantity) &&
+        typeof orderSummaryFields.attemptedDeliveryQuantity === "number" && Number.isFinite(orderSummaryFields.attemptedDeliveryQuantity) &&
+        typeof orderSummaryFields.profitTotal === "number" && Number.isFinite(orderSummaryFields.profitTotal) &&
+        typeof orderSummaryFields.profitPostingCount === "number" && Number.isFinite(orderSummaryFields.profitPostingCount) &&
+        typeof orderSummaryFields.profitIncompleteCount === "number" && Number.isFinite(orderSummaryFields.profitIncompleteCount) &&
+        typeof orderSummaryFields.filteredPostingCount === "number" && Number.isFinite(orderSummaryFields.filteredPostingCount)
+        ? orderSummaryFields as OrderSummary : null);
       const remotePage = asRecord(asRecord(result)?.pagination);
       if (remotePage && typeof remotePage.page === "number" && typeof remotePage.pageSize === "number" && typeof remotePage.total === "number" && typeof remotePage.totalPages === "number") {
         setPagination({ page: remotePage.page, pageSize: remotePage.pageSize, total: remotePage.total, totalPages: remotePage.totalPages });
@@ -204,7 +294,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     }
     catch (reason) {
       if (sequence === requestSequence.current) {
-        setRows([]); setPagination(null); setSoldQuantity(null); setLoadError(reason instanceof Error ? reason.message : "Не удалось загрузить список");
+        setRows([]); setPagination(null); setSoldQuantity(null); setOrderSummary(null); setLoadError(reason instanceof Error ? reason.message : "Не удалось загрузить список");
       }
     }
     finally { if (sequence === requestSequence.current) setLoading(false); }
@@ -216,6 +306,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     if (search.trim() !== serverSearch || JSON.stringify(filters) !== JSON.stringify(serverFilters)) {
       requestSequence.current++;
       setLoading(false);
+      if (config.showOrderSummary) setOrderSummary(null);
     }
     const timeout = window.setTimeout(() => {
       setServerSearch(search.trim());
@@ -229,9 +320,29 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     window.addEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
     return () => window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, refreshAfterSync);
   }, [refresh]);
+  const loadServerFilterOptions = useCallback(async () => {
+    if (!config.filterOptionsUrl) return;
+    try {
+      const response = await requestJson(config.filterOptionsUrl);
+      const options = asRecord(asRecord(response)?.filterOptions);
+      if (!options) return;
+      const normalized = Object.fromEntries(Object.entries(options).flatMap(([key, value]) =>
+        Array.isArray(value) ? [[key, value.filter((option): option is string => typeof option === "string")]] : [],
+      ));
+      setServerFilterOptions(normalized);
+    } catch {
+      // The current page values still provide useful suggestions if the full list is unavailable.
+    }
+  }, [config.filterOptionsUrl]);
+  useEffect(() => {
+    if (!config.filterOptionsUrl) return;
+    void loadServerFilterOptions();
+    window.addEventListener(OZON_SYNC_COMPLETED_EVENT, loadServerFilterOptions);
+    return () => window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, loadServerFilterOptions);
+  }, [config.filterOptionsUrl, loadServerFilterOptions, refreshKey]);
   useEffect(() => {
     if (config.fields.some((field) => field.optionsFrom === "/api/products")) {
-      requestJson("/api/products").then((value) => setProductOptions(productOptionsFrom(value))).catch(() => setProductOptions([]));
+      requestJson("/api/products").then((value) => setProductOptions(productSelectOptions(value))).catch(() => setProductOptions([]));
     }
   }, [config.fields]);
 
@@ -242,21 +353,33 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     if (!query) return filteredAndSorted;
     return filteredAndSorted.filter((row) => JSON.stringify(row).toLocaleLowerCase("ru-RU").includes(query));
   }, [config.columns, config.remotePageSize, filters, rows, search, sort]);
+  const localPagination = useMemo(() => paginateRows(visibleRows, page), [visibleRows, page]);
+  const pageRows = config.remotePageSize ? visibleRows : localPagination.rows;
+  const tablePage = config.remotePageSize ? pagination?.page ?? page : localPagination.page;
+  const tablePageSize = config.remotePageSize ? pagination?.pageSize ?? config.remotePageSize : TABLE_PAGE_SIZE;
+  const tableTotal = config.remotePageSize ? pagination?.total ?? 0 : visibleRows.length;
+  const tableColumns = useMemo(() => config.columns.map((column) => ({
+    ...column,
+    kind: column.kind ?? (column.key === "id" || column.key === "externalId" ? "identifier" : "text"),
+    value: column.value ?? (column.key === "article" ? (row: JsonRecord) => orderArticleText(row.items)
+      : column.key === "status" ? (row: JsonRecord) => [row.status, row.returnState].filter(Boolean).join(" ")
+        : (row: JsonRecord) => valueAt(row, column.key)),
+  })), [config.columns]);
 
   function updateFilter(key: string, value: string) {
     setFilters((current) => ({ ...current, [key]: value }));
-    if (config.remotePageSize) setPage(1);
+    setPage(1);
   }
 
   function updateSort(key: string) {
     setSort((current) => cycleTableSort(current, key));
-    if (config.remotePageSize) setPage(1);
+    setPage(1);
   }
 
   function clearTableFilters() {
     setFilters({});
     setSearch("");
-    if (config.remotePageSize) setPage(1);
+    setPage(1);
   }
 
   function openEdit(row: JsonRecord) {
@@ -334,7 +457,8 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const tableColumnCount = config.columns.length + (config.deleteUrl || config.editUrl || rowActions ? 1 : 0);
   return <>
     <PageHeader eyebrow={config.eyebrow ?? "Учёт операций"} title={config.title} description={config.description} actions={<div className="toolbar">{actions}{!config.hideCreate && <button className="button" onClick={() => { setFormOpen((open) => !open); setError(""); setSuccess(""); }}><Plus size={15} />{formOpen ? "Закрыть форму" : config.createLabel}</button>}</div>} />
-    {config.showSoldQuantity && <section className="panel metric-card" style={{ "--metric-bg": "#eef5fa", marginBottom: 16 } as React.CSSProperties} aria-label="Проданные товары"><Package className="metric-icon" size={18} /><div className="metric-label">Продано товаров</div><div className="metric-value">{soldQuantity === null ? loading ? "…" : "—" : `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(soldQuantity)} шт.`}</div><div className="metric-help">Доставленные и выкупленные Ozon товары за всё время, за вычетом возвратов</div></section>}
+    {config.showOrderSummary && <OrderSummaryCards summary={orderSummary} loading={loading} hasActiveFilters={hasActiveFilters} />}
+    {!config.showOrderSummary && config.showSoldQuantity && <section className="panel metric-card" style={{ "--metric-bg": "#eef5fa", marginBottom: 16 } as React.CSSProperties} aria-label="Проданные товары"><Package className="metric-icon" size={18} /><div className="metric-label">Продано товаров</div><div className="metric-value">{soldQuantity === null ? loading ? "…" : "—" : `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(soldQuantity)} шт.`}</div><div className="metric-help">Доставленные и выкупленные Ozon товары за всё время, за вычетом возвратов</div></section>}
     {error && !editingRow && <div className="error-banner" role="alert"><AlertCircle size={16} />{error}</div>}
     {success && <div className="success-banner" role="status"><CheckCircle2 size={16} />{success}</div>}
     {formOpen && <section className="panel form-panel" aria-label={`Новая запись: ${config.title}`}>
@@ -376,19 +500,13 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
     />
     {beforeTable}
     <section className="panel">
-      <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Загружаем список…" : config.remotePageSize ? `${pagination?.total ?? 0} записей` : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder={config.remotePageSize ? "Поиск по заказам" : "Поиск"} value={search} onChange={(event) => setSearch(event.target.value)} /></div></div></div>
+      <div className="panel-head"><div><h2>Список записей</h2><span className="small-note">{loading ? "Загружаем список…" : config.remotePageSize ? `${pagination?.total ?? 0} записей` : `${visibleRows.length} ${visibleRows.length === 1 ? "запись" : "записей"}`}</span></div><div className="toolbar"><div className="search-box"><Search size={14} /><input aria-label="Поиск по таблице" placeholder={config.remotePageSize ? "Поиск по заказам" : "Поиск"} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} /></div></div></div>
       {loading && rows.length === 0 && !hasActiveFilters ? <div className="panel-body" aria-label="Загрузка списка"><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /><div style={{ height: 10 }} /><div className="loading-line" /></div>
         : loadError && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><AlertCircle size={20} /></div><div className="empty-title">Не удалось загрузить данные</div><p className="empty-description">{loadError}</p><button className="button secondary" style={{ marginTop: 13 }} onClick={() => void refresh()}>Повторить</button></div></div>
           : rows.length === 0 && !hasActiveFilters ? <div className="empty-state"><div><div className="empty-icon"><Package size={20} /></div><div className="empty-title">{config.emptyTitle ?? "Пока нет записей"}</div><p className="empty-description">{config.emptyDescription ?? "Добавьте первую запись — она появится в этом списке, а связанные итоги обновятся автоматически."}</p></div></div>
-            : <div className="table-wrap"><table><TableHead columns={config.columns.map((column) => ({
-              ...column,
-              kind: column.kind ?? (column.key === "id" || column.key === "externalId" ? "identifier" : "text"),
-              value: column.value ?? (column.key === "article" ? (row: JsonRecord) => orderArticleText(row.items)
-                : column.key === "status" ? (row: JsonRecord) => [row.status, row.returnState].filter(Boolean).join(" ")
-                  : (row: JsonRecord) => valueAt(row, column.key)),
-            }))} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || config.editUrl || rowActions ? ["Действия"] : []} /><tbody>{loadError ? <TableEmptyRow colSpan={tableColumnCount} message={loadError} /> : config.remotePageSize && loading ? <TableEmptyRow colSpan={tableColumnCount} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={tableColumnCount} message="По заданным условиям совпадений нет." onClear={clearTableFilters} /> : visibleRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
+            : <div className="table-wrap"><table><TableHead columns={tableColumns} rows={rows} filterOptions={serverFilterOptions} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} trailingHeaders={config.deleteUrl || config.editUrl || rowActions ? ["Действия"] : []} /><tbody>{loadError ? <TableEmptyRow colSpan={tableColumnCount} message={loadError} /> : config.remotePageSize && loading ? <TableEmptyRow colSpan={tableColumnCount} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={tableColumnCount} message="По заданным условиям совпадений нет." onClear={clearTableFilters} /> : pageRows.map((row, index) => <tr key={getId(row) ?? index}>{config.columns.map((column) => {
               const value = column.value ? column.value(row) : valueAt(row, column.key);
-              const displayKind = column.kind === "date" || column.kind === "money" || column.kind === "quantity" || column.kind === "status" ? column.kind : undefined;
+              const displayKind = column.kind === "date" || column.kind === "money" || column.kind === "quantity" || column.kind === "percent" || column.kind === "status" ? column.kind : undefined;
               if (column.render) return <td key={column.key}>{column.render(row, value)}</td>;
               if (["sku", "offerId", "ozonSku"].includes(column.key)) {
                 const identifier = stringValue(value);
@@ -416,21 +534,21 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
               if (column.primary) return <td key={column.key}><span className="table-primary">{displayValue(value, displayKind)}</span>{typeof row.sku === "string" && column.key !== "sku" && column.key !== "offerId" && <span className="table-secondary"><ProductArticle identifier={row.sku} productId={stringValue(row.productId)} fallback={row} /></span>}</td>;
               if (column.key === "article") return <td key={column.key}>{orderArticleText(row.items)}</td>;
               const rendered = displayValue(value, displayKind);
-              return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" ? "number" : ""}>{column.key.toLowerCase().includes("status") ? <><span className="badge">{rendered}</span>{column.key === "status" && typeof row.returnState === "string" && <span className="table-secondary">{row.returnState}</span>}</> : rendered}</td>;
+              if (column.key.toLowerCase().includes("status")) return <td key={column.key}>
+                <span className="badge">{rendered}</span>
+                {column.key === "status" && typeof row.returnState === "string" && <span className="table-secondary">{row.returnState}</span>}
+                {column.key === "status" && Array.isArray(row.returnRecords) && row.returnRecords.map((candidate, returnIndex) => {
+                  const returnId = stringValue(asRecord(candidate)?.externalId);
+                  return returnId ? <span className="table-secondary" key={`${returnId}-${returnIndex}`}><OzonReturnLink returnId={returnId}>Возврат {returnId}</OzonReturnLink></span> : null;
+                })}
+              </td>;
+              if (column.key === "amount" && Array.isArray(row.returnRecords) && row.returnRecords.length > 0 && typeof row.returnCost === "number") return <td key={column.key} className="number">
+                <span>{rendered}</span>
+                <span className="table-secondary">Расходы на возврат: {displayValue(row.returnCost, "money")}</span>
+              </td>;
+              return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" || column.kind === "percent" ? "number" : ""}>{rendered}</td>;
             })}{(config.deleteUrl || config.editUrl || rowActions) && <td><div className="row-actions">{config.editUrl?.(row) && <button type="button" className="icon-button" aria-label={`Редактировать запись ${index + 1}`} onClick={() => openEdit(row)} disabled={busy}><Pencil size={14} /></button>}{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
-      {pagination && pagination.totalPages > 1 && <nav className="pagination-controls" aria-label={`Страницы: ${config.title}`} aria-busy={loading}>
-        {pageItems(pagination.page, pagination.totalPages).map((item, index) => item === "ellipsis"
-          ? <span className="pagination-ellipsis" key={`ellipsis-${index}`} aria-hidden="true">…</span>
-          : <button
-            className={`pagination-page ${pagination.page === item ? "active" : ""}`}
-            key={item}
-            type="button"
-            aria-label={`Страница ${item}`}
-            aria-current={pagination.page === item ? "page" : undefined}
-            aria-disabled={loading || pagination.page === item}
-            onClick={() => { if (!loading && pagination.page !== item) setPage(item); }}
-          >{item}</button>)}
-      </nav>}
+      <TablePagination page={tablePage} pageSize={tablePageSize} total={tableTotal} label={config.title} busy={loading} onPageChange={setPage} />
     </section>
   </>;
 }

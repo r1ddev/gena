@@ -1,10 +1,8 @@
 import { isOzonWriteOffStatus, ozonReturnStatusLabel } from "@/ozon/return-status";
 
 type Posting = { id: string; externalId: string };
-type PostingItem = { postingId: string; productId: string | null };
 type ReturnRow = {
   postingNumber: string | null;
-  productId: string | null;
   destination: "seller" | "ozon" | "unknown";
   status?: string | null;
   raw?: unknown;
@@ -13,17 +11,13 @@ type ReturnRow = {
 
 export function getOrderReturnStatesByPosting(
   postings: Posting[],
-  postingItems: PostingItem[],
   returnRows: ReturnRow[],
 ): Map<string, string> {
-  const postingIdByNumber = new Map(postings.map((posting) => [posting.externalId, posting.id]));
-  const validReturnLinks = new Set(postingItems.flatMap((item) => item.productId ? [`${item.postingId}\u0000${item.productId}`] : []));
+  const postingNumbers = new Set(postings.map((posting) => posting.externalId));
   const statesByPosting = new Map<string, Set<string>>();
 
   for (const row of returnRows) {
-    if (!row.postingNumber || !row.productId) continue;
-    const postingId = postingIdByNumber.get(row.postingNumber);
-    if (!postingId || !validReturnLinks.has(`${postingId}\u0000${row.productId}`)) continue;
+    if (!row.postingNumber || !postingNumbers.has(row.postingNumber)) continue;
     if (isOzonWriteOffStatus(row.status, row.raw)) {
       statesByPosting.set(row.postingNumber, new Set([...(statesByPosting.get(row.postingNumber) ?? []), "Списание Ozon"]));
       continue;
@@ -43,4 +37,24 @@ export function getOrderReturnStatesByPosting(
   }
 
   return new Map([...statesByPosting].map(([postingNumber, states]) => [postingNumber, [...states].join("; ")]));
+}
+
+const postingStatusLabels: Record<string, string> = {
+  delivered: "Доставлен",
+  cancelled: "Отменён",
+  canceled: "Отменён",
+  delivering: "Доставляется",
+  awaiting_deliver: "Ожидает доставки",
+  awaiting_packaging: "Ожидает сборки",
+};
+
+export function currentOrderStatus(postingStatus: string, returnState: string | null | undefined) {
+  if (!returnState) return postingStatusLabels[postingStatus.toLowerCase()] ?? postingStatus;
+
+  const states = returnState.split(";").map((state) => state.trim()).filter(Boolean);
+  const hasWriteoff = states.includes("Списание Ozon");
+  const hasReturn = states.some((state) => state.startsWith("Возврат"));
+  if (hasWriteoff && hasReturn) return "Возврат и списание";
+  if (hasWriteoff) return "Списание Ozon";
+  return "Возврат";
 }

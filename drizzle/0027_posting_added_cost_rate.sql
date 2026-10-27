@@ -1,0 +1,1 @@
+ALTER TABLE "ozon_postings" ADD COLUMN "added_cost_rate_percent" numeric(12, 8);

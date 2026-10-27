@@ -21,6 +21,7 @@ const navSections = [
       { href: "/purchases", label: "Закупки", icon: ShoppingCart },
       { href: "/supplies", label: "Поставки на Ozon", icon: Truck },
       { href: "/expenses", label: "Расходы", icon: Wallet },
+      { href: "/ozon-expenses", label: "Операции Ozon", icon: CircleDollarSign },
     ],
   },
   {

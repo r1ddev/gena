@@ -28,9 +28,11 @@ const receiptUpdateSchema = z.object({
 
 async function ensureProductsExist(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], lines: z.infer<typeof linesSchema>) {
   const productIds = lines.map((line) => line.productId);
-  const existing = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId })
+  const existing = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
     .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(inArray(products.id, productIds));
-  if (existing.length !== productIds.length) throw new Error("Один из выбранных товаров не найден.");
+  if (existing.length !== productIds.length || existing.some((product) => product.archived)) {
+    throw new Error("Выберите товары из текущего каталога.");
+  }
   return new Map(existing.map((product) => [product.id, {
     productSkuSnapshot: product.offerId || product.sku,
     productTitleSnapshot: product.title,
@@ -42,8 +44,10 @@ export async function POST(request: Request) {
     assertLocalMutation(request);
     const body = await parseBody(request, receiptSchema);
     const item = await db.transaction(async (tx) => {
-      const purchase = (await tx.select({ id: purchases.id }).from(purchases).where(eq(purchases.id, body.purchaseId)).limit(1))[0];
+      const [purchase] = await tx.select({ id: purchases.id, productId: purchases.productId, sku: products.sku, archived: products.archived })
+        .from(purchases).innerJoin(products, eq(products.id, purchases.productId)).where(eq(purchases.id, body.purchaseId)).limit(1);
       if (!purchase) throw new Error("Закупка не найдена.");
+      if (purchase.archived) throw new Error("Эта закупка связана с товаром вне текущего каталога.");
       const productSnapshots = await ensureProductsExist(tx, body.lines);
       const [receipt] = await tx.insert(purchaseReceipts).values({
         purchaseId: body.purchaseId,
@@ -64,8 +68,11 @@ export async function PATCH(request: Request) {
     if (!id || !z.string().uuid().safeParse(id).success) throw new Error("Не указан корректный идентификатор приёмки.");
     const body = await parseBody(request, receiptUpdateSchema);
     const item = await db.transaction(async (tx) => {
-      const [existing] = await tx.select({ id: purchaseReceipts.id }).from(purchaseReceipts).where(eq(purchaseReceipts.id, id)).limit(1);
+      const [existing] = await tx.select({ id: purchaseReceipts.id, purchaseId: purchaseReceipts.purchaseId, productId: purchases.productId, sku: products.sku, archived: products.archived })
+        .from(purchaseReceipts).innerJoin(purchases, eq(purchases.id, purchaseReceipts.purchaseId))
+        .innerJoin(products, eq(products.id, purchases.productId)).where(eq(purchaseReceipts.id, id)).limit(1);
       if (!existing) throw new Error("Приёмка не найдена.");
+      if (existing.archived) throw new Error("Эта закупка связана с товаром вне текущего каталога.");
       const productSnapshots = await ensureProductsExist(tx, body.lines);
       const [receipt] = await tx.update(purchaseReceipts).set({ receivedAt: body.receivedAt, note: body.note }).where(eq(purchaseReceipts.id, id)).returning();
       await tx.delete(purchaseReceiptLines).where(eq(purchaseReceiptLines.receiptId, id));

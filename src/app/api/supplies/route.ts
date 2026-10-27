@@ -2,12 +2,12 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { productLinks, products, supplies, supplyLines } from "@/db/schema";
+import { getAccountingSnapshot } from "@/domain/accounting-repository";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
-import { isoDate, nonNegativeDecimal, positiveInteger } from "../_lib/validation";
+import { isoDate, positiveInteger } from "../_lib/validation";
 
 const supplySchema = z.object({
   suppliedAt: isoDate,
-  shippingCost: nonNegativeDecimal,
   note: z.string().trim().max(2000).optional().default(""),
   lines: z.array(z.object({
     productId: z.string().uuid(),
@@ -28,9 +28,12 @@ export async function GET(request: Request) {
       db.select().from(supplyLines),
       db.select().from(products),
     ]);
+    const activeProductIds = new Set(catalog.filter((product) => !product.archived).map((product) => product.id));
+    const visibleLines = lines.filter((line) => activeProductIds.has(line.productId));
     const productById = new Map(catalog.map((product) => [product.id, product]));
-    return { items: headers.map((supply) => {
-      const matching = lines.filter((line) => line.supplyId === supply.id);
+    return { items: headers.flatMap((supply) => {
+      const matching = visibleLines.filter((line) => line.supplyId === supply.id);
+      if (matching.length === 0) return [];
       return {
         ...supply,
         lines: matching.map((line) => ({
@@ -54,14 +57,20 @@ export async function POST(request: Request) {
     assertLocalMutation(request);
     const body = await parseBody(request, supplySchema);
     assertUniqueProductLines(body.lines);
+    const currentUnitCosts = await loadCurrentUnitCosts();
     const item = await db.transaction(async (tx) => {
       const productsById = await loadProductSnapshots(tx, body.lines);
       const [header] = await tx.insert(supplies).values({
         suppliedAt: body.suppliedAt,
-        shippingCost: body.shippingCost,
+        shippingCost: "0",
         note: body.note,
       }).returning();
-      await tx.insert(supplyLines).values(body.lines.map((line) => ({ supplyId: header.id, ...line, ...productsById.get(line.productId)! })));
+      await tx.insert(supplyLines).values(body.lines.map((line) => ({
+        supplyId: header.id,
+        ...line,
+        ...productsById.get(line.productId)!,
+        ...currentUnitCosts.get(line.productId),
+      })));
       return header;
     });
     return Response.json({ item }, { status: 201 });
@@ -76,27 +85,48 @@ export async function PATCH(request: Request) {
     const supplyId = z.string().uuid().parse(id);
     const body = await parseBody(request, supplySchema);
     assertUniqueProductLines(body.lines);
+    const currentUnitCosts = await loadCurrentUnitCosts();
     const item = await db.transaction(async (tx) => {
       const productsById = await loadProductSnapshots(tx, body.lines);
+      const previousLines = await tx.select().from(supplyLines).where(eq(supplyLines.supplyId, supplyId));
+      const previousCosts = new Map(previousLines.map((line) => [line.productId, {
+        purchaseUnitCostSnapshot: line.purchaseUnitCostSnapshot,
+        landedUnitCostSnapshot: line.landedUnitCostSnapshot,
+      }]));
       const [updated] = await tx.update(supplies).set({
         suppliedAt: body.suppliedAt,
-        shippingCost: body.shippingCost,
+        shippingCost: "0",
         note: body.note,
       }).where(eq(supplies.id, supplyId)).returning();
       if (!updated) throw new Error("Поставка не найдена.");
       await tx.delete(supplyLines).where(eq(supplyLines.supplyId, supplyId));
-      await tx.insert(supplyLines).values(body.lines.map((line) => ({ supplyId, ...line, ...productsById.get(line.productId)! })));
+      await tx.insert(supplyLines).values(body.lines.map((line) => ({
+        supplyId,
+        ...line,
+        ...productsById.get(line.productId)!,
+        ...(previousCosts.get(line.productId) ?? currentUnitCosts.get(line.productId)),
+      })));
       return updated;
     });
     return Response.json({ item });
   } catch (error) { return errorResponse(error); }
 }
 
+async function loadCurrentUnitCosts() {
+  const accounting = await getAccountingSnapshot();
+  return new Map(accounting.products.map((product) => [product.productId, {
+    purchaseUnitCostSnapshot: product.averagePurchaseCost,
+    landedUnitCostSnapshot: product.landedUnitCost,
+  }]));
+}
+
 async function loadProductSnapshots(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], lines: { productId: string }[]) {
   const productIds = lines.map((line) => line.productId);
-  const rows = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId })
+  const rows = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
     .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(inArray(products.id, productIds));
-  if (rows.length !== productIds.length) throw new Error("Один из выбранных товаров не найден.");
+  if (rows.length !== productIds.length || rows.some((product) => product.archived)) {
+    throw new Error("Выберите товары из текущего каталога.");
+  }
   return new Map(rows.map((product) => [product.id, {
     productSkuSnapshot: product.offerId || product.sku,
     productTitleSnapshot: product.title,

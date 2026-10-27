@@ -24,11 +24,17 @@ export async function GET(request: Request) {
       db.select().from(purchaseReceiptLines),
       db.select().from(products),
     ]);
+    const activeProductIds = new Set(catalog.filter((product) => !product.archived).map((product) => product.id));
+    const visiblePurchases = purchaseRows.filter((purchase) => activeProductIds.has(purchase.productId));
+    const visiblePurchaseIds = new Set(visiblePurchases.map((purchase) => purchase.id));
+    const visibleReceipts = receipts.filter((receipt) => visiblePurchaseIds.has(receipt.purchaseId));
+    const visibleReceiptIds = new Set(visibleReceipts.map((receipt) => receipt.id));
+    const visibleReceiptLines = receiptLines.filter((line) => visibleReceiptIds.has(line.receiptId) && activeProductIds.has(line.productId));
     const productById = new Map(catalog.map((product) => [product.id, product]));
     const linesByReceiptId = new Map<string, typeof receiptLines>();
-    for (const line of receiptLines) linesByReceiptId.set(line.receiptId, [...(linesByReceiptId.get(line.receiptId) ?? []), line]);
-    return { items: purchaseRows.map((purchase) => {
-      const purchaseReceiptsForRow = receipts.filter((receipt) => receipt.purchaseId === purchase.id);
+    for (const line of visibleReceiptLines) linesByReceiptId.set(line.receiptId, [...(linesByReceiptId.get(line.receiptId) ?? []), line]);
+    return { items: visiblePurchases.map((purchase) => {
+      const purchaseReceiptsForRow = visibleReceipts.filter((receipt) => receipt.purchaseId === purchase.id);
       const received = purchaseReceiptsForRow.reduce((sum, receipt) => sum.plus((linesByReceiptId.get(receipt.id) ?? []).reduce((lineSum, line) => lineSum.plus(line.quantity), new Decimal(0))), new Decimal(0));
       const ordered = new Decimal(purchase.orderedQuantity);
       const product = productById.get(purchase.productId);
@@ -55,9 +61,9 @@ export async function POST(request: Request) {
   try {
     assertLocalMutation(request);
     const body = await parseBody(request, purchaseSchema);
-    const [product] = await db.select({ sku: products.sku, title: products.title, offerId: productLinks.offerId })
+    const [product] = await db.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
       .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(eq(products.id, body.productId)).limit(1);
-    if (!product) throw new Error("Товар не найден.");
+    if (!product || product.archived) throw new Error("Выберите товар из текущего каталога.");
     const [item] = await db.insert(purchases).values({
       ...body,
       productSkuSnapshot: product.offerId || product.sku,
@@ -72,8 +78,25 @@ export async function PATCH(request: Request) {
     assertLocalMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id || !z.string().uuid().safeParse(id).success) throw new Error("Не указан корректный идентификатор закупки.");
-    const body = await parseBody(request, purchaseStatusSchema);
-    const [item] = await db.update(purchases).set({ status: body.status }).where(eq(purchases.id, id)).returning();
+    const body = await parseBody(request, z.union([purchaseSchema, purchaseStatusSchema]));
+    if ("status" in body) {
+      const [existing] = await db.select({ productArchived: products.archived }).from(purchases)
+        .innerJoin(products, eq(products.id, purchases.productId)).where(eq(purchases.id, id)).limit(1);
+      if (!existing) throw new Error("Закупка не найдена.");
+      if (existing.productArchived) throw new Error("Эта закупка связана с товаром вне текущего каталога.");
+      const [item] = await db.update(purchases).set({ status: body.status }).where(eq(purchases.id, id)).returning();
+      if (!item) throw new Error("Закупка не найдена.");
+      return Response.json({ item });
+    }
+
+    const [product] = await db.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
+      .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(eq(products.id, body.productId)).limit(1);
+    if (!product || product.archived) throw new Error("Выберите товар из текущего каталога.");
+    const [item] = await db.update(purchases).set({
+      ...body,
+      productSkuSnapshot: product.offerId || product.sku,
+      productTitleSnapshot: product.title,
+    }).where(eq(purchases.id, id)).returning();
     if (!item) throw new Error("Закупка не найдена.");
     return Response.json({ item });
   } catch (error) { return errorResponse(error); }

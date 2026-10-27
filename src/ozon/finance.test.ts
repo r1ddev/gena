@@ -127,8 +127,9 @@ describe("staleOzonAccrualKeys", () => {
 
 describe("financeAccrualPostingNumber", () => {
   it("keeps posting and item accruals linked to their shipment", () => {
-    expect(financeAccrualPostingNumber("POSTING", "post-1")).toBe("post-1");
-    expect(financeAccrualPostingNumber("ITEM", "post-1")).toBe("post-1");
+    const postingNumber = "0263707812-0001-7";
+    expect(financeAccrualPostingNumber("POSTING", postingNumber)).toBe(postingNumber);
+    expect(financeAccrualPostingNumber("ITEM", postingNumber)).toBe(postingNumber);
   });
 
   it("does not interpret account-level service IDs as shipments", () => {

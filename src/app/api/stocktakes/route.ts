@@ -21,15 +21,20 @@ export async function GET(request: Request) {
       db.select().from(stocktakeLines),
       db.select().from(products),
     ]);
+    const activeProductIds = new Set(catalog.filter((product) => !product.archived).map((product) => product.id));
     const productById = new Map(catalog.map((product) => [product.id, product]));
-    return { items: headers.map((header) => ({
+    return { items: headers.flatMap((header) => {
+      const visibleLines = lines.filter((line) => line.stocktakeId === header.id && activeProductIds.has(line.productId));
+      if (visibleLines.length === 0) return [];
+      return {
       ...header,
-      lines: lines.filter((line) => line.stocktakeId === header.id).map((line) => ({
+      lines: visibleLines.map((line) => ({
         ...line,
         sku: productById.get(line.productId)?.sku ?? line.productSkuSnapshot,
         title: productById.get(line.productId)?.title ?? (line.productTitleSnapshot || "Товар удалён"),
       })),
-    })) };
+      };
+    }) };
   });
 }
 
@@ -42,9 +47,11 @@ export async function POST(request: Request) {
     const snapshot = await getAccountingSnapshot(new Date(`${body.countedAt}T23:59:59.999Z`));
     const currentById = new Map(snapshot.products.map((product) => [product.productId, product]));
     const header = await db.transaction(async (tx) => {
-      const productRows = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId })
+      const productRows = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
         .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(inArray(products.id, [...ids]));
-      if (productRows.length !== ids.size) throw new Error("Один из выбранных товаров не найден.");
+      if (productRows.length !== ids.size || productRows.some((product) => product.archived)) {
+        throw new Error("Выберите товары из текущего каталога.");
+      }
       const productById = new Map(productRows.map((product) => [product.id, product]));
       const [created] = await tx.insert(stocktakes).values({ warehouse: body.warehouse, countedAt: body.countedAt, note: body.note })
         .onConflictDoNothing().returning();
@@ -71,6 +78,8 @@ export async function PATCH(request: Request) {
     const body = await parseBody(request, resolutionSchema);
     const line = (await db.select().from(stocktakeLines).where(eq(stocktakeLines.id, id)).limit(1))[0];
     if (!line) throw new Error("Запись не найдена.");
+    const [product] = await db.select({ id: products.id, sku: products.sku, archived: products.archived }).from(products).where(eq(products.id, line.productId)).limit(1);
+    if (!product || product.archived) throw new Error("Эта запись связана с товаром вне текущего каталога.");
     const header = (await db.select().from(stocktakes).where(eq(stocktakes.id, line.stocktakeId)).limit(1))[0];
     if (!header) throw new Error("Инвентаризация не найдена.");
     await db.transaction(async (tx) => {

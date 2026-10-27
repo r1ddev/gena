@@ -272,10 +272,12 @@ describe("calculateAccounting", () => {
     );
 
     expect(result.products[0].sellerStock).toBe("0.000");
-    expect(result.confirmedProfit).toBe("245.00");
-    expect(result.profitBreakdown.orderProfit).toBe("245.00");
-    expect(result.profitBreakdown.manualLossPurchaseCost).toBe("-50.00");
-    expect(result.profitBreakdown.manualLossSharedCosts).toBe("-5.00");
+    expect(result.confirmedProfit).toBe("240.00");
+    expect(result.profitBreakdown.orderProfit).toBe("240.00");
+    expect(result.profitBreakdown.soldPurchaseCost).toBe("-50.00");
+    expect(result.profitBreakdown.soldSharedCosts).toBe("-10.00");
+    expect(result.profitBreakdown.manualLossPurchaseCost).toBe("0.00");
+    expect(result.profitBreakdown.manualLossSharedCosts).toBe("0.00");
   });
 
   it("charges a written-off return for a cancelled order even though no sale cost was recognized", () => {

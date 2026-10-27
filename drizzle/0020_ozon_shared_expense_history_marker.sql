@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "ozon_shared_expense_history_start_date" date;
