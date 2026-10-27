@@ -3,7 +3,7 @@ import type { AccountingInput } from "./accounting";
 import { calculateAddedCostRateByPosting } from "./added-cost-history";
 
 describe("calculateAddedCostRateByPosting", () => {
-  it("keeps a past delivery in the history after the posting is later returned", () => {
+  it("clears the added-cost rate when the full sale is returned to the seller", () => {
     const input: AccountingInput = {
       products: [{ id: "bag", sku: "BAG-1", title: "Косметичка" }],
       purchases: [],
@@ -43,6 +43,7 @@ describe("calculateAddedCostRateByPosting", () => {
 
     const rates = calculateAddedCostRateByPosting(input, new Date("2025-12-07T00:00:00.000Z"));
 
+    expect(rates.has("returned-sale")).toBe(false);
     expect(rates.get("sale-after-return")).toBe("5.20000000");
   });
 
@@ -83,6 +84,38 @@ describe("calculateAddedCostRateByPosting", () => {
 
     expect(rates.has("cancelled")).toBe(false);
     expect(rates.get("sale")).toBe("5.00000000");
+  });
+
+  it("keeps the rate when only part of a multi-unit sale is returned", () => {
+    const input: AccountingInput = {
+      products: [{ id: "bag", sku: "BAG-1", title: "Косметичка" }],
+      purchases: [],
+      receipts: [{ productId: "bag", quantity: "2", unitCost: "100", receivedAt: "2025-12-01T00:00:00.000Z" }],
+      supplies: [],
+      expenses: [{ amount: "10", spentAt: "2025-12-01" }],
+      ozonSharedExpenses: [],
+      postings: [{ id: "partially-returned", status: "returned", deliveredAt: "2025-12-02T00:00:00.000Z", isMarketplaceBuyout: false }],
+      postingItems: [{ postingId: "partially-returned", productId: "bag", quantity: "2", price: "150" }],
+      financeAccruals: [],
+      returns: [{
+        externalId: "partial-return",
+        postingId: "partially-returned",
+        productId: "bag",
+        quantity: "1",
+        destination: "seller",
+        returnedAt: "2025-12-04T00:00:00.000Z",
+        receivedBySellerAt: "2025-12-05T00:00:00.000Z",
+        writtenOffAt: null,
+        availableAtOzon: null,
+      }],
+      manualWriteoffs: [],
+      ozonWriteoffs: [],
+      stockAdjustments: [],
+    };
+
+    const rates = calculateAddedCostRateByPosting(input, new Date("2025-12-07T00:00:00.000Z"));
+
+    expect(rates.get("partially-returned")).toBe("5.00000000");
   });
 
   it("restores inventory and its original added-cost allocation when Ozon receives a return", () => {

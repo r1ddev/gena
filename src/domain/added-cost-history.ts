@@ -64,6 +64,17 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
   for (const item of input.postingItems) {
     itemsByPosting.set(item.postingId, [...(itemsByPosting.get(item.postingId) ?? []), item]);
   }
+  const quantityByPostingAndProduct = new Map<string, Map<string, Decimal>>();
+  for (const [postingId, items] of itemsByPosting) {
+    for (const item of items) {
+      if (!item.productId || item.movementEnabled === false) continue;
+      const quantity = new Decimal(item.quantity);
+      if (!quantity.isFinite() || quantity.lte(0)) continue;
+      const quantities = quantityByPostingAndProduct.get(postingId) ?? new Map<string, Decimal>();
+      quantities.set(item.productId, (quantities.get(item.productId) ?? new Decimal(0)).plus(quantity));
+      quantityByPostingAndProduct.set(postingId, quantities);
+    }
+  }
   for (const posting of input.postings) {
     const items = (itemsByPosting.get(posting.id) ?? []).filter((item) => item.productId && item.movementEnabled !== false);
     const buyoutItems = items.filter((item) => item.isMarketplaceBuyout || posting.isMarketplaceBuyout);
@@ -112,6 +123,7 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
   }
 
   const returnWriteoffs: { at: string; productId: string; quantity: string | number; key: string }[] = [];
+  const sellerReturnedByPostingAndProduct = new Map<string, Decimal>();
   for (const returned of input.returns) {
     const postingId = returned.postingId;
     const productId = returned.productId;
@@ -126,16 +138,30 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
     addEvent(returnedAt, 2, `return:${returned.externalId ?? events.length}`, () => {
       const allocationKey = `${postingId}\u0000${productId}`;
       const allocation = allocations.get(allocationKey);
-      if (!allocation || !allocation.quantity.gt(0)) return;
-      const restoredQuantity = Decimal.min(quantity, allocation.quantity);
-      const current = stock(productId);
-      const restoredPurchaseValue = allocation.unitCost.times(restoredQuantity);
-      inventory.set(productId, {
-        quantity: current.quantity.plus(restoredQuantity),
-        purchaseValue: current.purchaseValue.plus(restoredPurchaseValue),
-      });
-      unallocatedSharedCosts = unallocatedSharedCosts.plus(restoredPurchaseValue.times(allocation.rate).div(100));
-      allocations.set(allocationKey, { ...allocation, quantity: allocation.quantity.minus(restoredQuantity) });
+      if (allocation?.quantity.gt(0)) {
+        const restoredQuantity = Decimal.min(quantity, allocation.quantity);
+        const current = stock(productId);
+        const restoredPurchaseValue = allocation.unitCost.times(restoredQuantity);
+        inventory.set(productId, {
+          quantity: current.quantity.plus(restoredQuantity),
+          purchaseValue: current.purchaseValue.plus(restoredPurchaseValue),
+        });
+        unallocatedSharedCosts = unallocatedSharedCosts.plus(restoredPurchaseValue.times(allocation.rate).div(100));
+        allocations.set(allocationKey, { ...allocation, quantity: allocation.quantity.minus(restoredQuantity) });
+      }
+
+      if (returned.destination === "seller") {
+        const postedQuantities = quantityByPostingAndProduct.get(postingId);
+        if (!postedQuantities) return;
+        const returnKey = `${postingId}\u0000${productId}`;
+        const previousReturnQuantity = sellerReturnedByPostingAndProduct.get(returnKey) ?? new Decimal(0);
+        const postedQuantity = postedQuantities.get(productId) ?? new Decimal(0);
+        sellerReturnedByPostingAndProduct.set(returnKey, Decimal.min(postedQuantity, previousReturnQuantity.plus(quantity)));
+        const wholeCatalogSaleReturned = [...postedQuantities].every(([postedProductId, postedProductQuantity]) =>
+          (sellerReturnedByPostingAndProduct.get(`${postingId}\u0000${postedProductId}`) ?? new Decimal(0)).gte(postedProductQuantity),
+        );
+        if (wholeCatalogSaleReturned) rates.delete(postingId);
+      }
     });
     if (returned.writtenOffAt) {
       returnWriteoffs.push({ at: returned.writtenOffAt, productId, quantity: returned.quantity, key: `return-writeoff:${returned.externalId ?? events.length}` });
