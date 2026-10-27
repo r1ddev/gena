@@ -20,6 +20,11 @@ function timestamp(value: string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function isCancelledStatus(status: string) {
+  const normalized = status.trim().toLocaleLowerCase("ru-RU").replace(/[\s-]+/g, "_");
+  return /cancel|отмен|declin|reject/i.test(normalized);
+}
+
 /** Replays shared costs and catalog stock chronologically; every returned value is percentage points. */
 export function calculateAddedCostRateByPosting(input: AccountingInput, now = new Date()) {
   const events: HistoryEvent[] = [];
@@ -76,6 +81,7 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
     }
   }
   for (const posting of input.postings) {
+    if (isCancelledStatus(posting.status)) continue;
     const items = (itemsByPosting.get(posting.id) ?? []).filter((item) => item.productId && item.movementEnabled !== false);
     const buyoutItems = items.filter((item) => item.isMarketplaceBuyout || posting.isMarketplaceBuyout);
     const hasDeliveryEvent = Boolean(posting.deliveredAt);

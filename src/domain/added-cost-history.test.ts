@@ -57,10 +57,12 @@ describe("calculateAddedCostRateByPosting", () => {
       ozonSharedExpenses: [],
       postings: [
         { id: "cancelled", status: "cancelled", deliveredAt: null, isMarketplaceBuyout: false },
+        { id: "cancelled-with-delivery-date", status: "cancelled", deliveredAt: "2025-12-03T00:00:00.000Z", isMarketplaceBuyout: false },
         { id: "sale", status: "delivered", deliveredAt: "2025-12-06T00:00:00.000Z", isMarketplaceBuyout: false },
       ],
       postingItems: [
         { postingId: "cancelled", productId: "bag", quantity: "1", price: "150" },
+        { postingId: "cancelled-with-delivery-date", productId: "bag", quantity: "1", price: "150" },
         { postingId: "sale", productId: "bag", quantity: "1", price: "150" },
       ],
       financeAccruals: [],
@@ -83,6 +85,7 @@ describe("calculateAddedCostRateByPosting", () => {
     const rates = calculateAddedCostRateByPosting(input, new Date("2025-12-07T00:00:00.000Z"));
 
     expect(rates.has("cancelled")).toBe(false);
+    expect(rates.has("cancelled-with-delivery-date")).toBe(false);
     expect(rates.get("sale")).toBe("5.00000000");
   });
 
