@@ -37,6 +37,7 @@ function returnStatusLabel(row: JsonRecord) {
 const returnColumns: TableColumn<JsonRecord>[] = [
   { key: "externalId", label: "Возврат", kind: "identifier", value: (row) => row.externalId ?? row.postingNumber ?? row.id },
   { key: "postingNumber", label: "Отправление", kind: "identifier", value: (row) => row.postingNumber ?? row.orderNumber ?? "" },
+  { key: "returnBarcode", label: "Штрихкод", kind: "identifier" },
   { key: "product", label: "Товар", value: (row) => [row.title ?? row.productName, row.offerId, row.sku, row.ozonSku].filter(Boolean).join(" ") },
   { key: "quantity", label: "Количество", kind: "quantity" },
   { key: "destination", label: "Куда", value: returnLabel },
@@ -338,6 +339,7 @@ export function ReturnsWorkspace() {
         const writtenOff = Boolean(row.writtenOffAt);
         const sellerDone = destination === "seller" && Boolean(row.receivedBySellerAt) && !writtenOff;
         const postingNumber = String(row.postingNumber ?? "");
+        const returnBarcode = String(row.returnBarcode ?? "");
         const postingMatched = row.postingMatched === true;
         const profitNeedsReconciliation = row.profitReconciliationNeeded === true || (!postingMatched && sellerDone);
         const returnId = String(row.externalId ?? "");
@@ -355,6 +357,7 @@ export function ReturnsWorkspace() {
         }}>
           <td className="table-primary"><OzonReturnLink returnId={returnId}>{returnId || String(row.postingNumber ?? id)}</OzonReturnLink></td>
           <td>{postingNumber ? <OzonOrderLink postingNumber={postingNumber} /> : "—"}</td>
+          <td>{returnBarcode || "—"}</td>
           <td>
             <span className="table-primary">{String(row.title ?? row.productName ?? "—")}</span>
             {sellerArticle && <span className="table-secondary">Артикул: <ProductArticle identifier={sellerArticle} productId={productId} identifierLabel="Артикул" fallback={row} /></span>}

@@ -35,6 +35,12 @@ export async function GET(request: Request) {
       row.raw.product && typeof row.raw.product === "object" && !Array.isArray(row.raw.product)
         ? row.raw.product as Record<string, unknown>
         : {};
+    const returnBarcode = (row: (typeof rows)[number]) => {
+      const logistic = row.raw.logistic && typeof row.raw.logistic === "object" && !Array.isArray(row.raw.logistic)
+        ? row.raw.logistic as Record<string, unknown>
+        : {};
+      return typeof logistic.barcode === "string" ? logistic.barcode : "";
+    };
     const candidateReturns = rows.filter((row) => row.destination !== "ozon");
     const candidatePostingNumbers = [...new Set(candidateReturns.map((row) => row.postingNumber).filter((value): value is string => Boolean(value)))];
     const candidatePostings = candidatePostingNumbers.length
@@ -173,6 +179,7 @@ export async function GET(request: Request) {
         title: product?.title || ozonTitle || "Товар не сопоставлен",
         sku: product?.sku ?? sellerArticle,
         orderNumber: row.postingNumber ?? "",
+        returnBarcode: returnBarcode(row),
         returnedAt: row.returnedAt?.toISOString() ?? null,
         linkedPosting: posting ? {
           externalId: posting.externalId,
