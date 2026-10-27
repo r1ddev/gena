@@ -26,13 +26,21 @@ function returnLabel(row: JsonRecord) {
   return String(target.name ?? target.address ?? "—");
 }
 
+function returnStatusLabel(row: JsonRecord) {
+  if (row.writtenOffAt) return "Товара нет, списан";
+  if (row.destination === "seller" && row.receivedBySellerAt) return "Получен";
+  const ozonStatus = ozonReturnStatusLabel(row.status, row.raw);
+  if (row.destination === "seller" && ozonStatus === "Получен") return "Подтвердите получение";
+  return ozonStatus;
+}
+
 const returnColumns: TableColumn<JsonRecord>[] = [
   { key: "externalId", label: "Возврат", kind: "identifier", value: (row) => row.externalId ?? row.postingNumber ?? row.id },
   { key: "postingNumber", label: "Отправление", kind: "identifier", value: (row) => row.postingNumber ?? row.orderNumber ?? "" },
   { key: "product", label: "Товар", value: (row) => [row.title ?? row.productName, row.offerId, row.sku, row.ozonSku].filter(Boolean).join(" ") },
   { key: "quantity", label: "Количество", kind: "quantity" },
   { key: "destination", label: "Куда", value: returnLabel },
-  { key: "status", label: "Статус", value: (row) => [row.writtenOffAt ? "Товара нет, списан" : row.destination === "seller" && row.receivedBySellerAt ? "Получен" : ozonReturnStatusLabel(row.status, row.raw), row.profitReconciliationNeeded ? "Прибыль требует сверки" : ""].filter(Boolean).join(" ") },
+  { key: "status", label: "Статус", value: (row) => [returnStatusLabel(row), row.profitReconciliationNeeded ? "Прибыль требует сверки" : ""].filter(Boolean).join(" ") },
   { key: "returnedAt", label: "Дата", kind: "date", value: (row) => row.returnedAt ?? row.updatedAt },
   { key: "action", label: "Действие", sortable: false, filterable: false },
 ];
@@ -354,7 +362,7 @@ export function ReturnsWorkspace() {
           </td>
           <td className="number">{String(row.quantity ?? "—")}</td>
           <td>{returnLabel(row)}</td>
-          <td><span className={`badge ${writtenOff ? "orange" : sellerDone ? "green" : "orange"}`}>{writtenOff ? "Товара нет, списан" : sellerDone ? "Получен" : ozonReturnStatusLabel(row.status, row.raw)}</span>{profitNeedsReconciliation && <span className="badge orange" style={{ marginTop: 5 }}>Прибыль требует сверки</span>}</td>
+          <td><span className={`badge ${writtenOff ? "orange" : sellerDone ? "green" : "orange"}`}>{returnStatusLabel(row)}</span>{profitNeedsReconciliation && <span className="badge orange" style={{ marginTop: 5 }}>Прибыль требует сверки</span>}</td>
           <td>{String(row.returnedAt ?? row.updatedAt ?? "—").slice(0, 10)}</td>
           <td><div className="row-actions">{!sellerDone && !writtenOff && <button className="button secondary small" disabled={busyId === id} onClick={() => void markReceived(row)}>Получил</button>}{!writtenOff && <button className="button danger small" disabled={busyId === id || !productId} title={!productId ? "Сначала сопоставьте товар с каталогом" : undefined} onClick={() => setPendingWriteoff(row)}>Списать</button>}</div></td>
         </tr>;

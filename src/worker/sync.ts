@@ -333,7 +333,11 @@ async function importReturns(credentials: OzonCredentials, from: Date, to: Date,
           if (timeline.finalStatus !== target) return null;
           return apiValue ?? oldValue;
         };
-        const receivedBySellerAt = resolveMilestone("receivedBySellerAt", "seller", timeline.receivedBySellerAt);
+        // Receipt into the seller's stock is a manual confirmation. Ozon's
+        // status remains visible in `status`/`raw`, but must not close the task.
+        const receivedBySellerAt = manualFields.has("receivedBySellerAt")
+          ? old?.receivedBySellerAt ?? null
+          : null;
         const availableAtOzon = resolveMilestone("availableAtOzon", "ozon", timeline.availableAtOzon);
         const writtenOffAt = resolveMilestone("writtenOffAt", "writeoff", timeline.writtenOffAt);
         await db.insert(returns).values({
