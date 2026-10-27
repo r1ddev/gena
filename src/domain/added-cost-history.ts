@@ -129,7 +129,7 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
   }
 
   const returnWriteoffs: { at: string; productId: string; quantity: string | number; key: string }[] = [];
-  const sellerReturnedByPostingAndProduct = new Map<string, Decimal>();
+  const restockedByPostingAndProduct = new Map<string, Decimal>();
   for (const returned of input.returns) {
     const postingId = returned.postingId;
     const productId = returned.productId;
@@ -156,15 +156,15 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
         allocations.set(allocationKey, { ...allocation, quantity: allocation.quantity.minus(restoredQuantity) });
       }
 
-      if (returned.destination === "seller") {
+      if (returned.destination === "seller" || returned.destination === "ozon") {
         const postedQuantities = quantityByPostingAndProduct.get(postingId);
         if (!postedQuantities) return;
         const returnKey = `${postingId}\u0000${productId}`;
-        const previousReturnQuantity = sellerReturnedByPostingAndProduct.get(returnKey) ?? new Decimal(0);
+        const previousReturnQuantity = restockedByPostingAndProduct.get(returnKey) ?? new Decimal(0);
         const postedQuantity = postedQuantities.get(productId) ?? new Decimal(0);
-        sellerReturnedByPostingAndProduct.set(returnKey, Decimal.min(postedQuantity, previousReturnQuantity.plus(quantity)));
+        restockedByPostingAndProduct.set(returnKey, Decimal.min(postedQuantity, previousReturnQuantity.plus(quantity)));
         const wholeCatalogSaleReturned = [...postedQuantities].every(([postedProductId, postedProductQuantity]) =>
-          (sellerReturnedByPostingAndProduct.get(`${postingId}\u0000${postedProductId}`) ?? new Decimal(0)).gte(postedProductQuantity),
+          (restockedByPostingAndProduct.get(`${postingId}\u0000${postedProductId}`) ?? new Decimal(0)).gte(postedProductQuantity),
         );
         if (wholeCatalogSaleReturned) rates.delete(postingId);
       }

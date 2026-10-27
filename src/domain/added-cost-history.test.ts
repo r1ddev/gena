@@ -121,7 +121,7 @@ describe("calculateAddedCostRateByPosting", () => {
     expect(rates.get("partially-returned")).toBe("5.00000000");
   });
 
-  it("restores inventory and its original added-cost allocation when Ozon receives a return", () => {
+  it("clears the returned sale rate and restores added cost when Ozon receives the item", () => {
     const input: AccountingInput = {
       products: [{ id: "bag", sku: "BAG-1", title: "Косметичка" }],
       purchases: [],
@@ -156,7 +156,7 @@ describe("calculateAddedCostRateByPosting", () => {
 
     const rates = calculateAddedCostRateByPosting(input, new Date("2025-12-07T00:00:00.000Z"));
 
-    expect(rates.get("sale")).toBe("5.00000000");
+    expect(rates.has("sale")).toBe(false);
     expect(rates.get("sale-after-return")).toBe("10.00000000");
   });
 });
