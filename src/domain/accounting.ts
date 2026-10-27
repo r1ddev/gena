@@ -290,19 +290,20 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
   const returnedQuantityByPostingProduct = new Map<string, Decimal>();
   const profitReconciliationIssues: AccountingResult["profitReconciliationIssues"] = [];
   for (const returned of input.returns) {
+    const restockWarehouse = returned.destination === "seller" || returned.destination === "ozon" ? returned.destination : null;
+    const restockedAt = returned.destination === "seller" ? returned.receivedBySellerAt
+      : returned.destination === "ozon" ? returned.availableAtOzon : null;
     if (returned.writtenOffAt && isEffectiveAt(returned.writtenOffAt, now)) {
-      const receivedAt = returned.receivedBySellerAt;
-      if (returned.productId && receivedAt && isEffectiveAt(receivedAt, now) && Date.parse(receivedAt) <= Date.parse(returned.writtenOffAt)) {
-        stockEvent(returned.productId, "seller", receivedAt, d(returned.quantity));
-        stockEvent(returned.productId, "seller", returned.writtenOffAt, d(returned.quantity).negated());
+      if (returned.productId && restockWarehouse && restockedAt && isEffectiveAt(restockedAt, now) && Date.parse(restockedAt) <= Date.parse(returned.writtenOffAt)) {
+        stockEvent(returned.productId, restockWarehouse, restockedAt, d(returned.quantity));
+        stockEvent(returned.productId, restockWarehouse, returned.writtenOffAt, d(returned.quantity).negated());
       }
       continue;
     }
-    if (!returned.productId || returned.destination !== "seller") continue;
-    const restockedAt = returned.receivedBySellerAt;
+    if (!returned.productId || !restockWarehouse) continue;
     if (!restockedAt || !isEffectiveAt(restockedAt, now)) continue;
     if (!returned.postingId) {
-      stockEvent(returned.productId, returned.destination, restockedAt, d(returned.quantity));
+      stockEvent(returned.productId, restockWarehouse, restockedAt, d(returned.quantity));
       const product = productById.get(returned.productId);
       profitReconciliationIssues.push({
         externalId: returned.externalId ?? "",
@@ -313,7 +314,7 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
     }
     const returnPosting = postingById.get(returned.postingId);
     if (returnPosting && isCancelled(returnPosting)) {
-      stockEvent(returned.productId, "seller", restockedAt, d(returned.quantity));
+      if (restockWarehouse === "seller") stockEvent(returned.productId, "seller", restockedAt, d(returned.quantity));
       continue;
     }
     const key = `${returned.postingId}:${returned.productId}`;
@@ -329,7 +330,7 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
       });
     }
     if (!acceptedQuantity.gt(0)) continue;
-    stockEvent(returned.productId, "seller", restockedAt, acceptedQuantity);
+    stockEvent(returned.productId, restockWarehouse, restockedAt, acceptedQuantity);
     returnedQuantityByPostingProduct.set(key, alreadyRestocked.plus(acceptedQuantity));
   }
 

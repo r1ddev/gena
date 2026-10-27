@@ -22,6 +22,7 @@ import { financeAccrualPostingNumber, financeAccrualRelatedSkus, groupFinanceIte
 import { isOzonSupplyUnitNumber, loadOzonSupplySkus } from "@/ozon/supply-attribution";
 import { observeBuyerHandoffAt } from "@/ozon/postings";
 import { chooseReturnPostingNumber } from "@/ozon/returns";
+import { resolveOzonReturnTimeline } from "@/ozon/return-status";
 import { parseOzonCompensationXlsx } from "@/ozon/compensation";
 import { resolveOzonSyncRange, splitUtcDateRange } from "@/ozon/sync-range";
 import { chooseExternalProductRecord, dispositionAfterProductLink, exactProductLinkForOffer, externalProductKey, resolveExternalProductLink } from "@/ozon/external-product";
@@ -323,6 +324,18 @@ async function importReturns(credentials: OzonCredentials, from: Date, to: Date,
         );
         const returnedAtValue = item.logistic?.return_date;
         const status = asString(item.visual?.status?.display_name, asString(item.visual?.status?.sys_name, "unknown"));
+        const timeline = resolveOzonReturnTimeline(item);
+        const manualFields = new Set(old?.manualReconciliationFields ?? []);
+        const resolveMilestone = (field: "receivedBySellerAt" | "availableAtOzon" | "writtenOffAt", target: "seller" | "ozon" | "writeoff", apiValue: Date | null) => {
+          const oldValue = old?.[field] ?? null;
+          if (manualFields.has(field)) return oldValue ?? apiValue;
+          if (!timeline.finalStatus) return oldValue;
+          if (timeline.finalStatus !== target) return null;
+          return apiValue ?? oldValue;
+        };
+        const receivedBySellerAt = resolveMilestone("receivedBySellerAt", "seller", timeline.receivedBySellerAt);
+        const availableAtOzon = resolveMilestone("availableAtOzon", "ozon", timeline.availableAtOzon);
+        const writtenOffAt = resolveMilestone("writtenOffAt", "writeoff", timeline.writtenOffAt);
         await db.insert(returns).values({
           externalId: id,
           postingNumber,
@@ -334,9 +347,9 @@ async function importReturns(credentials: OzonCredentials, from: Date, to: Date,
           productId: mapped.productId,
           status,
           returnedAt: typeof returnedAtValue === "string" ? new Date(returnedAtValue) : old?.returnedAt ?? null,
-          receivedBySellerAt: old?.receivedBySellerAt ?? null,
-          writtenOffAt: old?.writtenOffAt ?? null,
-          availableAtOzon: old?.availableAtOzon ?? null,
+          receivedBySellerAt,
+          writtenOffAt,
+          availableAtOzon,
           raw: item as JsonRecord,
           updatedAt: new Date(),
         }).onConflictDoUpdate({
@@ -351,8 +364,9 @@ async function importReturns(credentials: OzonCredentials, from: Date, to: Date,
             destination: old?.manualReconciliationFields.includes("destination") ? old.destination : old?.destination === "unknown" ? destination : old?.destination ?? destination,
             status,
             returnedAt: typeof returnedAtValue === "string" ? new Date(returnedAtValue) : old?.returnedAt ?? null,
-            receivedBySellerAt: old?.receivedBySellerAt ?? null,
-            writtenOffAt: old?.writtenOffAt ?? null,
+            receivedBySellerAt,
+            writtenOffAt,
+            availableAtOzon,
             raw: item as JsonRecord,
             updatedAt: new Date(),
           },

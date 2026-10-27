@@ -7,7 +7,16 @@ type ReturnRow = {
   status?: string | null;
   raw?: unknown;
   receivedBySellerAt: Date | null;
+  availableAtOzon?: Date | null;
+  writtenOffAt?: Date | null;
 };
+
+export function hasRestockedReturn(row: Pick<ReturnRow, "destination" | "receivedBySellerAt" | "availableAtOzon" | "writtenOffAt" | "status" | "raw">) {
+  if (row.writtenOffAt || isOzonWriteOffStatus(row.status, row.raw)) return false;
+  if (row.destination === "seller") return Boolean(row.receivedBySellerAt);
+  if (row.destination === "ozon") return Boolean(row.availableAtOzon);
+  return false;
+}
 
 export function getOrderReturnStatesByPosting(
   postings: Posting[],
@@ -49,6 +58,8 @@ const postingStatusLabels: Record<string, string> = {
 };
 
 export function currentOrderStatus(postingStatus: string, returnState: string | null | undefined) {
+  const normalizedStatus = postingStatus.trim().toLocaleLowerCase("ru-RU").replace(/[\s-]+/g, "_");
+  if (/cancel|отмен|declin|reject/i.test(normalizedStatus)) return postingStatusLabels[normalizedStatus] ?? "Отменён";
   if (!returnState) return postingStatusLabels[postingStatus.toLowerCase()] ?? postingStatus;
 
   const states = returnState.split(";").map((state) => state.trim()).filter(Boolean);

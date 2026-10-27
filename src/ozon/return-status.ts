@@ -15,6 +15,32 @@ function record(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
 
+function parsedDate(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+export function resolveOzonReturnTimeline(raw: unknown) {
+  const value = record(raw);
+  const visual = record(value.visual);
+  const visualStatus = record(visual.status);
+  const systemName = typeof visualStatus.sys_name === "string" ? visualStatus.sys_name.toLowerCase() : "";
+  const changedAt = parsedDate(visual.change_moment) ?? parsedDate(record(value.logistic).final_moment);
+  const finalStatus = systemName === "receivedbyseller"
+    ? "seller"
+    : systemName === "returnedtoozon"
+      ? "ozon"
+      : systemName === "writeoff" ? "writeoff" : null;
+
+  return {
+    finalStatus,
+    receivedBySellerAt: finalStatus === "seller" ? changedAt : null,
+    availableAtOzon: finalStatus === "ozon" ? changedAt : null,
+    writtenOffAt: finalStatus === "writeoff" ? changedAt : null,
+  } as const;
+}
+
 export function isOzonWriteOffStatus(status: unknown, raw?: unknown) {
   const visualStatus = record(record(record(raw).visual).status);
   const systemName = typeof visualStatus.sys_name === "string" ? visualStatus.sys_name : "";
@@ -31,5 +57,6 @@ export function ozonReturnStatusLabel(status: unknown, raw?: unknown) {
   const code = systemName || value;
   if (fallbackLabels[code]) return fallbackLabels[code];
   if (value && Object.values(fallbackLabels).includes(value)) return value;
+  if (!systemName && value && value.toLowerCase() !== "unknown") return value;
   return code && code !== "unknown" ? "Статус Ozon" : "Статус не передан Ozon";
 }

@@ -20,11 +20,6 @@ function timestamp(value: string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function deliveredStatus(status: string) {
-  const normalized = status.trim().toLocaleLowerCase("ru-RU").replace(/[\s-]+/g, "_");
-  return normalized === "delivered" || /^доставлен[аоы]?$/.test(normalized);
-}
-
 /** Replays shared costs and catalog stock chronologically; every returned value is percentage points. */
 export function calculateAddedCostRateByPosting(input: AccountingInput, now = new Date()) {
   const events: HistoryEvent[] = [];
@@ -72,12 +67,12 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
   for (const posting of input.postings) {
     const items = (itemsByPosting.get(posting.id) ?? []).filter((item) => item.productId && item.movementEnabled !== false);
     const buyoutItems = items.filter((item) => item.isMarketplaceBuyout || posting.isMarketplaceBuyout);
-    const isDelivered = deliveredStatus(posting.status) && Boolean(posting.deliveredAt);
-    if (!isDelivered && !buyoutItems.length) continue;
+    const hasDeliveryEvent = Boolean(posting.deliveredAt);
+    if (!hasDeliveryEvent && !buyoutItems.length) continue;
     const buyoutTimes = buyoutItems
       .map((item) => timestamp(item.marketplaceBuyoutAt ?? posting.marketplaceBuyoutAt))
       .filter((value): value is number => value !== null);
-    const saleAt = isDelivered
+    const saleAt = hasDeliveryEvent
       ? posting.deliveredAt
       : buyoutTimes.length ? new Date(Math.min(...buyoutTimes)).toISOString() : null;
     if (!saleAt) continue;
@@ -116,15 +111,18 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
     });
   }
 
+  const returnWriteoffs: { at: string; productId: string; quantity: string | number; key: string }[] = [];
   for (const returned of input.returns) {
     const postingId = returned.postingId;
     const productId = returned.productId;
-    if (!postingId || !productId || returned.writtenOffAt) continue;
+    if (!postingId || !productId) continue;
     const returnedAt = returned.destination === "seller"
       ? returned.receivedBySellerAt
       : returned.destination === "ozon" ? returned.availableAtOzon : null;
     const quantity = new Decimal(returned.quantity);
-    if (!quantity.isFinite() || quantity.lte(0)) continue;
+    const returnTime = timestamp(returnedAt);
+    const writeoffTime = timestamp(returned.writtenOffAt);
+    if (!quantity.isFinite() || quantity.lte(0) || returnTime === null || (writeoffTime !== null && returnTime > writeoffTime)) continue;
     addEvent(returnedAt, 2, `return:${returned.externalId ?? events.length}`, () => {
       const allocationKey = `${postingId}\u0000${productId}`;
       const allocation = allocations.get(allocationKey);
@@ -139,6 +137,9 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
       unallocatedSharedCosts = unallocatedSharedCosts.plus(restoredPurchaseValue.times(allocation.rate).div(100));
       allocations.set(allocationKey, { ...allocation, quantity: allocation.quantity.minus(restoredQuantity) });
     });
+    if (returned.writtenOffAt) {
+      returnWriteoffs.push({ at: returned.writtenOffAt, productId, quantity: returned.quantity, key: `return-writeoff:${returned.externalId ?? events.length}` });
+    }
   }
 
   const addWriteoff = (at: string | null | undefined, productId: string | null | undefined, rawQuantity: string | number, key: string) => {
@@ -164,6 +165,7 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
   };
   for (const writeoff of input.manualWriteoffs) addWriteoff(writeoff.writtenOffAt, writeoff.productId, writeoff.quantity, `manual-writeoff:${events.length}`);
   for (const writeoff of input.ozonWriteoffs) addWriteoff(writeoff.occurredAt, writeoff.productId, writeoff.quantity, `ozon-writeoff:${events.length}`);
+  for (const writeoff of returnWriteoffs) addWriteoff(writeoff.at, writeoff.productId, writeoff.quantity, writeoff.key);
 
   events.sort((left, right) => left.at - right.at || left.priority - right.priority || left.key.localeCompare(right.key));
   for (const event of events) event.apply();

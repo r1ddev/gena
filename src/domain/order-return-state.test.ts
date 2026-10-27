@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getOrderReturnStatesByPosting } from "./order-return-state";
+import { currentOrderStatus, getOrderReturnStatesByPosting, hasRestockedReturn } from "./order-return-state";
 
 describe("getOrderReturnStatesByPosting", () => {
   const postings = [{ id: "posting-1", externalId: "posting-number-1" }];
@@ -32,5 +32,28 @@ describe("getOrderReturnStatesByPosting", () => {
     }]);
 
     expect(states.get("posting-number-1")).toBe("Возврат на Ozon · Не выкуплен");
+  });
+});
+
+describe("hasRestockedReturn", () => {
+  it("accepts a return only after it reaches the seller or Ozon warehouse", () => {
+    expect(hasRestockedReturn({ destination: "seller", receivedBySellerAt: new Date(), availableAtOzon: null })).toBe(true);
+    expect(hasRestockedReturn({ destination: "ozon", receivedBySellerAt: null, availableAtOzon: new Date() })).toBe(true);
+    expect(hasRestockedReturn({ destination: "seller", receivedBySellerAt: null, availableAtOzon: null })).toBe(false);
+  });
+
+  it("does not count a written-off return as inventory", () => {
+    expect(hasRestockedReturn({
+      destination: "seller",
+      receivedBySellerAt: new Date(),
+      availableAtOzon: null,
+      writtenOffAt: new Date(),
+    })).toBe(false);
+  });
+});
+
+describe("currentOrderStatus", () => {
+  it("keeps a refused, undelivered shipment cancelled even after its package returns to the seller", () => {
+    expect(currentOrderStatus("cancelled", "Возврат получен мной")).toBe("Отменён");
   });
 });

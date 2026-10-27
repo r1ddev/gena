@@ -353,7 +353,7 @@ describe("calculateAccounting", () => {
     expect(result.products[0].ozonStock).toBe("10.000");
   });
 
-  it("does not move stock again when a delivered order is returned to Ozon", () => {
+  it("restores a delivered product to Ozon stock when the return reaches its warehouse", () => {
     const result = calculateAccounting(
       base({
         receipts: [{ productId: "p1", quantity: "1", unitCost: "50" }],
@@ -366,7 +366,7 @@ describe("calculateAccounting", () => {
     );
 
     expect(result.products[0].sellerStock).toBe("0.000");
-    expect(result.products[0].ozonStock).toBe("0.000");
+    expect(result.products[0].ozonStock).toBe("1.000");
   });
 
   it("does not restore more units than were removed by the linked posting", () => {

@@ -25,7 +25,7 @@ import {
 import { calculateAccounting, hasAccountablePostingItems, type AccountingInput } from "./accounting";
 import { calculateAddedCostRateByPosting } from "./added-cost-history";
 import { calculateFinalPostingProfits, isFinalPostingStatus } from "./order-profit";
-import { currentOrderStatus, getOrderReturnStatesByPosting } from "./order-return-state";
+import { currentOrderStatus, getOrderReturnStatesByPosting, hasRestockedReturn } from "./order-return-state";
 import { buildFinanceOrderSkuPostingMap, buildFinancePostingProductIdentifiers, financeAccrualRelatedOfferIds, financeAccrualRelatedSkus, financePostingSaleSkus, isOzonBuyerOrderAccrual, isOzonSharedExpense, isOzonWriteoffCompensation, ozonExpenseLabel, resolveFinanceAccrualPostingNumber } from "@/ozon/finance";
 import { isOzonWriteOffStatus } from "@/ozon/return-status";
 import { buildCatalogProductWhitelist, isCatalogProduct, isFinanceRowOutsideCatalog, resolveCatalogProductId } from "@/ozon/catalog-whitelist";
@@ -292,7 +292,7 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
       quantity: item.quantity,
       movementEnabled: item.movementEnabled,
     })),
-    returns: visibleReturnRows.flatMap((returned) => returned.postingNumber && returned.productId && returned.destination === "seller" && returned.receivedBySellerAt && !returned.writtenOffAt && !isOzonWriteOffStatus(returned.status, returned.raw)
+    returns: visibleReturnRows.flatMap((returned) => returned.postingNumber && returned.productId && hasRestockedReturn(returned)
       ? [{ postingNumber: returned.postingNumber, productId: returned.productId, quantity: returned.quantity }]
       : []),
     writeoffs: visibleReturnRows.flatMap((returned) => returned.postingNumber && returned.productId && returned.writtenOffAt && !isOzonWriteOffStatus(returned.status, returned.raw)

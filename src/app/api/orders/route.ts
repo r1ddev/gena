@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { appSettings, externalItems, financeAccruals, postingItems, postings, productLinks, products, returns, syncJobs } from "@/db/schema";
 import { getAccountingSnapshot, persistAddedCostRateSnapshots } from "@/domain/accounting-repository";
 import { calculateFinalPostingProfits } from "@/domain/order-profit";
-import { currentOrderStatus, getOrderReturnStatesByPosting } from "@/domain/order-return-state";
+import { currentOrderStatus, getOrderReturnStatesByPosting, hasRestockedReturn } from "@/domain/order-return-state";
 import { buildFinanceOrderSkuPostingMap, financePostingSaleSkus, financeReturnLogisticsCents, resolveFinanceAccrualPostingNumber } from "@/ozon/finance";
 import { isOzonWriteOffStatus } from "@/ozon/return-status";
 import { buildCatalogProductWhitelist, isFinanceRowOutsideCatalog, resolveCatalogProductId, type CatalogProductWhitelist } from "@/ozon/catalog-whitelist";
@@ -128,7 +128,7 @@ async function orderFilterOptions() {
       quantity: item.quantity,
       movementEnabled: item.movementEnabled,
     })),
-    returns: filteredReturnRows.flatMap((returned) => returned.postingNumber && returned.productId && returned.destination === "seller" && returned.receivedBySellerAt && !returned.writtenOffAt && !isOzonWriteOffStatus(returned.status, returned.raw)
+    returns: filteredReturnRows.flatMap((returned) => returned.postingNumber && returned.productId && hasRestockedReturn(returned)
       ? [{ postingNumber: returned.postingNumber, productId: returned.productId, quantity: returned.quantity }]
       : []),
     writeoffs: filteredReturnRows.flatMap((returned) => returned.postingNumber && returned.productId && returned.writtenOffAt && !isOzonWriteOffStatus(returned.status, returned.raw)
