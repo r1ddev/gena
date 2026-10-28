@@ -368,7 +368,7 @@ export function calculateAddedCostHistoryByPosting(input: AccountingInput, now =
       }
       return restoredQuantity.gt(0)
         ? { explanation: "Вернулись товар и та доля расходов, которую распределили на это отправление." }
-        : { explanation: "Ранее на это отправление не распределялась закупочная стоимость, возвращать в пул нечего." };
+        : { explanation: "Ранее на это отправление не распределялась закупочная стоимость, возвращать сумму в нераспределённые расходы нечего." };
     });
     if (returned.writtenOffAt) {
       returnWriteoffs.push({

@@ -105,11 +105,11 @@ function OperationEffect({ operation }: { operation: HistoryOperation }) {
     </div>;
   }
   if (operation.kind === "my_expense" || operation.kind === "ozon_expense") {
-    return <div className="added-cost-formula">Изменение пула расходов: <strong className={deltaClass(operation.poolDelta)}>{signedMoney(operation.poolDelta)}</strong></div>;
+    return <div className="added-cost-formula">Изменение нераспределённых расходов: <strong className={deltaClass(operation.poolDelta)}>{signedMoney(operation.poolDelta)}</strong></div>;
   }
   return <div className="added-cost-formula">
     <div>Закупочная стоимость остатков: <strong className={deltaClass(operation.stockValueDelta)}>{signedMoney(operation.stockValueDelta)}</strong></div>
-    <div>Пул расходов: <strong className={deltaClass(operation.poolDelta)}>{signedMoney(operation.poolDelta)}</strong></div>
+    <div>Нераспределённые расходы: <strong className={deltaClass(operation.poolDelta)}>{signedMoney(operation.poolDelta)}</strong></div>
     {operation.explanation && <small>{operation.explanation}</small>}
   </div>;
 }
@@ -169,7 +169,7 @@ export function AddedCostHistoryWorkspace() {
 
   return <>
     <section className="panel added-cost-history-note">
-      <p>Для заказов показаны отдельно дата заказа и дата, когда заказ повлиял на расчёт. Закупочная стоимость растёт после приёмки. Расходы меняют общий пул; возвраты и списания меняют остатки и распределённую сумму.</p>
+      <p>Для заказов показаны дата заказа и дата, когда заказ изменил расчёт. Закупочная стоимость растёт после приёмки. Общие расходы распределяются на товары; возвраты и списания меняют остатки и уже распределённую сумму.</p>
     </section>
     <section className="panel">
       <div className="panel-head added-cost-history-head">
@@ -188,7 +188,7 @@ export function AddedCostHistoryWorkspace() {
             <th>Дата заказа / операции</th>
             <th>Операция</th>
             <th>Заказ или товар</th>
-            <th>Пул расходов: до · изменение · после</th>
+            <th>Нераспределённые расходы: до · изменение · после</th>
             <th>Закупочная стоимость остатков: до · изменение · после</th>
             <th>Как посчитано</th>
           </tr></thead>
@@ -212,7 +212,7 @@ export function AddedCostHistoryWorkspace() {
                       <span>{operation.details}</span>
                       {operation.note && <small>{operation.note}</small>}
                     </td>
-                    <td><BalanceChange title="Пул расходов" before={operation.poolBefore} delta={operation.poolDelta} after={operation.poolAfter} /></td>
+                    <td><BalanceChange title="Нераспределённые расходы" before={operation.poolBefore} delta={operation.poolDelta} after={operation.poolAfter} /></td>
                     <td><BalanceChange title="Закупочная стоимость" before={operation.stockValueBefore} delta={operation.stockValueDelta} after={operation.stockValueAfter} /><small className="added-cost-stock-count">Остаток: {quantityFormatter.format(numberValue(operation.stockQuantityBefore))} {signedQuantity(operation.stockQuantityDelta)} → {quantityFormatter.format(numberValue(operation.stockQuantityAfter))} шт.</small></td>
                     <td><OperationEffect operation={operation} /></td>
                   </tr>)}
