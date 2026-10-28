@@ -25,6 +25,7 @@ import {
 import { calculateAccounting, hasAccountablePostingItems, type AccountingInput } from "./accounting";
 import { calculateAddedCostHistoryByPosting } from "./added-cost-history";
 import type { AddedCostBreakdown } from "./added-cost-history";
+import { resolveOzonReturnTimeline } from "@/ozon/return-status";
 import { calculateFinalPostingProfits, isFinalPostingStatus } from "./order-profit";
 import { currentOrderStatus, getOrderReturnStatesByPosting, hasRestockedReturn } from "./order-return-state";
 import { buildFinanceOrderSkuPostingMap, buildFinancePostingProductIdentifiers, financeAccrualRelatedOfferIds, financeAccrualRelatedSkus, financePostingSaleSkus, isOzonBuyerOrderAccrual, isOzonSharedExpense, isOzonWriteoffCompensation, ozonExpenseLabel, resolveFinanceAccrualPostingNumber } from "@/ozon/finance";
@@ -265,8 +266,24 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
     })),
     stockAdjustments: visibleAdjustmentRows.map(({ productId, warehouse, actualQuantity, adjustedAt }) => ({ productId, warehouse, actualQuantity, countedAt: adjustedAt })),
   };
+  const ozonSellerReturnAtById = new Map(visibleReturnRows.flatMap((row) => {
+    if (row.destination !== "seller") return [];
+    const timeline = resolveOzonReturnTimeline(row.raw);
+    return timeline.finalStatus === "seller" && timeline.receivedBySellerAt
+      ? [[row.externalId, timeline.receivedBySellerAt.toISOString()] as const]
+      : [];
+  }));
+  const addedCostInput: AccountingInput = {
+    ...accountingInput,
+    returns: accountingInput.returns.map((returned) => ({
+      ...returned,
+      receivedBySellerAt: returned.destination === "seller"
+        ? ozonSellerReturnAtById.get(returned.externalId ?? "") ?? returned.receivedBySellerAt
+        : returned.receivedBySellerAt,
+    })),
+  };
   const addedCostHistoryByPostingId = includeAddedCostRates
-    ? calculateAddedCostHistoryByPosting(accountingInput, now)
+    ? calculateAddedCostHistoryByPosting(addedCostInput, now)
     : undefined;
   const addedCostRateByPostingId = addedCostHistoryByPostingId
     ? Object.fromEntries(addedCostHistoryByPostingId.rates)

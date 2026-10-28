@@ -52,7 +52,6 @@ function addedCostExplanation(
   breakdown: Record<string, unknown> | undefined,
   status: string,
   hasSaleEvent: boolean,
-  returnState: string | null,
 ) {
   const normalizedStatus = status.trim().toLocaleLowerCase("ru-RU");
   if (!breakdown) {
@@ -70,9 +69,6 @@ function addedCostExplanation(
     `Перед продажей: ${money(poolBefore)} ₽ расходов ÷ ${money(purchaseBefore)} ₽ закупочной стоимости остатков × 100 = ${percent}%.`,
     `На отправление: ${money(purchaseSold)} ₽ × ${percent}% = ${money(allocated)} ₽. В пуле осталось ${money(poolAfter)} ₽.`,
   ];
-  if (returnState && /получение не отмечено/i.test(returnState)) {
-    lines.push("Ozon отметил возврат как полученный продавцом, но получение в сервисе не подтверждено.");
-  }
   if (breakdown.fullyReturned === true) lines.push("После полного возврата процент снят, доля расходов вернулась в пул.");
   return lines.join("\n");
 }
@@ -528,7 +524,6 @@ export async function GET(request: Request) {
             addedCostBreakdownByPostingId[posting.id],
             String(posting.status ?? ""),
             Boolean(posting.deliveredAt || posting.isMarketplaceBuyout || buyoutCents > 0),
-            returnState,
           ),
           status: currentOrderStatus(posting.status, returnState),
           returnState,
