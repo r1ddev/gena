@@ -15,7 +15,7 @@ export default function SalesPage() {
       { key: "status", label: "Статус", kind: "status" },
       { key: "article", label: "Артикул" },
       { key: "amount", label: "Итог Ozon", kind: "money" },
-      { key: "addedCostRatePercent", label: "Добавочная стоимость", kind: "percent", filterable: false },
+      { key: "addedCostRatePercent", label: "Добавочная стоимость", kind: "percent", filterable: false, titleField: "addedCostExplanation" },
       { key: "profit", label: "Прибыль после себестоимости", kind: "money" },
     ],
     emptyTitle: "Заказов пока нет", emptyDescription: "Нажмите «Синхронизировать продажи», чтобы загрузить заказы, статусы и суммы.",

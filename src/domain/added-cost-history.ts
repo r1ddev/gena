@@ -13,6 +13,22 @@ type HistoryEvent = {
 type Inventory = { quantity: Decimal; purchaseValue: Decimal };
 type SaleAllocation = { quantity: Decimal; unitCost: Decimal; rate: Decimal };
 
+export type AddedCostBreakdown = {
+  sharedCostsBefore: string;
+  purchaseValueBefore: string;
+  ratePercent: string;
+  purchaseValueSold: string;
+  allocatedSharedCosts: string;
+  sharedCostsAfter: string;
+  purchaseValueAfter: string;
+  fullyReturned?: true;
+};
+
+export type AddedCostHistory = {
+  rates: Map<string, string>;
+  breakdowns: Map<string, AddedCostBreakdown>;
+};
+
 function timestamp(value: string | null | undefined) {
   if (!value) return null;
   const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : value;
@@ -25,12 +41,13 @@ function isCancelledStatus(status: string) {
   return /cancel|отмен|declin|reject/i.test(normalized);
 }
 
-/** Replays shared costs and catalog stock chronologically; every returned value is percentage points. */
-export function calculateAddedCostRateByPosting(input: AccountingInput, now = new Date()) {
+/** Replays shared costs and catalog stock chronologically; the rate is percentage points. */
+export function calculateAddedCostHistoryByPosting(input: AccountingInput, now = new Date()): AddedCostHistory {
   const events: HistoryEvent[] = [];
   const inventory = new Map<string, Inventory>();
   const allocations = new Map<string, SaleAllocation>();
   const rates = new Map<string, string>();
+  const breakdowns = new Map<string, AddedCostBreakdown>();
   let unallocatedSharedCosts = new Decimal(0);
 
   const addEvent = (at: string | null | undefined, priority: number, key: string, apply: () => void) => {
@@ -96,6 +113,7 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
     addEvent(saleAt, 3, `sale:${posting.id}`, () => {
       const totalPurchaseValue = [...inventory.values()].reduce((total, item) => total.plus(item.purchaseValue), new Decimal(0));
       if (!totalPurchaseValue.gt(0)) return;
+      const sharedCostsBefore = unallocatedSharedCosts;
       const rate = unallocatedSharedCosts.div(totalPurchaseValue).times(100);
       rates.set(posting.id, rate.toDecimalPlaces(8).toFixed(8));
 
@@ -106,6 +124,7 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
         if (!quantity.isFinite() || quantity.lte(0)) continue;
         quantityByProduct.set(item.productId, (quantityByProduct.get(item.productId) ?? new Decimal(0)).plus(quantity));
       }
+      let purchaseValueSold = new Decimal(0);
       for (const [productId, quantity] of quantityByProduct) {
         const current = stock(productId);
         if (!current.quantity.gt(0) || !current.purchaseValue.gt(0)) continue;
@@ -119,12 +138,22 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
           unitCost,
           rate,
         });
+        purchaseValueSold = purchaseValueSold.plus(removedPurchaseValue);
         unallocatedSharedCosts = unallocatedSharedCosts.minus(removedPurchaseValue.times(rate).div(100));
         inventory.set(productId, {
           quantity: current.quantity.minus(removedQuantity),
           purchaseValue: current.purchaseValue.minus(removedPurchaseValue),
         });
       }
+      breakdowns.set(posting.id, {
+        sharedCostsBefore: sharedCostsBefore.toString(),
+        purchaseValueBefore: totalPurchaseValue.toString(),
+        ratePercent: rate.toDecimalPlaces(8).toFixed(8),
+        purchaseValueSold: purchaseValueSold.toString(),
+        allocatedSharedCosts: purchaseValueSold.times(rate).div(100).toString(),
+        sharedCostsAfter: unallocatedSharedCosts.toString(),
+        purchaseValueAfter: totalPurchaseValue.minus(purchaseValueSold).toString(),
+      });
     });
   }
 
@@ -166,7 +195,11 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
         const wholeCatalogSaleReturned = [...postedQuantities].every(([postedProductId, postedProductQuantity]) =>
           (restockedByPostingAndProduct.get(`${postingId}\u0000${postedProductId}`) ?? new Decimal(0)).gte(postedProductQuantity),
         );
-        if (wholeCatalogSaleReturned) rates.delete(postingId);
+        if (wholeCatalogSaleReturned) {
+          rates.delete(postingId);
+          const breakdown = breakdowns.get(postingId);
+          if (breakdown) breakdowns.set(postingId, { ...breakdown, fullyReturned: true });
+        }
       }
     });
     if (returned.writtenOffAt) {
@@ -201,5 +234,9 @@ export function calculateAddedCostRateByPosting(input: AccountingInput, now = ne
 
   events.sort((left, right) => left.at - right.at || left.priority - right.priority || left.key.localeCompare(right.key));
   for (const event of events) event.apply();
-  return rates;
+  return { rates, breakdowns };
+}
+
+export function calculateAddedCostRateByPosting(input: AccountingInput, now = new Date()) {
+  return calculateAddedCostHistoryByPosting(input, now).rates;
 }

@@ -197,6 +197,13 @@
       "when": 1793091685499,
       "tag": "0027_posting_added_cost_rate",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793217923239,
+      "tag": "0028_youthful_beyonder",
+      "breakpoints": true
     }
   ]
 }

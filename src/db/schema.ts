@@ -184,6 +184,7 @@ export const postings = pgTable(
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     marketplaceBuyoutAt: timestamp("marketplace_buyout_at", { withTimezone: true }),
     addedCostRatePercent: numeric("added_cost_rate_percent", { precision: 12, scale: 8 }),
+    addedCostBreakdown: jsonb("added_cost_breakdown").$type<Record<string, unknown>>(),
     isMarketplaceBuyout: boolean("is_marketplace_buyout").notNull().default(false),
     raw: jsonb("raw").$type<Record<string, unknown>>().notNull().default({}),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

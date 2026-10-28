@@ -23,7 +23,8 @@ import {
   supplyLines,
 } from "@/db/schema";
 import { calculateAccounting, hasAccountablePostingItems, type AccountingInput } from "./accounting";
-import { calculateAddedCostRateByPosting } from "./added-cost-history";
+import { calculateAddedCostHistoryByPosting } from "./added-cost-history";
+import type { AddedCostBreakdown } from "./added-cost-history";
 import { calculateFinalPostingProfits, isFinalPostingStatus } from "./order-profit";
 import { currentOrderStatus, getOrderReturnStatesByPosting, hasRestockedReturn } from "./order-return-state";
 import { buildFinanceOrderSkuPostingMap, buildFinancePostingProductIdentifiers, financeAccrualRelatedOfferIds, financeAccrualRelatedSkus, financePostingSaleSkus, isOzonBuyerOrderAccrual, isOzonSharedExpense, isOzonWriteoffCompensation, ozonExpenseLabel, resolveFinanceAccrualPostingNumber } from "@/ozon/finance";
@@ -264,8 +265,14 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
     })),
     stockAdjustments: visibleAdjustmentRows.map(({ productId, warehouse, actualQuantity, adjustedAt }) => ({ productId, warehouse, actualQuantity, countedAt: adjustedAt })),
   };
-  const addedCostRateByPostingId = includeAddedCostRates
-    ? Object.fromEntries(calculateAddedCostRateByPosting(accountingInput, now))
+  const addedCostHistoryByPostingId = includeAddedCostRates
+    ? calculateAddedCostHistoryByPosting(accountingInput, now)
+    : undefined;
+  const addedCostRateByPostingId = addedCostHistoryByPostingId
+    ? Object.fromEntries(addedCostHistoryByPostingId.rates)
+    : undefined;
+  const addedCostBreakdownByPostingId = addedCostHistoryByPostingId
+    ? Object.fromEntries(addedCostHistoryByPostingId.breakdowns)
     : undefined;
   const result = calculateAccounting(accountingInput, now);
 
@@ -371,6 +378,7 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
   return {
     ...result,
     ...(addedCostRateByPostingId ? { addedCostRateByPostingId } : {}),
+    ...(addedCostBreakdownByPostingId ? { addedCostBreakdownByPostingId } : {}),
     profitBreakdown: {
       ...result.profitBreakdown,
       orderProfit: (finalizedOrderProfitCents / 100).toFixed(2),
@@ -417,18 +425,27 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
 export async function persistAddedCostRateSnapshots(snapshot: {
   postingRows: { id: string }[];
   addedCostRateByPostingId?: Record<string, string>;
+  addedCostBreakdownByPostingId?: Record<string, AddedCostBreakdown>;
 }) {
   if (!snapshot.postingRows.length) return 0;
-  const values = snapshot.postingRows.map((posting) => [posting.id, snapshot.addedCostRateByPostingId?.[posting.id] ?? null] as const);
+  const values = snapshot.postingRows.map((posting) => [
+    posting.id,
+    snapshot.addedCostRateByPostingId?.[posting.id] ?? null,
+    snapshot.addedCostBreakdownByPostingId?.[posting.id]
+      ? JSON.stringify(snapshot.addedCostBreakdownByPostingId[posting.id])
+      : null,
+  ] as const);
   for (let offset = 0; offset < values.length; offset += 500) {
     const batch = values.slice(offset, offset + 500);
-    const tuples = batch.map(([id, rate]) => sql`(${id}::uuid, ${rate}::numeric)`);
+    const tuples = batch.map(([id, rate, breakdown]) => sql`(${id}::uuid, ${rate}::numeric, ${breakdown}::jsonb)`);
     await db.execute(sql`
       UPDATE ozon_postings AS posting
-      SET added_cost_rate_percent = rates.rate
-      FROM (VALUES ${sql.join(tuples, sql`, `)}) AS rates(id, rate)
+      SET added_cost_rate_percent = rates.rate,
+          added_cost_breakdown = rates.breakdown
+      FROM (VALUES ${sql.join(tuples, sql`, `)}) AS rates(id, rate, breakdown)
       WHERE posting.id = rates.id
-        AND posting.added_cost_rate_percent IS DISTINCT FROM rates.rate
+        AND (posting.added_cost_rate_percent IS DISTINCT FROM rates.rate
+          OR posting.added_cost_breakdown IS DISTINCT FROM rates.breakdown)
     `);
   }
   return Object.keys(snapshot.addedCostRateByPostingId ?? {}).length;

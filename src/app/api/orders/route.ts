@@ -48,6 +48,35 @@ function emptyOrderSummary() {
   };
 }
 
+function addedCostExplanation(
+  breakdown: Record<string, unknown> | undefined,
+  status: string,
+  hasSaleEvent: boolean,
+  returnState: string | null,
+) {
+  const normalizedStatus = status.trim().toLocaleLowerCase("ru-RU");
+  if (!breakdown) {
+    if (/cancel|отмен|declin|reject/i.test(normalizedStatus)) return "Отправление отменено, процент не распределялся.";
+    if (hasSaleEvent) return "На дату продажи не было закупочной стоимости остатков для расчёта процента.";
+    return "Процент появится после доставки или выкупа.";
+  }
+  const keys = ["sharedCostsBefore", "purchaseValueBefore", "ratePercent", "purchaseValueSold", "allocatedSharedCosts", "sharedCostsAfter"];
+  const values = keys.map((key) => Number(breakdown[key]));
+  if (values.some((value) => !Number.isFinite(value))) return "Не удалось получить составляющие расчёта.";
+  const [poolBefore, purchaseBefore, rate, purchaseSold, allocated, poolAfter] = values;
+  const money = (value: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  const percent = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 8 }).format(rate);
+  const lines = [
+    `Перед продажей: ${money(poolBefore)} ₽ расходов ÷ ${money(purchaseBefore)} ₽ закупочной стоимости остатков × 100 = ${percent}%.`,
+    `На отправление: ${money(purchaseSold)} ₽ × ${percent}% = ${money(allocated)} ₽. В пуле осталось ${money(poolAfter)} ₽.`,
+  ];
+  if (returnState && /получение не отмечено/i.test(returnState)) {
+    lines.push("Ozon отметил возврат как полученный продавцом, но получение в сервисе не подтверждено.");
+  }
+  if (breakdown.fullyReturned === true) lines.push("После полного возврата процент снят, доля расходов вернулась в пул.");
+  return lines.join("\n");
+}
+
 async function orderFilterOptions() {
   const [allPostingRows, catalog] = await Promise.all([
     db.select().from(postings),
@@ -259,6 +288,7 @@ export async function GET(request: Request) {
     ]);
     await persistAddedCostRateSnapshots(accounting);
     const addedCostRateByPostingId = accounting.addedCostRateByPostingId ?? {};
+    const addedCostBreakdownByPostingId = accounting.addedCostBreakdownByPostingId ?? {};
     const candidateItems = catalogPostingItems(candidateItemRows.map(({ item }) => item), whitelist).map((item) => ({ item }));
     const candidatePostingIds = new Set(candidateItems.map(({ item }) => item.postingId));
     const visibleCandidates = candidates.filter((posting) => candidatePostingIds.has(posting.id));
@@ -493,6 +523,13 @@ export async function GET(request: Request) {
         return {
           ...posting,
           addedCostRatePercent: addedCostRateByPostingId[posting.id] ?? null,
+          addedCostBreakdown: addedCostBreakdownByPostingId[posting.id] ?? null,
+          addedCostExplanation: addedCostExplanation(
+            addedCostBreakdownByPostingId[posting.id],
+            String(posting.status ?? ""),
+            Boolean(posting.deliveredAt || posting.isMarketplaceBuyout || buyoutCents > 0),
+            returnState,
+          ),
           status: currentOrderStatus(posting.status, returnState),
           returnState,
           returnRecords: (returnRecordsByPosting.get(posting.externalId) ?? []).map((row) => ({

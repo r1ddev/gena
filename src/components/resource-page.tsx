@@ -26,7 +26,7 @@ export type FieldConfig = {
   optionsFrom?: string;
 };
 
-export type ColumnConfig = { key: string; label: string; kind?: "identifier" | "money" | "quantity" | "percent" | "date" | "status" | "number" | "time" | "text"; primary?: boolean; sortable?: boolean; filterable?: boolean; linkToOzonPosting?: boolean; value?: (row: JsonRecord) => unknown; render?: (row: JsonRecord, value: unknown) => ReactNode };
+export type ColumnConfig = { key: string; label: string; kind?: "identifier" | "money" | "quantity" | "percent" | "date" | "status" | "number" | "time" | "text"; primary?: boolean; sortable?: boolean; filterable?: boolean; linkToOzonPosting?: boolean; titleField?: string; value?: (row: JsonRecord) => unknown; render?: (row: JsonRecord, value: unknown) => ReactNode };
 export type ResourceConfig = {
   title: string;
   eyebrow?: string;
@@ -239,6 +239,7 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [serverFilters, setServerFilters] = useState<Record<string, string>>({});
   const [serverFilterOptions, setServerFilterOptions] = useState<Record<string, string[]>>({});
+  const [activeCellTooltip, setActiveCellTooltip] = useState<string | null>(null);
   const [sort, setSort] = useState<TableSort>(null);
   const requestSequence = useRef(0);
 
@@ -546,7 +547,16 @@ export function ResourcePage({ config, actions, beforeTable, refreshKey, rowActi
                 <span>{rendered}</span>
                 <span className="table-secondary">Расходы на возврат: {displayValue(row.returnCost, "money")}</span>
               </td>;
-              return <td key={column.key} className={column.kind === "money" || column.kind === "quantity" || column.kind === "percent" ? "number" : ""}>{rendered}</td>;
+              const title = column.titleField ? stringValue(row[column.titleField]) ?? undefined : undefined;
+              if (column.titleField && title) {
+                const tooltipKey = `${stringValue(row.externalId) ?? stringValue(row.id) ?? index}-${column.key}`;
+                const isOpen = activeCellTooltip === tooltipKey;
+                return <td key={column.key} title={title} className={column.kind === "money" || column.kind === "quantity" || column.kind === "percent" ? "number" : ""}>
+                  <button type="button" className="table-tooltip-trigger" aria-label={`Показать пояснение: ${rendered}`} aria-expanded={isOpen} onClick={() => setActiveCellTooltip(isOpen ? null : tooltipKey)}>{rendered}</button>
+                  {isOpen && <span className="table-secondary table-cell-tooltip" role="tooltip">{title}</span>}
+                </td>;
+              }
+              return <td key={column.key} title={title} className={column.kind === "money" || column.kind === "quantity" || column.kind === "percent" ? "number" : ""}>{rendered}</td>;
             })}{(config.deleteUrl || config.editUrl || rowActions) && <td><div className="row-actions">{config.editUrl?.(row) && <button type="button" className="icon-button" aria-label={`Редактировать запись ${index + 1}`} onClick={() => openEdit(row)} disabled={busy}><Pencil size={14} /></button>}{config.deleteUrl?.(row) && <button className="icon-button" aria-label={`Удалить запись ${index + 1}`} onClick={() => void remove(row)} disabled={busy}><Trash2 size={14} /></button>}{rowActions?.(row, refresh)}</div></td>}</tr>)}</tbody></table></div>}
       <TablePagination page={tablePage} pageSize={tablePageSize} total={tableTotal} label={config.title} busy={loading} onPageChange={setPage} />
     </section>
