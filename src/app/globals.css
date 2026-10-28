@@ -167,10 +167,11 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .added-cost-date, .added-cost-detail-cell { display: grid; gap: 4px; }
 .added-cost-date small, .added-cost-detail, .added-cost-detail-cell small, .added-cost-stock-count { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .added-cost-detail-cell { min-width: 190px; max-width: 280px; overflow-wrap: anywhere; }
-.added-cost-balance { display: grid; min-width: 175px; grid-template-columns: 1fr auto; gap: 4px 10px; white-space: nowrap; }
-.added-cost-balance span { grid-column: 1 / -1; color: var(--muted); font-size: 10px; }
-.added-cost-balance strong, .added-cost-balance b { font-size: 11px; font-weight: 600; }
-.added-cost-balance b { text-align: right; }
+.added-cost-balance { display: grid; min-width: 240px; gap: 4px; white-space: nowrap; }
+.added-cost-balance > span { color: var(--muted); font-size: 10px; }
+.added-cost-balance-values { display: flex; align-items: baseline; gap: 5px; }
+.added-cost-balance-values strong, .added-cost-balance-values b { font-size: 11px; font-weight: 600; }
+.added-cost-balance-values > span { color: #849089; font-size: 10px; }
 .added-cost-positive { color: var(--green-dark) !important; }
 .added-cost-negative { color: var(--red) !important; }
 .added-cost-formula { display: grid; min-width: 250px; gap: 6px; color: #536158; font-size: 11px; line-height: 1.45; }

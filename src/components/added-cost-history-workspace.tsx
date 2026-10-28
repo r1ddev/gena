@@ -116,9 +116,13 @@ function OperationEffect({ operation }: { operation: HistoryOperation }) {
 function BalanceChange({ title, before, delta, after }: { title: string; before: string; delta: string; after: string }) {
   return <div className="added-cost-balance">
     <span>{title}</span>
-    <strong>{money(before)}</strong>
-    <b className={deltaClass(delta)}>{signedMoney(delta)}</b>
-    <strong>{money(after)}</strong>
+    <div className="added-cost-balance-values">
+      <strong>{money(before)}</strong>
+      <span aria-hidden="true">→</span>
+      <b className={deltaClass(delta)}>{signedMoney(delta)}</b>
+      <span aria-hidden="true">→</span>
+      <strong>{money(after)}</strong>
+    </div>
   </div>;
 }
 
