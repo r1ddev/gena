@@ -24,7 +24,7 @@ import {
 } from "@/db/schema";
 import { calculateAccounting, hasAccountablePostingItems, type AccountingInput } from "./accounting";
 import { calculateAddedCostHistoryByPosting } from "./added-cost-history";
-import type { AddedCostBreakdown } from "./added-cost-history";
+import type { AddedCostBreakdown, AddedCostHistoryOperation } from "./added-cost-history";
 import { resolveOzonReturnTimeline } from "@/ozon/return-status";
 import { calculateFinalPostingProfits, isFinalPostingStatus } from "./order-profit";
 import { currentOrderStatus, getOrderReturnStatesByPosting, hasRestockedReturn } from "./order-return-state";
@@ -137,6 +137,7 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
 
   const postingIdByExternalId = new Map(visiblePostingRows.map((posting) => [posting.externalId, posting.id]));
   const postingById = new Map(visiblePostingRows.map((posting) => [posting.id, posting]));
+  const productById = new Map(visibleProductRows.map((product) => [product.id, product]));
   const financePostingByOrderSku = buildFinanceOrderSkuPostingMap(visiblePostingRows, visiblePostingItemRows);
   const financeSaleSkuKeys = new Set(visibleFinanceRows.flatMap((row) => {
     const postingNumber = resolveFinanceAccrualPostingNumber(row, financePostingByOrderSku);
@@ -170,36 +171,61 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
       const totalReceived = receivedQuantityByPurchase.get(receipt.purchaseId);
       if (!purchase || !totalReceived || totalReceived.isZero()) return [];
       const unitCost = new Decimal(purchase.amountPaid).div(totalReceived).toString();
-      return [{ productId: line.productId, quantity: line.quantity, unitCost, includeInAverageCost: purchase.status === "completed", receivedAt: receipt.receivedAt }];
+      const product = productById.get(line.productId);
+      return [{
+        productId: line.productId,
+        quantity: line.quantity,
+        unitCost,
+        includeInAverageCost: purchase.status === "completed",
+        receivedAt: receipt.receivedAt,
+        productSku: line.productSkuSnapshot || product?.sku,
+        productTitle: line.productTitleSnapshot || product?.title,
+        purchaseId: purchase.id,
+        purchaseDate: purchase.purchasedAt,
+        purchaseNote: purchase.note,
+        receiptNote: receipt.note,
+      }];
     }),
     supplies: [
       ...visibleSupplyRows.map((supply) => ({ productId: "", quantity: "0", shippingCost: supply.shippingCost, suppliedAt: supply.suppliedAt })),
       ...visibleSupplyLineRows.map((line) => ({ productId: line.productId, quantity: line.quantity, shippingCost: "0", suppliedAt: visibleSupplyRows.find((supply) => supply.id === line.supplyId)?.suppliedAt })),
     ],
-    expenses: expenseRows.map(({ amount, spentAt, description }) => ({ amount, spentAt, sourceLabel: description })),
+    expenses: expenseRows.map(({ amount, spentAt, description, note }) => ({ amount, spentAt, sourceLabel: description, note })),
     ozonSharedExpenses: visibleFinanceRows.flatMap((row) => {
       const postingNumber = resolveFinanceAccrualPostingNumber(row, financePostingByOrderSku);
       if (!isOzonSharedExpense({ postingNumber, category: row.accruedCategory, typeId: row.typeId, raw: row.raw })) return [];
-      return [{ amount: row.amount, spentAt: row.accrualDate }];
+      return [{
+        amount: row.amount,
+        spentAt: row.accrualDate,
+        sourceLabel: ozonExpenseLabel(row.typeId, row.raw, row.accruedCategory),
+        typeId: row.typeId,
+        unitNumber: typeof row.raw.unit_number === "string" ? row.raw.unit_number : "",
+        externalKey: row.externalKey,
+      }];
     }),
-    postings: visiblePostingRows.map(({ id, status, deliveredAt, marketplaceBuyoutAt, isMarketplaceBuyout }) => ({
+    postings: visiblePostingRows.map(({ id, status, deliveredAt, marketplaceBuyoutAt, isMarketplaceBuyout, externalId, orderNumber, orderDate }) => ({
       id,
       status,
       deliveredAt: deliveredAt?.toISOString() ?? null,
       marketplaceBuyoutAt: marketplaceBuyoutAt?.toISOString() ?? null,
       isMarketplaceBuyout,
+      externalId,
+      orderNumber,
+      orderDate: orderDate?.toISOString() ?? null,
       accountingEnabled: hasAccountablePostingItems((itemsByPosting.get(id) ?? []).map((item) => ({
         productId: item.productId,
         ignored: false,
       }))),
     })),
-    postingItems: visiblePostingItemRows.map(({ postingId, externalKey, productId, quantity, price, movementEnabled, ozonSku, isMarketplaceBuyout, marketplaceBuyoutAt }) => ({
+    postingItems: visiblePostingItemRows.map(({ postingId, externalKey, productId, quantity, price, movementEnabled, ozonSku, isMarketplaceBuyout, marketplaceBuyoutAt, offerId, title }) => ({
       postingId,
       productId,
       quantity,
       price,
       movementEnabled,
       ozonSku,
+      offerId,
+      title,
       isMarketplaceBuyout,
       marketplaceBuyoutAt: marketplaceBuyoutAt?.toISOString() ?? null,
         ignored: false,
@@ -241,9 +267,10 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
         sourceLabel: "Выручка от выкупа",
       }];
     })),
-    returns: visibleReturnRows.map(({ externalId, postingNumber, productId, quantity, destination, returnedAt, receivedBySellerAt, writtenOffAt, availableAtOzon }) => {
+    returns: visibleReturnRows.map(({ externalId, postingNumber, productId, quantity, destination, returnedAt, receivedBySellerAt, writtenOffAt, availableAtOzon, status, note }) => {
       const candidatePostingId = postingNumber ? postingIdByExternalId.get(postingNumber) ?? null : null;
       const postingId = candidatePostingId && productId && postingProductPairs.has(`${candidatePostingId}\u0000${productId}`) ? candidatePostingId : null;
+      const product = productId ? productById.get(productId) : undefined;
       return {
         externalId,
         postingId,
@@ -254,15 +281,30 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
         receivedBySellerAt: receivedBySellerAt?.toISOString() ?? null,
         writtenOffAt: writtenOffAt?.toISOString() ?? null,
         availableAtOzon: availableAtOzon?.toISOString() ?? null,
+        postingNumber,
+        productSku: product?.sku,
+        productTitle: product?.title,
+        status,
+        note,
       };
     }),
-    manualWriteoffs: visibleManualRows.map(({ productId, quantity, writtenOffAt }) => ({ productId, quantity, writtenOffAt })),
-    ozonWriteoffs: visibleOzonWriteoffRows.map(({ productId, quantity, occurredAt, compensationStatus, compensationAmount }) => ({
+    manualWriteoffs: visibleManualRows.map(({ productId, quantity, writtenOffAt, productSkuSnapshot, productTitleSnapshot, note }) => ({
+      productId,
+      quantity,
+      writtenOffAt,
+      productSku: productSkuSnapshot,
+      productTitle: productTitleSnapshot,
+      note,
+    })),
+    ozonWriteoffs: visibleOzonWriteoffRows.map(({ externalId, productId, quantity, occurredAt, compensationStatus, compensationAmount, ozonSku }) => ({
+      externalId,
       productId,
       quantity,
       occurredAt: occurredAt?.toISOString() ?? null,
       compensationStatus,
       compensationAmount,
+      productSku: productId ? productById.get(productId)?.sku : ozonSku,
+      productTitle: productId ? productById.get(productId)?.title : undefined,
     })),
     stockAdjustments: visibleAdjustmentRows.map(({ productId, warehouse, actualQuantity, adjustedAt }) => ({ productId, warehouse, actualQuantity, countedAt: adjustedAt })),
   };
@@ -291,6 +333,7 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
   const addedCostBreakdownByPostingId = addedCostHistoryByPostingId
     ? Object.fromEntries(addedCostHistoryByPostingId.breakdowns)
     : undefined;
+  const addedCostOperations = addedCostHistoryByPostingId?.operations;
   const result = calculateAccounting(accountingInput, now);
 
   // Use the same per-posting calculation shown in "Продажи и заказы".
@@ -396,6 +439,7 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
     ...result,
     ...(addedCostRateByPostingId ? { addedCostRateByPostingId } : {}),
     ...(addedCostBreakdownByPostingId ? { addedCostBreakdownByPostingId } : {}),
+    ...(addedCostOperations ? { addedCostOperations } : {}),
     profitBreakdown: {
       ...result.profitBreakdown,
       orderProfit: (finalizedOrderProfitCents / 100).toFixed(2),

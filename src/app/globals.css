@@ -157,6 +157,26 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .notice.critical { border-color: #f0d8d8; color: #8b4141; background: #fff8f8; }
 .notice svg { flex: 0 0 auto; margin-top: 1px; }
 .table-wrap { width: 100%; overflow-x: auto; }
+.added-cost-history-note { margin-bottom: 14px; padding: 13px 16px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.added-cost-history-note p { margin: 0; }
+.added-cost-history-head { min-height: 66px; }
+.added-cost-history-head .search-box { width: min(360px, 48%); }
+.added-cost-history-table { min-width: 1120px; }
+.added-cost-history-table td { vertical-align: top; }
+.added-cost-history-table td:first-child { min-width: 115px; }
+.added-cost-date, .added-cost-detail-cell { display: grid; gap: 4px; }
+.added-cost-date small, .added-cost-detail, .added-cost-detail-cell small, .added-cost-stock-count { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.added-cost-detail-cell { min-width: 190px; max-width: 280px; overflow-wrap: anywhere; }
+.added-cost-balance { display: grid; min-width: 175px; grid-template-columns: 1fr auto; gap: 4px 10px; white-space: nowrap; }
+.added-cost-balance span { grid-column: 1 / -1; color: var(--muted); font-size: 10px; }
+.added-cost-balance strong, .added-cost-balance b { font-size: 11px; font-weight: 600; }
+.added-cost-balance b { text-align: right; }
+.added-cost-positive { color: var(--green-dark) !important; }
+.added-cost-negative { color: var(--red) !important; }
+.added-cost-formula { display: grid; min-width: 250px; gap: 6px; color: #536158; font-size: 11px; line-height: 1.45; }
+.added-cost-formula strong { color: var(--ink); }
+.added-cost-formula small { color: var(--muted); }
+.added-cost-stock-count { display: block; margin-top: 5px; white-space: nowrap; }
 .pagination-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .pagination-range { white-space: nowrap; }
 .pagination-buttons { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; }
@@ -461,6 +481,8 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
   .field.wide, .field.full { grid-column: auto; }
   .line-item { grid-template-columns: 1fr 80px auto; }
   .search-box { width: 100%; }
+  .added-cost-history-head { align-items: flex-start; flex-direction: column; padding-top: 12px; padding-bottom: 12px; }
+  .added-cost-history-head .search-box { width: 100%; }
   .product-edit-backdrop { padding: 8px; }
   .product-edit-dialog { max-height: calc(100vh - 16px); }
   .ozon-expense-dialog .panel-head { align-items: flex-start; }

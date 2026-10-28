@@ -5,10 +5,22 @@ Decimal.set({ precision: 24, rounding: Decimal.ROUND_HALF_UP });
 export type AccountingInput = {
   products: { id: string; sku: string; title: string }[];
   purchases: { id: string; amountPaid: string | number; sourceLabel?: string }[];
-  receipts: { productId: string; quantity: string | number; unitCost: string | number; includeInAverageCost?: boolean; receivedAt?: string }[];
+  receipts: {
+    productId: string;
+    quantity: string | number;
+    unitCost: string | number;
+    includeInAverageCost?: boolean;
+    receivedAt?: string;
+    productSku?: string;
+    productTitle?: string;
+    purchaseId?: string;
+    purchaseDate?: string;
+    purchaseNote?: string;
+    receiptNote?: string;
+  }[];
   supplies: { productId: string; quantity: string | number; shippingCost: string | number; suppliedAt?: string }[];
-  expenses: { amount: string | number; spentAt?: string; sourceLabel?: string }[];
-  ozonSharedExpenses?: { amount: string | number; spentAt?: string }[];
+  expenses: { amount: string | number; spentAt?: string; sourceLabel?: string; note?: string }[];
+  ozonSharedExpenses?: { amount: string | number; spentAt?: string; sourceLabel?: string; typeId?: string; unitNumber?: string; externalKey?: string }[];
   postings: {
     id: string;
     status: string;
@@ -16,6 +28,9 @@ export type AccountingInput = {
     marketplaceBuyoutAt?: string | null;
     isMarketplaceBuyout: boolean;
     accountingEnabled?: boolean;
+    externalId?: string;
+    orderNumber?: string;
+    orderDate?: string | null;
   }[];
   postingItems: {
     postingId: string;
@@ -27,6 +42,8 @@ export type AccountingInput = {
     ozonSku?: string;
     isMarketplaceBuyout?: boolean;
     marketplaceBuyoutAt?: string | null;
+    offerId?: string;
+    title?: string;
   }[];
   financeAccruals: { postingId: string | null; productId?: string | null; ozonSku?: string | null; amount: string | number; category?: string; accrualDate?: string; isOzonWriteoffCompensation?: boolean; ignored?: boolean; sourceGroup?: "orders" | "shared" | "compensation"; sourceLabel?: string }[];
   returns: {
@@ -39,9 +56,14 @@ export type AccountingInput = {
     receivedBySellerAt: string | null;
     writtenOffAt?: string | null;
     availableAtOzon: string | null;
+    postingNumber?: string | null;
+    productSku?: string;
+    productTitle?: string;
+    status?: string;
+    note?: string;
   }[];
-  manualWriteoffs: { productId: string; quantity: string | number; writtenOffAt?: string }[];
-  ozonWriteoffs: { productId: string | null; quantity: string | number; occurredAt?: string | null; compensationStatus?: string; compensationAmount?: string | number | null }[];
+  manualWriteoffs: { productId: string; quantity: string | number; writtenOffAt?: string; productSku?: string; productTitle?: string; note?: string }[];
+  ozonWriteoffs: { productId: string | null; quantity: string | number; occurredAt?: string | null; compensationStatus?: string; compensationAmount?: string | number | null; externalId?: string; productSku?: string; productTitle?: string }[];
   stockAdjustments: { productId: string; warehouse: "seller" | "ozon"; actualQuantity: string | number; countedAt?: string }[];
 };
 
