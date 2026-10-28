@@ -12,7 +12,6 @@ type HistoryOperation = {
   title: string;
   details: string;
   occurredAt: string;
-  sortAt: string;
   postingNumber?: string;
   orderNumber?: string;
   orderDate?: string | null;
@@ -185,7 +184,7 @@ export function AddedCostHistoryWorkspace() {
       <div className="table-wrap">
         <table className="added-cost-history-table">
           <thead><tr>
-            <th>Дата заказа / операции</th>
+            <th>Дата расчёта / заказа</th>
             <th>Операция</th>
             <th>Заказ или товар</th>
             <th>Нераспределённые расходы: до · изменение · после</th>
@@ -198,8 +197,8 @@ export function AddedCostHistoryWorkspace() {
                 : rows.length === 0 ? <TableEmptyRow colSpan={6} message={search ? "По этому запросу операций нет." : "Операций, влияющих на добавочную стоимость, пока нет."} />
                   : rows.map((operation) => <tr key={operation.id}>
                     <td className="added-cost-date">
-                      <strong>{date(operation.kind === "sale" ? operation.orderDate || operation.occurredAt : operation.occurredAt)}</strong>
-                      {operation.kind === "sale" && operation.orderDate && <small>Расчёт: {date(operation.occurredAt)}</small>}
+                      <strong>{date(operation.occurredAt)}</strong>
+                      {operation.kind === "sale" && operation.orderDate && <small>Заказ: {date(operation.orderDate)}</small>}
                       {operation.kind === "receipt" && operation.purchaseDate && <small>Закупка оформлена: {date(operation.purchaseDate)}</small>}
                     </td>
                     <td><strong>{operation.title}</strong></td>

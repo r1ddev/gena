@@ -13,15 +13,12 @@ export async function GET(request: Request) {
       : 50;
     const query = (params.get("q") ?? "").trim().slice(0, 120).toLocaleLowerCase("ru-RU");
     const snapshot = await getAccountingSnapshot(new Date(), true);
+    // Keep the reducer order: it is the sequence that changes the balances.
     const operations = (snapshot.addedCostOperations ?? []).filter((operation) => {
       if (!query) return true;
       return [operation.title, operation.details, operation.postingNumber, operation.orderNumber, operation.sourceNumber, operation.productSku, operation.productTitle, operation.note, operation.status]
         .some((value) => value?.toLocaleLowerCase("ru-RU").includes(query));
-    }).sort((left, right) =>
-      right.sortAt.localeCompare(left.sortAt)
-      || right.occurredAt.localeCompare(left.occurredAt)
-      || right.id.localeCompare(left.id),
-    );
+    });
     const total = operations.length;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const page = Math.min(Math.max(1, Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1), totalPages);

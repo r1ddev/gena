@@ -11,7 +11,6 @@ export type AddedCostHistoryOperation = {
   title: string;
   details: string;
   occurredAt: string;
-  sortAt: string;
   postingId?: string;
   postingNumber?: string;
   orderNumber?: string;
@@ -43,7 +42,6 @@ export type AddedCostHistoryOperation = {
 
 type EventMetadata = Omit<AddedCostHistoryOperation,
   | "occurredAt"
-  | "sortAt"
   | "poolBefore"
   | "poolDelta"
   | "poolAfter"
@@ -63,7 +61,6 @@ type EventResult = Pick<AddedCostHistoryOperation, "ratePercent" | "purchaseValu
 type HistoryEvent = {
   at: number;
   occurredAt: string;
-  sortAt: string;
   priority: number;
   key: string;
   metadata: EventMetadata;
@@ -126,9 +123,7 @@ export function calculateAddedCostHistoryByPosting(input: AccountingInput, now =
     const eventAt = timestamp(at);
     if (eventAt === null || eventAt > now.getTime()) return;
     const occurredAt = new Date(eventAt).toISOString();
-    const orderTimestamp = metadata.kind === "sale" ? timestamp(metadata.orderDate) : null;
-    const sortAt = orderTimestamp === null ? occurredAt : new Date(orderTimestamp).toISOString();
-    events.push({ at: eventAt, occurredAt, sortAt, priority, key, metadata, apply });
+    events.push({ at: eventAt, occurredAt, priority, key, metadata, apply });
   };
   const stock = (productId: string) => inventory.get(productId) ?? { quantity: new Decimal(0), purchaseValue: new Decimal(0) };
   const inventorySnapshot = () => [...inventory.values()].reduce((total, item) => ({
@@ -471,7 +466,6 @@ export function calculateAddedCostHistoryByPosting(input: AccountingInput, now =
     operations.push({
       ...event.metadata,
       occurredAt: event.occurredAt,
-      sortAt: event.sortAt,
       poolBefore: poolBefore.toString(),
       poolDelta: unallocatedSharedCosts.minus(poolBefore).toString(),
       poolAfter: unallocatedSharedCosts.toString(),
