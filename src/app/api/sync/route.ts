@@ -5,8 +5,9 @@ import { appSettings, syncJobs } from "@/db/schema";
 import { resolveOzonSyncRange } from "@/ozon/sync-range";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 
-const syncRequestSchema = z.object({ kind: z.enum(["orders", "returns", "payouts", "full"]).default("full") });
+const syncRequestSchema = z.object({ kind: z.enum(["orders", "returns", "payouts", "payouts_full", "full"]).default("full") });
 const fullSyncKinds = ["full", "manual", "scheduled"];
+const payoutSyncKinds = ["payouts", "payouts_full"];
 
 export async function GET(request: Request) {
   return handleLocalGet(request, async () => {
@@ -28,19 +29,23 @@ export async function POST(request: Request) {
     if (!settings?.ozonClientId || !settings.ozonApiKeyEncrypted) throw new Error("Сначала укажи Client ID и API-ключ Ozon в настройках.");
     if (!settings.accountingStartDate) throw new Error("Сначала укажи дату начала учёта в настройках.");
     const active = await db.select().from(syncJobs).where(inArray(syncJobs.status, ["queued", "running"]));
-    const conflictingJob = active.find((job) => job.kind === kind || fullSyncKinds.includes(job.kind) || kind === "full");
+    const conflictingJob = active.find((job) => job.kind === kind
+      || (payoutSyncKinds.includes(job.kind) && payoutSyncKinds.includes(kind))
+      || fullSyncKinds.includes(job.kind)
+      || kind === "full");
     if (conflictingJob) {
       return Response.json({ item: conflictingJob, message: "Обновление уже выполняется или ожидает запуска." }, { status: 202 });
     }
     const requestedAt = new Date();
     const range = resolveOzonSyncRange(settings.accountingStartDate, settings.lastSyncAt, requestedAt);
+    const queriedFrom = kind === "payouts_full" ? new Date(`${settings.accountingStartDate}T00:00:00.000Z`) : range.from;
     const [item] = await db.insert(syncJobs).values({
       kind,
       status: "queued",
       summary: {
         requestedBy: "user",
         accountingStartDate: settings.accountingStartDate,
-        queriedFrom: range.from.toISOString(),
+        queriedFrom: queriedFrom.toISOString(),
         queriedTo: range.to.toISOString(),
         progress: "Ожидает запуска",
       },

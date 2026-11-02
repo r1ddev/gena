@@ -6,7 +6,7 @@ import { asRecord, findRows, requestJson, type JsonRecord } from "./api";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 
 type OzonSyncButtonProps = {
-  kind: "orders" | "returns";
+  kind: "orders" | "returns" | "payouts_full";
   label: string;
   completedMessage: string;
 };

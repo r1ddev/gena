@@ -730,7 +730,7 @@ async function importOzonPayouts(credentials: OzonCredentials, from: Date, to: D
         periodEnd,
         currencyCode,
         amount: (group.cents / 100).toFixed(2),
-        raw: { period, payments: group.payments },
+        raw: { period, payments: group.payments, cashFlows, details },
       });
     }
     seenKeysByPeriod.set(stablePeriodId, periodKeys);
@@ -984,7 +984,9 @@ export async function syncOzonData(jobId: string) {
   const existingPayoutPeriods = await db.select({ periodId: ozonPayouts.periodId }).from(ozonPayouts);
   const hasCollapsedLegacyPayouts = existingPayoutPeriods.some((row) => row.periodId === "0" || !row.periodId.includes(":"));
   const hasOzonPayoutHistory = settingsRow.ozonPayoutHistoryStartDate === startDate && !hasCollapsedLegacyPayouts;
-  const payoutFrom = hasOzonPayoutHistory ? from : new Date(`${startDate}T00:00:00.000Z`);
+  const payoutFrom = kind === "payouts_full"
+    ? new Date(`${startDate}T00:00:00.000Z`)
+    : hasOzonPayoutHistory ? from : new Date(`${startDate}T00:00:00.000Z`);
   const syncPayouts = async () => {
     summary.ozonPayoutHistoryFrom = payoutFrom.toISOString();
     const payoutRun = await run("payouts", () => importOzonPayouts(credentials, payoutFrom, to, progress), { from: payoutFrom, to });
@@ -997,7 +999,7 @@ export async function syncOzonData(jobId: string) {
   };
 
   const fullSync = ["scheduled", "manual", "full"].includes(kind);
-  if (kind === "payouts") {
+  if (kind === "payouts" || kind === "payouts_full") {
     await syncPayouts();
   } else if (kind === "orders") {
     const ordersRun = await run("orders", () => importPostings(credentials, from, to, progress));

@@ -419,8 +419,9 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
   const finalizedOrderProfitCents = [...profitByPosting.values()].reduce((total, result) => total + (result.profitCents ?? 0), 0);
   const orderProfitIncompleteCount = [...profitByPosting.values()].filter((result) => result.missingCost).length;
 
+  const paidPayoutRows = payoutRows.filter((payout) => !new Decimal(payout.amount).isZero());
   const payoutByCurrency = new Map<string, Decimal>();
-  for (const payout of payoutRows) {
+  for (const payout of paidPayoutRows) {
     const currencyCode = payout.currencyCode.toUpperCase();
     payoutByCurrency.set(currencyCode, (payoutByCurrency.get(currencyCode) ?? new Decimal(0)).plus(payout.amount));
   }
@@ -452,7 +453,7 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
       expenses: manualExpenseOutflow.toFixed(2),
       total: actualCashTotal,
       loaded: payoutHistoryLoaded,
-      periods: new Set(payoutRows.map((payout) => payout.periodId)).size,
+      periods: new Set(paidPayoutRows.map((payout) => payout.periodId)).size,
       unsupportedCurrencies: unsupportedPayoutCurrencies,
     },
     products: visibleProductRows.map((product) => ({
