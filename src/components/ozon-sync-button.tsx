@@ -120,7 +120,9 @@ export function OzonSyncButton({ kind, label, completedMessage }: OzonSyncButton
 
   const description = kind === "orders"
     ? "Загружает из Ozon заказы, их статусы и связанные денежные суммы."
-    : "Загружает из Ozon возвраты, их статусы и связанные денежные суммы.";
+    : kind === "returns"
+      ? "Загружает из Ozon возвраты, их статусы и связанные денежные суммы."
+      : "Загружает отчёты выплат Ozon за весь период учёта.";
 
   const buttonLabel = state === "checking" ? "Проверяем…" : state === "queued" ? "В очереди…" : state === "running" ? "Синхронизируем…" : label;
   const summary = asRecord(activeJob?.summary);
