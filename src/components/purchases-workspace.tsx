@@ -84,7 +84,6 @@ function PurchasePicker({
           aria-controls="purchase-options"
           aria-activedescendant={activePurchase && getId(activePurchase) ? `purchase-option-${getId(activePurchase)}` : undefined}
           autoComplete="off"
-          required
           value={open ? query : selected ? purchaseSummary(selected) : query}
           placeholder="Артикул, комментарий, количество, сумма или дата"
           onFocus={() => { setOpen(true); setQuery(""); setActiveIndex(-1); }}
@@ -140,6 +139,8 @@ export function PurchasesWorkspace() {
   const [products, setProducts] = useState<JsonRecord[]>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [receiptError, setReceiptError] = useState("");
+  const [receiptSuccess, setReceiptSuccess] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [receivedAt, setReceivedAt] = useState(localToday());
@@ -212,35 +213,55 @@ export function PurchasesWorkspace() {
     setHistoryPurchaseId(id);
     setHistoryFilters({});
     setHistoryPage(1);
-    document.getElementById("receipt-history")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setEditingReceiptId("");
+    setSelectedId(id);
+    const expectedQuantity = Number(purchase.expectedQuantity);
+    setLines([{
+      productId: typeof purchase.productId === "string" ? purchase.productId : "",
+      quantity: Number.isFinite(expectedQuantity) && expectedQuantity > 0 ? String(expectedQuantity) : "",
+    }]);
+    setReceivedAt(localToday());
+    setNote("");
+    setError("");
+    setSuccess("");
+    setReceiptError("");
+    setReceiptSuccess("");
+    document.getElementById("receipt-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function resetReceiptForm() {
     setEditingReceiptId(""); setSelectedId(""); setLines([]); setNote(""); setReceivedAt(localToday());
+    setReceiptError(""); setReceiptSuccess("");
   }
 
   async function submitReceipt(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedId || !selectedPurchase) {
-      setError("Выберите закупку из списка.");
+      setReceiptError("Выберите закупку из списка.");
+      setReceiptSuccess("");
       return;
     }
     if (lines.length === 0 || lines.some((line) => !line.productId || !line.quantity || !Number.isInteger(Number(line.quantity)) || Number(line.quantity) <= 0)) {
-      setError("Укажите фактически полученные товары и целое количество штук.");
+      setReceiptError("Укажите, какие товары приехали и сколько штук.");
+      setReceiptSuccess("");
       return;
     }
-    setBusy(true); setError(""); setSuccess("");
+    setBusy(true); setError(""); setSuccess(""); setReceiptError(""); setReceiptSuccess("");
     try {
       const body = { ...(editingReceiptId ? {} : { purchaseId: selectedId }), receivedAt, lines: lines.map((line) => ({ productId: line.productId, quantity: Number(line.quantity) })), note };
       await requestJson(editingReceiptId ? `/api/purchases/receipts?id=${encodeURIComponent(editingReceiptId)}` : "/api/purchases/receipts", { method: editingReceiptId ? "PATCH" : "POST", body: JSON.stringify(body) });
-      resetReceiptForm(); setSuccess(editingReceiptId ? "Приёмка изменена." : "Приёмка записана."); setRefreshKey((value) => value + 1);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось записать приёмку"); }
+      const message = editingReceiptId ? "Приёмка изменена." : "Приёмка записана.";
+      resetReceiptForm(); setReceiptSuccess(message); setRefreshKey((value) => value + 1);
+    } catch (reason) {
+      setReceiptError(reason instanceof Error ? reason.message : "Не удалось записать приёмку.");
+    }
     finally { setBusy(false); }
   }
 
   function editReceipt(receipt: JsonRecord) {
     const receiptId = getId(receipt);
     if (!receiptId) return;
+    setReceiptError(""); setReceiptSuccess("");
     setEditingReceiptId(receiptId);
     setSelectedId(typeof receipt.purchaseId === "string" ? receipt.purchaseId : "");
     setReceivedAt(typeof receipt.receivedAt === "string" ? receipt.receivedAt.slice(0, 10) : localToday());
@@ -329,6 +350,7 @@ export function PurchasesWorkspace() {
       <form className="panel-body" onSubmit={submitReceipt}>
         <div className="form-grid">
           {editingReceiptId ? <div className="field wide"><label>Закупка</label><div className="receipt-purchase-readonly">{selectedPurchase ? <><ProductArticle identifier={String(selectedPurchase.sku ?? "Артикул не указан")} productId={String(selectedPurchase.productId ?? "")} fallback={selectedPurchase} /> · {formatPurchaseDate(selectedPurchase.purchasedAt)} · оплачено {formatPurchaseAmount(selectedPurchase.amountPaid)} ₽</> : "Закупка"}</div></div> : <PurchasePicker purchases={purchases} selectedId={selectedId} onSelect={(purchase) => {
+            setReceiptError(""); setReceiptSuccess("");
             if (!purchase) { setSelectedId(""); setLines([]); return; }
             const id = getId(purchase);
             const expectedQuantity = Number(purchase.expectedQuantity);
@@ -347,6 +369,8 @@ export function PurchasesWorkspace() {
           </div>)}
           <p className="form-help">Приёмка сразу меняет остаток. Средняя себестоимость начнёт учитывать закупку только после завершения и рассчитается по всему фактически принятому количеству.</p>
         </div>
+        {receiptError && <div className="error-banner" role="alert"><AlertCircle size={15} />{receiptError}</div>}
+        {receiptSuccess && <div className="success-banner" role="status"><CheckCircle2 size={15} />{receiptSuccess}</div>}
         <div className="form-actions">
           {editingReceiptId && <button type="button" className="button secondary" disabled={busy} onClick={resetReceiptForm}>Отмена</button>}
           <button className="button" disabled={busy || purchases.length === 0 || catalog.length === 0}>{busy ? "Сохраняем…" : editingReceiptId ? "Сохранить приёмку" : "Записать приёмку"}</button>
