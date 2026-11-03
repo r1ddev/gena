@@ -211,6 +211,13 @@
       "when": 1793724340762,
       "tag": "0029_payout_manual_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793725719029,
+      "tag": "0030_remove_payout_manual_scope",
+      "breakpoints": true
     }
   ]
 }

@@ -124,7 +124,7 @@ function ActualCashCard({ actualCash }: { actualCash: JsonRecord | null }) {
     <div className="panel-head"><div className="breakdown-heading"><h2>Реальные деньги</h2><span className="breakdown-info">
       <button className="breakdown-info-button" type="button" aria-label="Как рассчитываются реальные деньги" aria-describedby="breakdown-actual-cash"><Info size={14} aria-hidden="true" /></button>
       <span className="breakdown-tooltip" role="tooltip" id="breakdown-actual-cash">Выплаты Ozon минус уже оплаченные закупки и добавленные вами расходы. Зачисление денег проверьте по выписке банка.</span>
-    </span></div><div className="payouts-card-actions"><Link className="button secondary small" href="/payouts">Список выплат</Link><CreditCard size={17} color="#178b63" /></div></div>
+    </span></div><CreditCard size={17} color="#178b63" /></div>
     <div className="panel-body mini-stat-list">
       <div className="mini-stat" style={{ borderBottom: 0, paddingBottom: 4 }}>
         <span className="mini-stat-label" style={{ color: "var(--ink)", fontWeight: 800 }}><ArrowUpRight size={14} color="#178b63" />Выплаты Ozon</span>
