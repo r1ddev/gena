@@ -7,8 +7,8 @@ export default function PayoutsPage() {
     <PageHeader
       eyebrow="Деньги и затраты"
       title="Выплаты Ozon"
-      description="Сумма перевода, состав отчёта Ozon и начисления по отправлениям за тот же период."
-      actions={<OzonSyncButton kind="payouts_full" label="Обновить расшифровки" completedMessage="Состав выплат обновлён." />}
+      description="Фактические суммы переводов по отчётным периодам. Ozon не разбивает перевод по товарам."
+      actions={<OzonSyncButton kind="payouts_full" label="Обновить выплаты" completedMessage="Выплаты обновлены." />}
     />
     <PayoutsWorkspace />
   </>;
