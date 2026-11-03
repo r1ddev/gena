@@ -204,6 +204,13 @@
       "when": 1793217923239,
       "tag": "0028_youthful_beyonder",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793724340762,
+      "tag": "0029_payout_manual_scope",
+      "breakpoints": true
     }
   ]
 }

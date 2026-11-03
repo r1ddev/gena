@@ -1,0 +1,1 @@
+ALTER TABLE "ozon_payouts" ADD COLUMN "manual_scope" text;

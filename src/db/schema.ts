@@ -250,6 +250,7 @@ export const ozonPayouts = pgTable(
     periodEnd: date("period_end").notNull(),
     currencyCode: text("currency_code").notNull().default("RUB"),
     amount: money("amount"),
+    manualScope: text("manual_scope"),
     raw: jsonb("raw").$type<Record<string, unknown>>().notNull().default({}),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
