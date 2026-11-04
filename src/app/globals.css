@@ -521,8 +521,9 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
   .return-link-form { align-items: stretch; flex-direction: column; }
   .return-link-form input { width: 100%; }
   .audit-log-filters { align-items: stretch; flex-direction: column; }
-  .audit-log-search { align-items: stretch; flex-direction: column; }
-  .audit-log-search .button { align-self: flex-end; }
+  .audit-log-search { display: grid; flex: 0 1 auto; grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+  .audit-log-search .field { flex: none; }
+  .audit-log-search .button { align-self: end; }
   .audit-log-source { width: 100%; flex-basis: auto; }
   .audit-log-total { padding: 0; }
   .audit-log-entry { padding: 12px; }
