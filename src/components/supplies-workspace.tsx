@@ -7,6 +7,13 @@ import { ResourcePage } from "./resource-page";
 import { ProductSelect, productFallbackOption, productSelectOptions, type ProductSelectOption } from "./product-select";
 
 type SupplyEditLine = { productId: string; quantity: string; sku: string; title: string };
+const supplyMarketplaceOptions = [
+  { value: "ozon", label: "Ozon" },
+  { value: "wb", label: "WB" },
+  { value: "avito", label: "Авито" },
+  { value: "other", label: "Другая площадка" },
+  { value: "unknown", label: "Не указана" },
+];
 
 function productOptions(value: unknown): ProductSelectOption[] { return productSelectOptions(value); }
 
@@ -58,6 +65,7 @@ function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: Json
   }) : [];
   const [lines, setLines] = useState<SupplyEditLine[]>(initialLines.length ? initialLines : [{ productId: "", quantity: "", sku: "", title: "" }]);
   const [suppliedAt, setSuppliedAt] = useState(typeof supply.suppliedAt === "string" ? supply.suppliedAt.slice(0, 10) : localToday());
+  const [marketplace, setMarketplace] = useState(String(supply.marketplace ?? "unknown"));
   const [note, setNote] = useState(String(supply.note ?? ""));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -71,6 +79,7 @@ function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: Json
         method: "PATCH",
         body: JSON.stringify({
           suppliedAt,
+          marketplace,
           note,
           lines: lines.map((line) => ({ productId: line.productId, quantity: Number(line.quantity) })),
         }),
@@ -87,6 +96,7 @@ function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: Json
         {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}
         <div className="form-grid">
           <div className="field"><label htmlFor="edit-supply-date">Дата поставки *</label><input id="edit-supply-date" type="date" required value={suppliedAt} onChange={(event) => setSuppliedAt(event.target.value)} /></div>
+          <div className="field"><label htmlFor="edit-supply-marketplace">Площадка *</label><select id="edit-supply-marketplace" value={marketplace} required onChange={(event) => setMarketplace(event.target.value)}>{supplyMarketplaceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
           <div className="field wide"><label htmlFor="edit-supply-note">Комментарий</label><input id="edit-supply-note" value={note} onChange={(event) => setNote(event.target.value)} /></div>
         </div>
         <div className="form-help" style={{ marginBottom: 8, color: "#5f6d64", fontWeight: 700 }}>Состав поставки</div>
@@ -124,7 +134,8 @@ export function SuppliesWorkspace() {
     description: "Создавайте поставки вручную после оформления заявки в Ozon. Сервис не ждёт приёмки: складской остаток перемещается сразу.",
     collectionUrl: "/api/supplies", createUrl: "/api/supplies", hideCreate: true,
     fields: [], columns: [
-      { key: "suppliedAt", label: "Дата", kind: "date" }, { key: "articles", label: "Артикулы", primary: true },
+      { key: "suppliedAt", label: "Дата", kind: "date" }, { key: "marketplaceLabel", label: "Площадка" }, { key: "articles", label: "Артикулы", primary: true },
+      { key: "shippingCost", label: "Доставка", kind: "money" },
       { key: "quantity", label: "Единиц", kind: "quantity" }, { key: "note", label: "Комментарий" },
     ],
     deleteUrl: (row: JsonRecord) => typeof row.id === "string" ? `/api/supplies?id=${encodeURIComponent(row.id)}` : null,

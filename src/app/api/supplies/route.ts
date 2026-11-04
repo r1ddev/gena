@@ -3,11 +3,13 @@ import { z } from "zod";
 import { db } from "@/db";
 import { productLinks, products, supplies, supplyLines } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
+import { reconcileOzonSupplyCosts } from "@/ozon/supply-cost-reconciliation";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 import { isoDate, positiveInteger } from "../_lib/validation";
 
 const supplySchema = z.object({
   suppliedAt: isoDate,
+  marketplace: z.enum(["ozon", "wb", "avito", "other", "unknown"]).optional(),
   note: z.string().trim().max(2000).optional().default(""),
   lines: z.array(z.object({
     productId: z.string().uuid(),
@@ -31,11 +33,13 @@ export async function GET(request: Request) {
     const activeProductIds = new Set(catalog.filter((product) => !product.archived).map((product) => product.id));
     const visibleLines = lines.filter((line) => activeProductIds.has(line.productId));
     const productById = new Map(catalog.map((product) => [product.id, product]));
+    const marketplaceLabels: Record<string, string> = { ozon: "Ozon", wb: "WB", avito: "Авито", other: "Другая площадка", unknown: "Не указана" };
     return { items: headers.flatMap((supply) => {
       const matching = visibleLines.filter((line) => line.supplyId === supply.id);
       if (matching.length === 0) return [];
       return {
         ...supply,
+        marketplaceLabel: marketplaceLabels[supply.marketplace] ?? marketplaceLabels.unknown,
         lines: matching.map((line) => ({
           ...line,
           sku: productById.get(line.productId)?.sku ?? line.productSkuSnapshot,
@@ -63,6 +67,7 @@ export async function POST(request: Request) {
       const [header] = await tx.insert(supplies).values({
         suppliedAt: body.suppliedAt,
         shippingCost: "0",
+        marketplace: body.marketplace ?? "ozon",
         note: body.note,
       }).returning();
       await tx.insert(supplyLines).values(body.lines.map((line) => ({
@@ -73,7 +78,9 @@ export async function POST(request: Request) {
       })));
       return header;
     });
-    return Response.json({ item }, { status: 201 });
+    await reconcileOzonSupplyCosts();
+    const [refreshed] = await db.select().from(supplies).where(eq(supplies.id, item.id));
+    return Response.json({ item: refreshed ?? item }, { status: 201 });
   } catch (error) { return errorResponse(error); }
 }
 
@@ -88,6 +95,8 @@ export async function PATCH(request: Request) {
     const currentUnitCosts = await loadCurrentUnitCosts();
     const item = await db.transaction(async (tx) => {
       const productsById = await loadProductSnapshots(tx, body.lines);
+      const [previous] = await tx.select().from(supplies).where(eq(supplies.id, supplyId));
+      if (!previous) throw new Error("Поставка не найдена.");
       const previousLines = await tx.select().from(supplyLines).where(eq(supplyLines.supplyId, supplyId));
       const previousCosts = new Map(previousLines.map((line) => [line.productId, {
         purchaseUnitCostSnapshot: line.purchaseUnitCostSnapshot,
@@ -95,10 +104,11 @@ export async function PATCH(request: Request) {
       }]));
       const [updated] = await tx.update(supplies).set({
         suppliedAt: body.suppliedAt,
-        shippingCost: "0",
+        marketplace: body.marketplace ?? previous.marketplace,
+        shippingCost: (body.marketplace ?? previous.marketplace) === "ozon" ? previous.shippingCost : "0",
+        ozonSupplyId: (body.marketplace ?? previous.marketplace) === "ozon" ? previous.ozonSupplyId : null,
         note: body.note,
       }).where(eq(supplies.id, supplyId)).returning();
-      if (!updated) throw new Error("Поставка не найдена.");
       await tx.delete(supplyLines).where(eq(supplyLines.supplyId, supplyId));
       await tx.insert(supplyLines).values(body.lines.map((line) => ({
         supplyId,
@@ -108,7 +118,9 @@ export async function PATCH(request: Request) {
       })));
       return updated;
     });
-    return Response.json({ item });
+    await reconcileOzonSupplyCosts();
+    const [refreshed] = await db.select().from(supplies).where(eq(supplies.id, item.id));
+    return Response.json({ item: refreshed ?? item });
   } catch (error) { return errorResponse(error); }
 }
 

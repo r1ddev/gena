@@ -187,6 +187,7 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
       }];
     }),
     supplies: [
+      // The displayed delivery amount mirrors Ozon type 12; finance accruals remain the single expense source.
       ...visibleSupplyRows.map((supply) => ({ productId: "", quantity: "0", shippingCost: supply.shippingCost, suppliedAt: supply.suppliedAt })),
       ...visibleSupplyLineRows.map((line) => ({ productId: line.productId, quantity: line.quantity, shippingCost: "0", suppliedAt: visibleSupplyRows.find((supply) => supply.id === line.supplyId)?.suppliedAt })),
     ],

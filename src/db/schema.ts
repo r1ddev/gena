@@ -138,10 +138,15 @@ export const supplies = pgTable("supplies", {
   id: id(),
   suppliedAt: date("supplied_at").notNull(),
   shippingCost: money("shipping_cost"),
+  marketplace: text("marketplace").notNull().default("unknown"),
+  ozonSupplyId: text("ozon_supply_id"),
   note: text("note").notNull().default(""),
   sourceKey: text("source_key").unique(),
   createdAt: createdAt(),
-});
+}, (table) => [
+  check("supplies_marketplace_check", sql`${table.marketplace} IN ('ozon', 'wb', 'avito', 'other', 'unknown')`),
+  uniqueIndex("supplies_ozon_supply_id_unique_idx").on(table.ozonSupplyId),
+]);
 
 export const supplyLines = pgTable(
   "supply_lines",

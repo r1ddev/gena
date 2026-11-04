@@ -218,6 +218,13 @@
       "when": 1793725719029,
       "tag": "0030_remove_payout_manual_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793818514294,
+      "tag": "0031_supply_marketplace_attribution",
+      "breakpoints": true
     }
   ]
 }

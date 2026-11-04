@@ -26,6 +26,7 @@ import { resolveOzonReturnTimeline } from "@/ozon/return-status";
 import { parseOzonCompensationXlsx } from "@/ozon/compensation";
 import { resolveOzonSyncRange, splitUtcDateRange } from "@/ozon/sync-range";
 import { chooseExternalProductRecord, dispositionAfterProductLink, exactProductLinkForOffer, externalProductKey, resolveExternalProductLink } from "@/ozon/external-product";
+import { reconcileOzonSupplyCosts } from "@/ozon/supply-cost-reconciliation";
 
 type JsonRecord = Record<string, unknown>;
 type ProgressCounts = { current: number; total: number };
@@ -933,6 +934,7 @@ export async function syncOzonData(jobId: string) {
     compensationReports: "Загрузка расшифровок компенсаций Ozon",
     payouts: "Загрузка отчётов о выплатах Ozon",
     writeoffs: "Загрузка списаний Ozon",
+    supplyCosts: "Сверка доставки Ozon по поставкам",
   };
   const run = async (label: string, task: () => Promise<unknown>, range = { from, to }) => {
     try {
@@ -971,6 +973,8 @@ export async function syncOzonData(jobId: string) {
       summary.ozonSharedExpenseHistoryStartDate = startDate;
     }
     if (!accrualRun.ok) return;
+    const supplyCostRun = await run("supplyCosts", reconcileOzonSupplyCosts, { from: accrualFrom, to });
+    if (supplyCostRun.ok) summary.ozonSupplyCosts = supplyCostRun.result;
     summary.ozonCompensationReportHistoryFrom = compensationFrom.toISOString();
     const reportRun = await run("compensationReports", () => importOzonCompensationReports(credentials, compensationFrom, to, progress), { from: compensationFrom, to });
     if (reportRun.ok && !hasOzonCompensationReportHistory) {
