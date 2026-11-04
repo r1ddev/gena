@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import {
   Archive, ArrowLeftRight, Boxes, Calculator, ChartNoAxesCombined,
-  ChevronRight, CircleDollarSign, ClipboardList, History, LayoutDashboard,
+  ChevronRight, CircleDollarSign, ClipboardList, FileClock, History, LayoutDashboard,
   Menu, Package, RotateCcw, Settings2, ShoppingCart, Truck,
   Wallet, X,
 } from "lucide-react";
@@ -38,6 +38,7 @@ const navSections = [
     links: [
       { href: "/scenario", label: "Номинальный расчёт", icon: Calculator },
       { href: "/added-cost-history", label: "История добавочной стоимости", icon: History },
+      { href: "/audit-logs", label: "Журнал действий", icon: FileClock },
     ],
   },
 ];

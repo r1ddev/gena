@@ -225,6 +225,13 @@
       "when": 1793818514294,
       "tag": "0031_supply_marketplace_attribution",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793822770672,
+      "tag": "0032_add_audit_events",
+      "breakpoints": true
     }
   ]
 }

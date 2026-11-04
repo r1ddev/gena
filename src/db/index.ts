@@ -6,6 +6,7 @@ const globalForDb = globalThis as unknown as { pool?: Pool };
 
 export const pool = globalForDb.pool ?? new Pool({
   connectionString: process.env.DATABASE_URL,
+  application_name: process.env.PGAPPNAME ?? "gena-web",
   max: process.env.NODE_ENV === "production" ? 10 : 5,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,

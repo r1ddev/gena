@@ -390,6 +390,27 @@ export const syncJobs = pgTable(
   (table) => [index("sync_jobs_status_requested_idx").on(table.status, table.requestedAt)],
 );
 
+export const auditEvents = pgTable(
+  "audit_events",
+  {
+    id: id(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).defaultNow().notNull(),
+    source: text("source").notNull(),
+    entityType: text("entity_type").notNull(),
+    action: text("action").notNull(),
+    recordKey: text("record_key").notNull().default(""),
+    transactionId: text("transaction_id").notNull(),
+    beforeData: jsonb("before_data").$type<Record<string, unknown>>(),
+    afterData: jsonb("after_data").$type<Record<string, unknown>>(),
+    changedFields: jsonb("changed_fields").$type<Record<string, { before: unknown; after: unknown }>>().notNull().default({}),
+  },
+  (table) => [
+    index("audit_events_occurred_at_idx").on(table.occurredAt),
+    index("audit_events_entity_record_idx").on(table.entityType, table.recordKey),
+    index("audit_events_source_idx").on(table.source),
+  ],
+);
+
 export const importBatches = pgTable("import_batches", {
   id: id(),
   fileName: text("file_name").notNull(),
