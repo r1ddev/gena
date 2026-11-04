@@ -25,6 +25,7 @@ import { chooseReturnPostingNumber } from "@/ozon/returns";
 import { resolveOzonReturnTimeline } from "@/ozon/return-status";
 import { parseOzonCompensationXlsx } from "@/ozon/compensation";
 import { resolveOzonSyncRange, splitUtcDateRange } from "@/ozon/sync-range";
+import { reconcileOzonSupplyIds } from "@/ozon/supply-order-reconciliation";
 import { chooseExternalProductRecord, dispositionAfterProductLink, exactProductLinkForOffer, externalProductKey, resolveExternalProductLink } from "@/ozon/external-product";
 import { reconcileOzonSupplyCosts } from "@/ozon/supply-cost-reconciliation";
 
@@ -934,6 +935,7 @@ export async function syncOzonData(jobId: string) {
     compensationReports: "Загрузка расшифровок компенсаций Ozon",
     payouts: "Загрузка отчётов о выплатах Ozon",
     writeoffs: "Загрузка списаний Ozon",
+    supplyIds: "Сопоставление поставок Ozon",
     supplyCosts: "Сверка доставки Ozon по поставкам",
   };
   const run = async (label: string, task: () => Promise<unknown>, range = { from, to }) => {
@@ -965,6 +967,8 @@ export async function syncOzonData(jobId: string) {
   const compensationFrom = hasOzonCompensationReportHistory ? from : new Date(`${startDate}T00:00:00.000Z`);
   const syncAccruals = async () => {
     summary.ozonSharedExpenseHistoryFrom = accrualFrom.toISOString();
+    const supplyIdRun = await run("supplyIds", () => reconcileOzonSupplyIds(credentials, progress), { from: accrualFrom, to });
+    if (supplyIdRun.ok) summary.ozonSupplyIdReconciliation = supplyIdRun.result;
     const accrualRun = await run("accruals", () => importDailyAccruals(credentials, accrualFrom, to, progress), { from: accrualFrom, to });
     if (accrualRun.ok && !hasOzonSharedExpenseHistory) {
       await db.update(appSettings)
