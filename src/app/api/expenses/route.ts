@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { expenses, externalItems, financeAccruals, ozonCompensationReports, postingItems, postings, productImages, productLinks, products } from "@/db/schema";
+import { appSettings, expenses, externalItems, financeAccruals, ozonCompensationReports, postingItems, postings, productImages, productLinks, products } from "@/db/schema";
 import { buildFinanceOrderSkuPostingMap, buildFinancePostingProductIdentifiers, financeAccrualRelatedOfferIds, financeAccrualRelatedSkus, isOzonBuyerOrderAccrual, isOzonSharedExpense, isOzonWriteoffCompensation, ozonExpenseLabel, resolveFinanceAccrualPostingNumber } from "@/ozon/finance";
 import { financeExpenseComponents } from "@/ozon/expense-details";
 import { matchOzonCompensationReports } from "@/ozon/compensation";
@@ -19,7 +19,7 @@ const expenseSchema = z.object({
 export async function GET(request: Request) {
   return handleLocalGet(request, async () => {
     const source = new URL(request.url).searchParams.get("source");
-    const [manualExpenses, ozonAccruals, compensationReports, postingRows, postingItemRows, externalRows, catalogRows, catalogLinks, productImageRows] = await Promise.all([
+    const [manualExpenses, ozonAccruals, compensationReports, postingRows, postingItemRows, externalRows, catalogRows, catalogLinks, productImageRows, settingsRows] = await Promise.all([
       db.select().from(expenses).orderBy(desc(expenses.spentAt), desc(expenses.createdAt)),
       db.select().from(financeAccruals),
       db.select().from(ozonCompensationReports),
@@ -29,7 +29,9 @@ export async function GET(request: Request) {
       db.select({ id: products.id, sku: products.sku, title: products.title, archived: products.archived }).from(products),
       db.select({ productId: productLinks.productId, offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks),
       db.select({ productId: productImages.productId }).from(productImages),
+      db.select({ accountingStartDate: appSettings.accountingStartDate }).from(appSettings).where(eq(appSettings.id, 1)).limit(1),
     ]);
+    const accountingStartDate = settingsRows[0]?.accountingStartDate ?? "0000-01-01";
     const manualItems = manualExpenses.map((item) => ({ ...item, source: "mine", sourceLabel: "Мои" }));
     const financePostingByOrderSku = buildFinanceOrderSkuPostingMap(postingRows, postingItemRows);
     const financePostingProductIdentifiers = buildFinancePostingProductIdentifiers(postingRows, postingItemRows);
@@ -157,7 +159,10 @@ export async function GET(request: Request) {
       const description = compensationDetails.length
         ? compensationReasons.length === 1 ? compensationReasons[0] : `Компенсация Ozon · ${compensationReasons.length} основания`
         : ozonExpenseLabel(row.typeId, row.raw, row.accruedCategory);
-      const accountingTreatment = isWriteoffCompensation
+      const beforeAccountingStart = row.accrualDate < accountingStartDate;
+      const accountingTreatment = beforeAccountingStart
+        ? "До даты начала учёта · не входит в расчёты"
+        : isWriteoffCompensation
         ? "Компенсация · в прибыли отдельно"
         : isAddedCost
           ? amount < 0 ? "Увеличивает добавочную стоимость" : amount > 0 ? "Уменьшает добавочную стоимость" : "Не влияет на добавочную стоимость"

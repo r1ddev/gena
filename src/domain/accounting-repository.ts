@@ -57,6 +57,7 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
   ]);
 
   const catalogWhitelist = buildCatalogProductWhitelist(productRows, catalogLinkRows, externalRows);
+  const accountingStartDate = settingsRows[0]?.accountingStartDate ?? "0000-01-01";
   const compensationByAccrual = matchOzonCompensationReports(financeRows, compensationReports);
   const currentCatalogProductIds = catalogWhitelist.productIds;
   const allFinancePostingByOrderSku = buildFinanceOrderSkuPostingMap(postingRows, postingItemRows);
@@ -83,6 +84,7 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
   const visiblePostingNumbers = new Set(visiblePostingRows.map((posting) => posting.externalId));
   const knownPostingNumbers = new Set(postingRows.map((posting) => posting.externalId));
   const visibleFinanceRows = financeRows.filter((row) => {
+    if (row.accrualDate < accountingStartDate) return false;
     const compensationDetails = compensationByAccrual.get(row.externalKey) ?? [];
     const postingNumber = resolveFinanceAccrualPostingNumber(row, allFinancePostingByOrderSku);
     if (postingNumber && knownPostingNumbers.has(postingNumber) && !visiblePostingNumbers.has(postingNumber) && !compensationDetails.length) return false;

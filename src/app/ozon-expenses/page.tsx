@@ -8,7 +8,7 @@ import { OzonOrderLink } from "@/components/ozon-order-link";
 export default function OzonExpensesPage() {
   return <ResourcePage config={{
     title: "Операции Ozon", eyebrow: "Деньги и затраты",
-    description: "Операции Ozon без привязки к отправлению покупателю. Списание отображается со знаком минус, начисление — со знаком плюс. Общие затраты входят в добавочную стоимость, компенсации за списания — в прибыль отдельно.",
+    description: "Операции Ozon без привязки к отправлению покупателю. Списание отображается со знаком минус, начисление — со знаком плюс. Операции до даты начала учёта остаются в списке, но в расчёты не входят.",
     collectionUrl: "/api/expenses?source=ozon", createUrl: "/api/expenses", hideCreate: true,
     fields: [],
     columns: [

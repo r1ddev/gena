@@ -79,7 +79,9 @@ function expenseExplanation(label: string, treatment: string, typeId: string) {
     : "");
 
   let accountingDescription = treatment;
-  if (treatment === "Увеличивает добавочную стоимость") {
+  if (treatment.startsWith("До даты начала учёта")) {
+    accountingDescription = "Запись остаётся в истории Ozon, но не входит в расчёты из-за даты операции.";
+  } else if (treatment === "Увеличивает добавочную стоимость") {
     accountingDescription = "Списание входит в общие расходы Ozon и распределяется между товарами пропорционально закупочной стоимости.";
   } else if (treatment === "Уменьшает добавочную стоимость") {
     accountingDescription = "Начисление уменьшает общие расходы Ozon, распределяемые между товарами пропорционально их закупочной стоимости.";
