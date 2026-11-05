@@ -28,7 +28,7 @@ const execFile = promisify(execFileCallback);
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const asString = (value: unknown) => value === undefined || value === null ? "" : String(value);
 const CARGO_LABEL_SIZE = { width: 349, height: 1280 };
-const CARGO_LABEL_FORMAT_VERSION = 2;
+const CARGO_LABEL_FORMAT_VERSION = 3;
 
 type CargoLabelParts = {
   supplyCode: Buffer;
@@ -67,9 +67,24 @@ async function composeLongCargoLabel(parts: CargoLabelParts) {
   return formatted;
 }
 
+async function binarizeCargoLabelBarcode(png: Buffer) {
+  const barcode = await sharp(png)
+    .extract({ left: 0, top: 1190, width: CARGO_LABEL_SIZE.width, height: 90 })
+    .threshold(160)
+    .png()
+    .toBuffer();
+  return sharp(png)
+    .composite([{ input: barcode, left: 0, top: 1190 }])
+    .png()
+    .withMetadata({ density: 300 })
+    .toBuffer();
+}
+
 async function formatCargoLabelPng(png: Buffer) {
   const metadata = await sharp(png).metadata();
-  if (metadata.width === CARGO_LABEL_SIZE.width && metadata.height === CARGO_LABEL_SIZE.height) return png;
+  if (metadata.width === CARGO_LABEL_SIZE.width && metadata.height === CARGO_LABEL_SIZE.height) {
+    return binarizeCargoLabelBarcode(png);
+  }
   if (!metadata.width || !metadata.height) throw new Error("Не удалось прочитать изображение этикетки.");
 
   const rotated = await sharp(png).rotate(90).png().toBuffer();
@@ -111,7 +126,16 @@ async function formatCargoLabelPng(png: Buffer) {
       .toBuffer(),
   ]);
 
-  return composeLongCargoLabel({ supplyCode, supplyCaption, headerIcon, headerText, handoffPoint, cargoId, supplier, barcode });
+  return binarizeCargoLabelBarcode(await composeLongCargoLabel({
+    supplyCode,
+    supplyCaption,
+    headerIcon,
+    headerText,
+    handoffPoint,
+    cargoId,
+    supplier,
+    barcode,
+  }));
 }
 
 async function reformatLegacyCargoLabel(png: Buffer) {
@@ -139,7 +163,7 @@ async function reformatLegacyCargoLabel(png: Buffer) {
     .resize({ width: 349, kernel: "nearest" })
     .png()
     .toBuffer();
-  return composeLongCargoLabel({
+  return binarizeCargoLabelBarcode(await composeLongCargoLabel({
     supplyCode,
     supplyCaption,
     headerIcon,
@@ -148,7 +172,7 @@ async function reformatLegacyCargoLabel(png: Buffer) {
     cargoId,
     supplier,
     barcode: barcodeForPrint,
-  });
+  }));
 }
 
 async function pdfPageToPng(pdf: Buffer) {
