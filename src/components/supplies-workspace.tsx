@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, Barcode, CheckCircle2, Download, Pencil, Plus, Trash2, Truck, X } from "lucide-react";
+import { AlertCircle, Barcode, CheckCircle2, Download, Pencil, Plus, Share2, Trash2, Truck, X } from "lucide-react";
 import { asRecord, getId, localToday, requestJson, type JsonRecord } from "./api";
 import { ResourcePage } from "./resource-page";
 import { ProductSelect, productFallbackOption, productSelectOptions, type ProductSelectOption } from "./product-select";
@@ -151,6 +151,8 @@ function SupplyLabelsDialog({ supply, onClose }: { supply: JsonRecord; onClose: 
   const [error, setError] = useState("");
   const [labels, setLabels] = useState<SupplyCargoLabel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sharingCargoId, setSharingCargoId] = useState("");
+  const [shareErrors, setShareErrors] = useState<Record<string, string>>({});
   const id = getId(supply);
   const ozonSupplyId = typeof supply.ozonSupplyId === "string" ? supply.ozonSupplyId : "";
   const title = typeof supply.note === "string" && supply.note.trim() ? supply.note : `Поставка ${ozonSupplyId ? `Ozon № ${ozonSupplyId}` : ""}`;
@@ -179,6 +181,30 @@ function SupplyLabelsDialog({ supply, onClose }: { supply: JsonRecord; onClose: 
     };
   }, [id]);
 
+  async function shareCargoLabel(label: SupplyCargoLabel) {
+    if (!label.imageUrl) return;
+    setSharingCargoId(label.id);
+    setShareErrors((current) => ({ ...current, [label.id]: "" }));
+    try {
+      const response = await fetch(label.imageUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error("Не удалось загрузить этикетку.");
+      const file = new File([await response.blob()], `cargo-${label.cargoId}.png`, { type: "image/png" });
+      const files = [file];
+      if (!navigator.share || !navigator.canShare?.({ files })) {
+        throw new Error("Этот браузер не поддерживает отправку PNG через системное меню.");
+      }
+      await navigator.share({ files, title: `Этикетка грузоместа ${label.cargoId}` });
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setShareErrors((current) => ({
+        ...current,
+        [label.id]: reason instanceof Error ? reason.message : "Не удалось открыть меню отправки.",
+      }));
+    } finally {
+      setSharingCargoId("");
+    }
+  }
+
   return <div className="product-edit-backdrop">
     <section className="panel product-edit-dialog supply-label-dialog" role="dialog" aria-modal="true" aria-labelledby="supply-label-title">
       <div className="panel-head"><div><h2 id="supply-label-title">{title}</h2><span className="small-note">{typeof supply.marketplaceLabel === "string" ? supply.marketplaceLabel : "Поставка"}</span></div><button type="button" className="icon-button" aria-label="Закрыть" onClick={onClose}><X size={15} /></button></div>
@@ -190,8 +216,14 @@ function SupplyLabelsDialog({ supply, onClose }: { supply: JsonRecord; onClose: 
                 ? <p className="supply-label-empty">Для этой поставки грузоместа пока не найдены.</p>
                 : <div className="supply-label-list">{labels.map((label) => <article className="supply-label-card" key={label.id}>
                     <div className="supply-label-card-head"><div><strong>Грузоместо {label.cargoId}</strong><span>{cargoTypeLabel(label.cargoType)}</span></div>
-                      {label.ready && label.imageUrl && <a className="button secondary small" href={`${label.imageUrl}?download=1`}><Download size={13} />Скачать PNG</a>}
+                      {label.ready && label.imageUrl && <div className="supply-label-card-actions">
+                        <a className="button secondary small" href={`${label.imageUrl}?download=1`}><Download size={13} />Скачать PNG</a>
+                        <button type="button" className="button secondary small" disabled={Boolean(sharingCargoId)} onClick={() => void shareCargoLabel(label)}>
+                          <Share2 size={13} />{sharingCargoId === label.id ? "Открываем…" : "Поделиться"}
+                        </button>
+                      </div>}
                     </div>
+                    {shareErrors[label.id] && <p className="supply-label-share-error" role="alert">{shareErrors[label.id]}</p>}
                     {label.ready && label.imageUrl
                       ? <div className="supply-label-preview"><img className="supply-label-image" src={label.imageUrl} alt={`Этикетка грузоместа ${label.cargoId}`} /></div>
                       : <p className="supply-label-pending">{label.needsRetry ? "Ozon не подготовил этикетку. Повторим при следующей синхронизации." : "Этикетка появится после следующей синхронизации с Ozon."}</p>}
