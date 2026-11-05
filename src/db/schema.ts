@@ -164,6 +164,26 @@ export const supplyLines = pgTable(
   (table) => [index("supply_lines_product_idx").on(table.productId)],
 );
 
+export const supplyCargoLabels = pgTable(
+  "supply_cargo_labels",
+  {
+    id: id(),
+    supplyId: uuid("supply_id").notNull().references(() => supplies.id, { onDelete: "cascade" }),
+    ozonSupplyId: text("ozon_supply_id").notNull(),
+    cargoId: text("cargo_id").notNull(),
+    cargoType: text("cargo_type").notNull().default(""),
+    bundleId: text("bundle_id").notNull().default(""),
+    labelPng: bytea("label_png"),
+    labelError: text("label_error").notNull().default(""),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("supply_cargo_labels_supply_cargo_unique_idx").on(table.supplyId, table.cargoId),
+    index("supply_cargo_labels_supply_idx").on(table.supplyId),
+  ],
+);
+
 export const expenses = pgTable(
   "expenses",
   {

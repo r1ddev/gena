@@ -96,13 +96,8 @@ function stringifyOzonBody(body: unknown) {
   return [...integers].reduce((result, [marker, raw]) => result.replace(JSON.stringify(marker), raw), json ?? "null");
 }
 
-export async function ozonDownloadLabelFile(
-  fileGuid: string | null,
-  fileUrl: string | null,
-  credentials: { clientId: string; apiKey: string },
-) {
-  if (!fileGuid && !fileUrl) throw new OzonApiError("Ozon did not return a label file identifier.");
-  let url = fileUrl ? trustedLabelUrl(fileUrl) : new URL(`/v1/cargoes-label/file/${encodeURIComponent(fileGuid!)}`, API_ROOT);
+export async function ozonDownloadLabelFile(fileUrl: string, credentials: { clientId: string; apiKey: string }) {
+  let url = trustedLabelUrl(fileUrl);
 
   for (let redirects = 0; redirects <= 3; redirects += 1) {
     await sleep(ozonRequestWait(lastRequestAt));

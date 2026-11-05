@@ -239,6 +239,13 @@
       "when": 1793865839902,
       "tag": "0033_exclude_ozon_payouts_from_accounting",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793877303418,
+      "tag": "0034_supply_cargo_labels",
+      "breakpoints": true
     }
   ]
 }

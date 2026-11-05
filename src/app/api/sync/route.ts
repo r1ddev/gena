@@ -5,9 +5,10 @@ import { appSettings, syncJobs } from "@/db/schema";
 import { resolveOzonSyncRange } from "@/ozon/sync-range";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
 
-const syncRequestSchema = z.object({ kind: z.enum(["orders", "returns", "payouts", "payouts_full", "full"]).default("full") });
+const syncRequestSchema = z.object({ kind: z.enum(["orders", "returns", "payouts", "payouts_full", "labels", "full"]).default("full") });
 const fullSyncKinds = ["full", "manual", "scheduled"];
 const payoutSyncKinds = ["payouts", "payouts_full"];
+const supplySyncKinds = ["orders", "returns", "labels", "full"];
 
 export async function GET(request: Request) {
   return handleLocalGet(request, async () => {
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
     const active = await db.select().from(syncJobs).where(inArray(syncJobs.status, ["queued", "running"]));
     const conflictingJob = active.find((job) => job.kind === kind
       || (payoutSyncKinds.includes(job.kind) && payoutSyncKinds.includes(kind))
+      || (supplySyncKinds.includes(job.kind) && supplySyncKinds.includes(kind))
       || fullSyncKinds.includes(job.kind)
       || kind === "full");
     if (conflictingJob) {

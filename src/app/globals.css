@@ -307,8 +307,18 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
 .form-panel { margin-bottom: 17px; }
 .product-edit-backdrop { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(15, 29, 21, .42); }
 .product-edit-dialog { width: min(850px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
-.supply-label-dialog { width: min(520px, 100%); }
-.supply-label-description { margin: 0 0 18px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.supply-label-dialog { width: min(760px, 100%); }
+.supply-label-description { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.supply-label-empty { margin: 0; padding: 18px; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); font-size: 12px; text-align: center; }
+.supply-label-list { display: grid; gap: 12px; max-height: min(58vh, 680px); overflow: auto; padding: 1px; }
+.supply-label-card { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fbfcfb; }
+.supply-label-card-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
+.supply-label-card-head > div { display: grid; gap: 3px; min-width: 0; }
+.supply-label-card-head strong { overflow-wrap: anywhere; color: var(--ink); font-size: 12px; }
+.supply-label-card-head span, .supply-label-pending { color: var(--muted); font-size: 11px; }
+.supply-label-pending { margin: 0; padding: 12px; border-radius: 7px; background: #f3f6f4; }
+.supply-label-image { display: block; width: 100%; max-height: 420px; object-fit: contain; border: 1px solid #e5eae6; border-radius: 7px; background: #fff; }
+.supply-label-actions { align-items: center; justify-content: space-between; padding-top: 14px; }
 .product-edit-dialog .form-actions { padding-top: 4px; }
 .confirmation-dialog { width: min(500px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
 .return-details-dialog { width: min(820px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
@@ -498,6 +508,9 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
   .dashboard-trend-chart { height: 242px; }
   .page-heading > .button { align-self: stretch; }
   .form-grid { grid-template-columns: 1fr; }
+  .supply-label-card-head { align-items: flex-start; flex-direction: column; }
+  .supply-label-actions { align-items: stretch; flex-direction: column-reverse; }
+  .supply-label-actions > .toolbar { display: grid; grid-template-columns: 1fr; }
   .scenario-result-grid { grid-template-columns: 1fr; }
   .scenario-save-row { grid-template-columns: 1fr; }
   .scenario-save-actions { justify-content: stretch; }

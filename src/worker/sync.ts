@@ -26,6 +26,7 @@ import { resolveOzonReturnTimeline } from "@/ozon/return-status";
 import { parseOzonCompensationXlsx } from "@/ozon/compensation";
 import { resolveOzonSyncRange, splitUtcDateRange } from "@/ozon/sync-range";
 import { reconcileOzonSupplyIds } from "@/ozon/supply-order-reconciliation";
+import { reconcileOzonSupplyLabels } from "@/ozon/supply-label-reconciliation";
 import { chooseExternalProductRecord, dispositionAfterProductLink, exactProductLinkForOffer, externalProductKey, resolveExternalProductLink } from "@/ozon/external-product";
 import { reconcileOzonSupplyCosts } from "@/ozon/supply-cost-reconciliation";
 
@@ -936,6 +937,7 @@ export async function syncOzonData(jobId: string) {
     payouts: "Загрузка отчётов о выплатах Ozon",
     writeoffs: "Загрузка списаний Ozon",
     supplyIds: "Сопоставление поставок Ozon",
+    supplyLabels: "Сохранение этикеток грузомест",
     supplyCosts: "Сверка доставки Ozon по поставкам",
   };
   const run = async (label: string, task: () => Promise<unknown>, range = { from, to }) => {
@@ -969,6 +971,8 @@ export async function syncOzonData(jobId: string) {
     summary.ozonSharedExpenseHistoryFrom = accrualFrom.toISOString();
     const supplyIdRun = await run("supplyIds", () => reconcileOzonSupplyIds(credentials, progress), { from: accrualFrom, to });
     if (supplyIdRun.ok) summary.ozonSupplyIdReconciliation = supplyIdRun.result;
+    const supplyLabelsRun = await run("supplyLabels", () => reconcileOzonSupplyLabels(credentials, progress), { from: accrualFrom, to });
+    if (supplyLabelsRun.ok) summary.ozonSupplyLabels = supplyLabelsRun.result;
     const accrualRun = await run("accruals", () => importDailyAccruals(credentials, accrualFrom, to, progress), { from: accrualFrom, to });
     if (accrualRun.ok && !hasOzonSharedExpenseHistory) {
       await db.update(appSettings)
@@ -1005,6 +1009,13 @@ export async function syncOzonData(jobId: string) {
       summary.ozonPayoutHistoryStartDate = startDate;
     }
   };
+
+  if (kind === "labels") {
+    const labelsRun = await run("supplyLabels", () => reconcileOzonSupplyLabels(credentials, progress));
+    if (labelsRun.ok) summary.ozonSupplyLabels = labelsRun.result;
+    if (errors.length) summary.warnings = errors;
+    return summary;
+  }
 
   const fullSync = ["scheduled", "manual", "full"].includes(kind);
   if (kind === "payouts" || kind === "payouts_full") {

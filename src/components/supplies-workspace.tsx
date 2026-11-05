@@ -5,6 +5,8 @@ import { AlertCircle, Barcode, CheckCircle2, Download, Pencil, Plus, Trash2, Tru
 import { asRecord, getId, localToday, requestJson, type JsonRecord } from "./api";
 import { ResourcePage } from "./resource-page";
 import { ProductSelect, productFallbackOption, productSelectOptions, type ProductSelectOption } from "./product-select";
+import { ConfirmationModal } from "./confirmation-modal";
+import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 
 type SupplyEditLine = { productId: string; quantity: string; sku: string; title: string };
 const supplyMarketplaceOptions = [
@@ -121,64 +123,108 @@ function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: Json
   </div>;
 }
 
-function SupplyLabelsDialog({ supply, operationId, onOperationIdChange, onClose }: { supply: JsonRecord; operationId: string; onOperationIdChange: (value: string) => void; onClose: () => void }) {
-  const [message, setMessage] = useState("");
+type SupplyCargoLabel = { id: string; cargoId: string; cargoType: string; ready: boolean; needsRetry: boolean; imageUrl: string | null };
+
+function readCargoLabels(value: unknown): SupplyCargoLabel[] {
+  const items = asRecord(value)?.items;
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((item) => {
+    const label = asRecord(item);
+    if (!label || typeof label.id !== "string" || typeof label.cargoId !== "string") return [];
+    return [{
+      id: label.id,
+      cargoId: label.cargoId,
+      cargoType: typeof label.cargoType === "string" ? label.cargoType : "",
+      ready: label.ready === true,
+      needsRetry: label.needsRetry === true,
+      imageUrl: typeof label.imageUrl === "string" ? label.imageUrl : null,
+    }];
+  });
+}
+
+function cargoTypeLabel(value: string) {
+  if (value.toUpperCase() === "BOX") return "Короб";
+  if (value.toUpperCase() === "PALLET") return "Палета";
+  return value || "Грузоместо";
+}
+
+function SupplyLabelsDialog({ supply, onEdit, onDeleted, onClose }: { supply: JsonRecord; onEdit: () => void; onDeleted: () => void; onClose: () => void }) {
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [labels, setLabels] = useState<SupplyCargoLabel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [deletePrompt, setDeletePrompt] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const id = getId(supply);
   const ozonSupplyId = typeof supply.ozonSupplyId === "string" ? supply.ozonSupplyId : "";
-  const canDownload = supply.marketplace === "ozon" && Boolean(ozonSupplyId && id);
+  const title = typeof supply.note === "string" && supply.note.trim() ? supply.note : `Поставка ${ozonSupplyId ? `Ozon № ${ozonSupplyId}` : ""}`;
 
-  async function downloadLabels() {
-    if (!id || !canDownload) return;
-    setBusy(true); setError(""); setMessage("");
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const value = await requestJson(`/api/supplies/labels?supplyId=${encodeURIComponent(id)}`);
+        if (!cancelled) setLabels(readCargoLabels(value));
+      } catch (reason) {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : "Не удалось загрузить этикетки.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    const onSyncComplete = () => { void load(); };
+    void load();
+    window.addEventListener(OZON_SYNC_COMPLETED_EVENT, onSyncComplete);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, onSyncComplete);
+    };
+  }, [id]);
+
+  async function deleteSupply() {
+    if (!id) return;
+    setDeleting(true);
+    setError("");
     try {
-      const response = await fetch("/api/supplies/labels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ supplyId: id, ...(operationId ? { operationId } : {}) }),
-        cache: "no-store",
-      });
-      if (response.status === 202) {
-        const result = asRecord(await response.json());
-        if (typeof result?.operationId === "string") onOperationIdChange(result.operationId);
-        setMessage("Ozon ещё готовит PDF. Нажмите кнопку ещё раз через несколько секунд.");
-        return;
-      }
-      if (!response.ok) {
-        const result = asRecord(await response.json().catch(() => null));
-        throw new Error(typeof result?.message === "string" ? result.message : "Не удалось скачать этикетки.");
-      }
-
-      const file = await response.blob();
-      const url = URL.createObjectURL(file);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `ozon-labels-${ozonSupplyId}.pdf`;
-      link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
-      onOperationIdChange("");
-      setMessage("Этикетки скачаны.");
+      await requestJson(`/api/supplies?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      onDeleted();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Не удалось скачать этикетки.");
-    } finally { setBusy(false); }
+      setError(reason instanceof Error ? reason.message : "Не удалось удалить поставку.");
+      setDeletePrompt(false);
+    } finally { setDeleting(false); }
   }
 
   return <div className="product-edit-backdrop">
     <section className="panel product-edit-dialog supply-label-dialog" role="dialog" aria-modal="true" aria-labelledby="supply-label-title">
-      <div className="panel-head"><div><h2 id="supply-label-title">Этикетки грузомест</h2><span className="small-note">Поставка Ozon № {ozonSupplyId || "не связана"}</span></div><button type="button" className="icon-button" aria-label="Закрыть" onClick={onClose}><X size={15} /></button></div>
+      <div className="panel-head"><div><h2 id="supply-label-title">{title}</h2><span className="small-note">{typeof supply.marketplaceLabel === "string" ? supply.marketplaceLabel : "Поставка"}</span></div><button type="button" className="icon-button" aria-label="Закрыть" onClick={onClose}><X size={15} /></button></div>
       <div className="panel-body">
         {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}
-        {message && <div className="success-banner" role="status"><CheckCircle2 size={15} />{message}</div>}
-        {canDownload
-          ? <p className="supply-label-description">Ozon подготовит один PDF со всеми грузоместами этой поставки. В файле будет отдельная этикетка для каждого грузоместа.</p>
-          : <div className="error-banner" role="status"><AlertCircle size={15} />{supply.marketplace !== "ozon" ? "Этикетки можно запросить только для поставок Ozon." : "У этой поставки пока нет ID Ozon. Сначала свяжите её с заявкой."}</div>}
-        <div className="form-actions">
+        {supply.marketplace === "ozon" && ozonSupplyId
+          ? <>
+              <p className="supply-label-description">Этикетки сохраняются при синхронизации с Ozon. Здесь можно открыть и скачать каждую отдельно.</p>
+              {loading ? <div className="loading-line" aria-label="Загружаем этикетки" /> : labels.length === 0
+                ? <p className="supply-label-empty">Для этой поставки грузоместа пока не найдены.</p>
+                : <div className="supply-label-list">{labels.map((label) => <article className="supply-label-card" key={label.id}>
+                    <div className="supply-label-card-head"><div><strong>Грузоместо {label.cargoId}</strong><span>{cargoTypeLabel(label.cargoType)}</span></div>
+                      {label.ready && label.imageUrl && <a className="button secondary small" href={`${label.imageUrl}?download=1`}><Download size={13} />Скачать PNG</a>}
+                    </div>
+                    {label.ready && label.imageUrl
+                      ? <img className="supply-label-image" src={label.imageUrl} alt={`Этикетка грузоместа ${label.cargoId}`} />
+                      : <p className="supply-label-pending">{label.needsRetry ? "Ozon не подготовил этикетку. Повторим при следующей синхронизации." : "Этикетка появится после следующей синхронизации с Ozon."}</p>}
+                  </article>)}</div>}
+            </>
+          : <p className="supply-label-empty">Этикетки доступны для поставок Ozon с привязанным номером поставки.</p>}
+        <div className="form-actions supply-label-actions">
           <button type="button" className="button secondary" onClick={onClose}>Закрыть</button>
-          {canDownload && <button type="button" className="button" disabled={busy} onClick={() => void downloadLabels()}><Download size={14} />{busy ? operationId ? "Проверяем…" : "Запрашиваем…" : operationId ? "Проверить и скачать" : "Скачать все этикетки"}</button>}
+          <div className="toolbar">
+            <button type="button" className="button secondary" onClick={onEdit}><Pencil size={13} />Изменить</button>
+            <button type="button" className="button danger" onClick={() => setDeletePrompt(true)}><Trash2 size={13} />Удалить поставку</button>
+          </div>
         </div>
       </div>
     </section>
+    <ConfirmationModal open={deletePrompt} title="Удалить поставку?" description="Поставка и связанные с ней этикетки будут удалены." confirmLabel="Удалить" busy={deleting} onCancel={() => setDeletePrompt(false)} onConfirm={() => void deleteSupply()} />
   </div>;
 }
 
@@ -187,12 +233,11 @@ export function SuppliesWorkspace() {
   const [products, setProducts] = useState<ProductSelectOption[]>([]);
   const [editingSupply, setEditingSupply] = useState<JsonRecord | null>(null);
   const [labelsSupply, setLabelsSupply] = useState<JsonRecord | null>(null);
-  const [labelOperations, setLabelOperations] = useState<Record<string, string>>({});
 
   useEffect(() => { requestJson("/api/products").then((value) => setProducts(productOptions(value))).catch(() => setProducts([])); }, []);
 
   return <>
-    <ResourcePage refreshKey={refreshKey} beforeTable={<SupplyEntryForm products={products} onSaved={() => setRefreshKey((value) => value + 1)} />} rowActions={(row) => <>{row.marketplace === "ozon" && <button type="button" className="button secondary small" title="Этикетки грузомест Ozon" aria-label={`Этикетки грузомест для поставки ${String(row.ozonSupplyId ?? row.note ?? "")}`} onClick={() => setLabelsSupply(row)}><Barcode size={12} />Этикетки</button>}<button type="button" className="button secondary small" onClick={() => setEditingSupply(row)}><Pencil size={12} />Изменить</button></>} config={{
+    <ResourcePage refreshKey={refreshKey} beforeTable={<SupplyEntryForm products={products} onSaved={() => setRefreshKey((value) => value + 1)} />} config={{
     title: "Поставки на Ozon", eyebrow: "Перемещение товара",
     description: "Создавайте поставки вручную после оформления заявки в Ozon. Сервис не ждёт приёмки: складской остаток перемещается сразу.",
     collectionUrl: "/api/supplies", createUrl: "/api/supplies", hideCreate: true,
@@ -200,18 +245,16 @@ export function SuppliesWorkspace() {
       { key: "suppliedAt", label: "Дата", kind: "date" }, { key: "marketplaceLabel", label: "Площадка" }, { key: "articles", label: "Артикулы", primary: true },
       { key: "shippingCost", label: "Доставка", kind: "money" },
       { key: "quantity", label: "Единиц", kind: "quantity" }, { key: "note", label: "Комментарий" },
+      { key: "cargoLabels", label: "Грузоместа", value: (row) => row.cargoLabelCount, render: (row) => {
+        const total = typeof row.cargoLabelCount === "number" ? row.cargoLabelCount : 0;
+        const ready = typeof row.readyCargoLabelCount === "number" ? row.readyCargoLabelCount : 0;
+        const label = total ? `${ready} из ${total}` : "Открыть";
+        return <button type="button" className="button secondary small" aria-label={`Открыть этикетки и детали поставки ${String(row.ozonSupplyId ?? row.note ?? "")}`} onClick={() => setLabelsSupply(row)}><Barcode size={13} />{label}</button>;
+      } },
     ],
-    deleteUrl: (row: JsonRecord) => typeof row.id === "string" ? `/api/supplies?id=${encodeURIComponent(row.id)}` : null,
     emptyTitle: "Поставок пока нет", emptyDescription: "Создайте поставку после оформления заявки в Ozon. Она сразу переместит товар между вашими складами.",
   }} />
     {editingSupply && <SupplyEditDialog key={getId(editingSupply)} supply={editingSupply} products={products} onClose={() => setEditingSupply(null)} onSaved={() => { setEditingSupply(null); setRefreshKey((value) => value + 1); }} />}
-    {labelsSupply && getId(labelsSupply) && <SupplyLabelsDialog key={getId(labelsSupply)} supply={labelsSupply} operationId={labelOperations[getId(labelsSupply)!] ?? ""} onOperationIdChange={(operationId) => setLabelOperations((current) => {
-      const supplyId = getId(labelsSupply);
-      if (!supplyId) return current;
-      const next = { ...current };
-      if (operationId) next[supplyId] = operationId;
-      else delete next[supplyId];
-      return next;
-    })} onClose={() => setLabelsSupply(null)} />}
+    {labelsSupply && getId(labelsSupply) && <SupplyLabelsDialog key={getId(labelsSupply)} supply={labelsSupply} onEdit={() => { setEditingSupply(labelsSupply); setLabelsSupply(null); }} onDeleted={() => { setLabelsSupply(null); setRefreshKey((value) => value + 1); }} onClose={() => setLabelsSupply(null)} />}
   </>;
 }

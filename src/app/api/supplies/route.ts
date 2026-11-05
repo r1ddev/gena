@@ -1,7 +1,7 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { productLinks, products, supplies, supplyLines } from "@/db/schema";
+import { productLinks, products, supplies, supplyCargoLabels, supplyLines } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
 import { reconcileOzonSupplyCosts } from "@/ozon/supply-cost-reconciliation";
 import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
@@ -25,20 +25,30 @@ function assertUniqueProductLines(lines: { productId: string }[]) {
 
 export async function GET(request: Request) {
   return handleLocalGet(request, async () => {
-    const [headers, lines, catalog] = await Promise.all([
+    const [headers, lines, catalog, cargoLabels] = await Promise.all([
       db.select().from(supplies).orderBy(desc(supplies.suppliedAt), desc(supplies.createdAt)),
       db.select().from(supplyLines),
       db.select().from(products),
+      db.select({ supplyId: supplyCargoLabels.supplyId, ready: sql<boolean>`${supplyCargoLabels.labelPng} IS NOT NULL` }).from(supplyCargoLabels),
     ]);
     const activeProductIds = new Set(catalog.filter((product) => !product.archived).map((product) => product.id));
     const visibleLines = lines.filter((line) => activeProductIds.has(line.productId));
     const productById = new Map(catalog.map((product) => [product.id, product]));
+    const labelCounts = new Map<string, { total: number; ready: number }>();
+    for (const label of cargoLabels) {
+      const count = labelCounts.get(label.supplyId) ?? { total: 0, ready: 0 };
+      count.total += 1;
+      if (label.ready) count.ready += 1;
+      labelCounts.set(label.supplyId, count);
+    }
     const marketplaceLabels: Record<string, string> = { ozon: "Ozon", wb: "WB", avito: "Авито", other: "Другая площадка", unknown: "Не указана" };
     return { items: headers.flatMap((supply) => {
       const matching = visibleLines.filter((line) => line.supplyId === supply.id);
       if (matching.length === 0) return [];
       return {
         ...supply,
+        cargoLabelCount: labelCounts.get(supply.id)?.total ?? 0,
+        readyCargoLabelCount: labelCounts.get(supply.id)?.ready ?? 0,
         marketplaceLabel: marketplaceLabels[supply.marketplace] ?? marketplaceLabels.unknown,
         lines: matching.map((line) => ({
           ...line,
