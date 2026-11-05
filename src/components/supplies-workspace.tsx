@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Pencil, Plus, Trash2, Truck, X } from "lucide-react";
+import { AlertCircle, Barcode, CheckCircle2, Download, Pencil, Plus, Trash2, Truck, X } from "lucide-react";
 import { asRecord, getId, localToday, requestJson, type JsonRecord } from "./api";
 import { ResourcePage } from "./resource-page";
 import { ProductSelect, productFallbackOption, productSelectOptions, type ProductSelectOption } from "./product-select";
@@ -121,15 +121,78 @@ function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: Json
   </div>;
 }
 
+function SupplyLabelsDialog({ supply, operationId, onOperationIdChange, onClose }: { supply: JsonRecord; operationId: string; onOperationIdChange: (value: string) => void; onClose: () => void }) {
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const id = getId(supply);
+  const ozonSupplyId = typeof supply.ozonSupplyId === "string" ? supply.ozonSupplyId : "";
+  const canDownload = supply.marketplace === "ozon" && Boolean(ozonSupplyId && id);
+
+  async function downloadLabels() {
+    if (!id || !canDownload) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const response = await fetch("/api/supplies/labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supplyId: id, ...(operationId ? { operationId } : {}) }),
+        cache: "no-store",
+      });
+      if (response.status === 202) {
+        const result = asRecord(await response.json());
+        if (typeof result?.operationId === "string") onOperationIdChange(result.operationId);
+        setMessage("Ozon ещё готовит PDF. Нажмите кнопку ещё раз через несколько секунд.");
+        return;
+      }
+      if (!response.ok) {
+        const result = asRecord(await response.json().catch(() => null));
+        throw new Error(typeof result?.message === "string" ? result.message : "Не удалось скачать этикетки.");
+      }
+
+      const file = await response.blob();
+      const url = URL.createObjectURL(file);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `ozon-labels-${ozonSupplyId}.pdf`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      onOperationIdChange("");
+      setMessage("Этикетки скачаны.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось скачать этикетки.");
+    } finally { setBusy(false); }
+  }
+
+  return <div className="product-edit-backdrop">
+    <section className="panel product-edit-dialog supply-label-dialog" role="dialog" aria-modal="true" aria-labelledby="supply-label-title">
+      <div className="panel-head"><div><h2 id="supply-label-title">Этикетки грузомест</h2><span className="small-note">Поставка Ozon № {ozonSupplyId || "не связана"}</span></div><button type="button" className="icon-button" aria-label="Закрыть" onClick={onClose}><X size={15} /></button></div>
+      <div className="panel-body">
+        {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}
+        {message && <div className="success-banner" role="status"><CheckCircle2 size={15} />{message}</div>}
+        {canDownload
+          ? <p className="supply-label-description">Ozon подготовит один PDF со всеми грузоместами этой поставки. В файле будет отдельная этикетка для каждого грузоместа.</p>
+          : <div className="error-banner" role="status"><AlertCircle size={15} />{supply.marketplace !== "ozon" ? "Этикетки можно запросить только для поставок Ozon." : "У этой поставки пока нет ID Ozon. Сначала свяжите её с заявкой."}</div>}
+        <div className="form-actions">
+          <button type="button" className="button secondary" onClick={onClose}>Закрыть</button>
+          {canDownload && <button type="button" className="button" disabled={busy} onClick={() => void downloadLabels()}><Download size={14} />{busy ? operationId ? "Проверяем…" : "Запрашиваем…" : operationId ? "Проверить и скачать" : "Скачать все этикетки"}</button>}
+        </div>
+      </div>
+    </section>
+  </div>;
+}
+
 export function SuppliesWorkspace() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [products, setProducts] = useState<ProductSelectOption[]>([]);
   const [editingSupply, setEditingSupply] = useState<JsonRecord | null>(null);
+  const [labelsSupply, setLabelsSupply] = useState<JsonRecord | null>(null);
+  const [labelOperations, setLabelOperations] = useState<Record<string, string>>({});
 
   useEffect(() => { requestJson("/api/products").then((value) => setProducts(productOptions(value))).catch(() => setProducts([])); }, []);
 
   return <>
-    <ResourcePage refreshKey={refreshKey} beforeTable={<SupplyEntryForm products={products} onSaved={() => setRefreshKey((value) => value + 1)} />} rowActions={(row) => <button type="button" className="button secondary small" onClick={() => setEditingSupply(row)}><Pencil size={12} />Изменить</button>} config={{
+    <ResourcePage refreshKey={refreshKey} beforeTable={<SupplyEntryForm products={products} onSaved={() => setRefreshKey((value) => value + 1)} />} rowActions={(row) => <>{row.marketplace === "ozon" && <button type="button" className="button secondary small" title="Этикетки грузомест Ozon" aria-label={`Этикетки грузомест для поставки ${String(row.ozonSupplyId ?? row.note ?? "")}`} onClick={() => setLabelsSupply(row)}><Barcode size={12} />Этикетки</button>}<button type="button" className="button secondary small" onClick={() => setEditingSupply(row)}><Pencil size={12} />Изменить</button></>} config={{
     title: "Поставки на Ozon", eyebrow: "Перемещение товара",
     description: "Создавайте поставки вручную после оформления заявки в Ozon. Сервис не ждёт приёмки: складской остаток перемещается сразу.",
     collectionUrl: "/api/supplies", createUrl: "/api/supplies", hideCreate: true,
@@ -142,5 +205,13 @@ export function SuppliesWorkspace() {
     emptyTitle: "Поставок пока нет", emptyDescription: "Создайте поставку после оформления заявки в Ozon. Она сразу переместит товар между вашими складами.",
   }} />
     {editingSupply && <SupplyEditDialog key={getId(editingSupply)} supply={editingSupply} products={products} onClose={() => setEditingSupply(null)} onSaved={() => { setEditingSupply(null); setRefreshKey((value) => value + 1); }} />}
+    {labelsSupply && getId(labelsSupply) && <SupplyLabelsDialog key={getId(labelsSupply)} supply={labelsSupply} operationId={labelOperations[getId(labelsSupply)!] ?? ""} onOperationIdChange={(operationId) => setLabelOperations((current) => {
+      const supplyId = getId(labelsSupply);
+      if (!supplyId) return current;
+      const next = { ...current };
+      if (operationId) next[supplyId] = operationId;
+      else delete next[supplyId];
+      return next;
+    })} onClose={() => setLabelsSupply(null)} />}
   </>;
 }
