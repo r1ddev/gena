@@ -308,10 +308,6 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
 .product-edit-backdrop { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(15, 29, 21, .42); }
 .product-edit-dialog { width: min(850px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
 .supply-label-dialog { width: min(760px, 100%); }
-.supply-label-head { position: sticky; z-index: 2; top: 0; background: #fff; }
-.supply-label-title-group { min-width: 0; flex: 1 1 auto; }
-.supply-label-title-group h2 { overflow-wrap: anywhere; }
-.supply-label-head-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .supply-label-description { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .supply-label-empty { margin: 0; padding: 18px; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); font-size: 12px; text-align: center; }
 .supply-label-list { display: grid; gap: 12px; max-height: min(58vh, 680px); overflow: auto; padding: 1px; }
@@ -512,10 +508,6 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
   .dashboard-trend-chart { height: 242px; }
   .page-heading > .button { align-self: stretch; }
   .form-grid { grid-template-columns: 1fr; }
-  .supply-label-head { align-items: flex-start; flex-wrap: wrap; padding: 10px; }
-  .supply-label-title-group { width: 100%; }
-  .supply-label-head-actions { width: 100%; justify-content: space-between; }
-  .supply-label-head-actions .button { flex: 1 1 auto; }
   .supply-label-card-head { align-items: flex-start; flex-direction: column; }
   .supply-label-actions { align-items: stretch; flex-direction: column-reverse; }
   .supply-label-actions > .toolbar { display: grid; grid-template-columns: 1fr; }

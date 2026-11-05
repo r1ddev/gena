@@ -5,7 +5,6 @@ import { AlertCircle, Barcode, CheckCircle2, Download, Pencil, Plus, Trash2, Tru
 import { asRecord, getId, localToday, requestJson, type JsonRecord } from "./api";
 import { ResourcePage } from "./resource-page";
 import { ProductSelect, productFallbackOption, productSelectOptions, type ProductSelectOption } from "./product-select";
-import { ConfirmationModal } from "./confirmation-modal";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 
 type SupplyEditLine = { productId: string; quantity: string; sku: string; title: string };
@@ -148,12 +147,10 @@ function cargoTypeLabel(value: string) {
   return value || "Грузоместо";
 }
 
-function SupplyLabelsDialog({ supply, onEdit, onDeleted, onClose }: { supply: JsonRecord; onEdit: () => void; onDeleted: () => void; onClose: () => void }) {
+function SupplyLabelsDialog({ supply, onClose }: { supply: JsonRecord; onClose: () => void }) {
   const [error, setError] = useState("");
   const [labels, setLabels] = useState<SupplyCargoLabel[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deletePrompt, setDeletePrompt] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const id = getId(supply);
   const ozonSupplyId = typeof supply.ozonSupplyId === "string" ? supply.ozonSupplyId : "";
   const title = typeof supply.note === "string" && supply.note.trim() ? supply.note : `Поставка ${ozonSupplyId ? `Ozon № ${ozonSupplyId}` : ""}`;
@@ -182,34 +179,13 @@ function SupplyLabelsDialog({ supply, onEdit, onDeleted, onClose }: { supply: Js
     };
   }, [id]);
 
-  async function deleteSupply() {
-    if (!id) return;
-    setDeleting(true);
-    setError("");
-    try {
-      await requestJson(`/api/supplies?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-      onDeleted();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Не удалось удалить поставку.");
-      setDeletePrompt(false);
-    } finally { setDeleting(false); }
-  }
-
   return <div className="product-edit-backdrop">
     <section className="panel product-edit-dialog supply-label-dialog" role="dialog" aria-modal="true" aria-labelledby="supply-label-title">
-      <div className="panel-head supply-label-head">
-        <div className="supply-label-title-group"><h2 id="supply-label-title">{title}</h2><span className="small-note">{typeof supply.marketplaceLabel === "string" ? supply.marketplaceLabel : "Поставка"}</span></div>
-        <div className="supply-label-head-actions">
-          <button type="button" className="button secondary small" onClick={onEdit}><Pencil size={13} />Изменить</button>
-          <button type="button" className="button danger small" onClick={() => setDeletePrompt(true)}><Trash2 size={13} />Удалить поставку</button>
-          <button type="button" className="icon-button" aria-label="Закрыть" onClick={onClose}><X size={15} /></button>
-        </div>
-      </div>
+      <div className="panel-head"><div><h2 id="supply-label-title">{title}</h2><span className="small-note">{typeof supply.marketplaceLabel === "string" ? supply.marketplaceLabel : "Поставка"}</span></div><button type="button" className="icon-button" aria-label="Закрыть" onClick={onClose}><X size={15} /></button></div>
       <div className="panel-body">
         {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}
         {supply.marketplace === "ozon" && ozonSupplyId
           ? <>
-              <p className="supply-label-description">Этикетки сохраняются при синхронизации с Ozon. Здесь можно открыть и скачать каждую отдельно.</p>
               {loading ? <div className="loading-line" aria-label="Загружаем этикетки" /> : labels.length === 0
                 ? <p className="supply-label-empty">Для этой поставки грузоместа пока не найдены.</p>
                 : <div className="supply-label-list">{labels.map((label) => <article className="supply-label-card" key={label.id}>
@@ -227,7 +203,6 @@ function SupplyLabelsDialog({ supply, onEdit, onDeleted, onClose }: { supply: Js
         </div>
       </div>
     </section>
-    <ConfirmationModal open={deletePrompt} title="Удалить поставку?" description="Поставка и связанные с ней этикетки будут удалены." confirmLabel="Удалить" busy={deleting} onCancel={() => setDeletePrompt(false)} onConfirm={() => void deleteSupply()} />
   </div>;
 }
 
@@ -240,7 +215,7 @@ export function SuppliesWorkspace() {
   useEffect(() => { requestJson("/api/products").then((value) => setProducts(productOptions(value))).catch(() => setProducts([])); }, []);
 
   return <>
-    <ResourcePage refreshKey={refreshKey} beforeTable={<SupplyEntryForm products={products} onSaved={() => setRefreshKey((value) => value + 1)} />} config={{
+    <ResourcePage refreshKey={refreshKey} beforeTable={<SupplyEntryForm products={products} onSaved={() => setRefreshKey((value) => value + 1)} />} rowActions={(row) => <button type="button" className="button secondary small" onClick={() => setEditingSupply(row)}><Pencil size={12} />Изменить</button>} config={{
     title: "Поставки на Ozon", eyebrow: "Перемещение товара",
     description: "Создавайте поставки вручную после оформления заявки в Ozon. Сервис не ждёт приёмки: складской остаток перемещается сразу.",
     collectionUrl: "/api/supplies", createUrl: "/api/supplies", hideCreate: true,
@@ -255,9 +230,10 @@ export function SuppliesWorkspace() {
         return <button type="button" className="button secondary small" aria-label={`Открыть этикетки и детали поставки ${String(row.ozonSupplyId ?? row.note ?? "")}`} onClick={() => setLabelsSupply(row)}><Barcode size={13} />{label}</button>;
       } },
     ],
+    deleteUrl: (row: JsonRecord) => typeof row.id === "string" ? `/api/supplies?id=${encodeURIComponent(row.id)}` : null,
     emptyTitle: "Поставок пока нет", emptyDescription: "Создайте поставку после оформления заявки в Ozon. Она сразу переместит товар между вашими складами.",
   }} />
     {editingSupply && <SupplyEditDialog key={getId(editingSupply)} supply={editingSupply} products={products} onClose={() => setEditingSupply(null)} onSaved={() => { setEditingSupply(null); setRefreshKey((value) => value + 1); }} />}
-    {labelsSupply && getId(labelsSupply) && <SupplyLabelsDialog key={getId(labelsSupply)} supply={labelsSupply} onEdit={() => { setEditingSupply(labelsSupply); setLabelsSupply(null); }} onDeleted={() => { setLabelsSupply(null); setRefreshKey((value) => value + 1); }} onClose={() => setLabelsSupply(null)} />}
+    {labelsSupply && getId(labelsSupply) && <SupplyLabelsDialog key={getId(labelsSupply)} supply={labelsSupply} onClose={() => setLabelsSupply(null)} />}
   </>;
 }
