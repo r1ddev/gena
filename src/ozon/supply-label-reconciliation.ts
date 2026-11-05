@@ -28,7 +28,7 @@ const execFile = promisify(execFileCallback);
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const asString = (value: unknown) => value === undefined || value === null ? "" : String(value);
 const CARGO_LABEL_SIZE = { width: 349, height: 1280 };
-const CARGO_LABEL_FORMAT_VERSION = 3;
+const CARGO_LABEL_FORMAT_VERSION = 4;
 
 type CargoLabelParts = {
   supplyCode: Buffer;
@@ -73,8 +73,60 @@ async function binarizeCargoLabelBarcode(png: Buffer) {
     .threshold(160)
     .png()
     .toBuffer();
+  const digitScan = await sharp(barcode)
+    .extract({ left: 0, top: 58, width: CARGO_LABEL_SIZE.width, height: 27 })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let digitLeft = digitScan.info.width;
+  let digitTop = digitScan.info.height;
+  let digitRight = -1;
+  let digitBottom = -1;
+  for (let y = 0; y < digitScan.info.height; y += 1) {
+    for (let x = 0; x < digitScan.info.width; x += 1) {
+      if (digitScan.data[y * digitScan.info.width + x] >= 128) continue;
+      digitLeft = Math.min(digitLeft, x);
+      digitTop = Math.min(digitTop, y);
+      digitRight = Math.max(digitRight, x);
+      digitBottom = Math.max(digitBottom, y);
+    }
+  }
+
+  const overlays: { input: Buffer; left: number; top: number }[] = [
+    { input: barcode, left: 0, top: 1190 },
+  ];
+  if (digitRight >= digitLeft && digitBottom >= digitTop) {
+    const digitWidth = digitRight - digitLeft + 1;
+    const digitHeight = digitBottom - digitTop + 1;
+    const scale = Math.min(1.5, 325 / digitWidth, 24 / digitHeight);
+    const enlargedWidth = Math.round(digitWidth * scale);
+    const enlargedHeight = Math.round(digitHeight * scale);
+    const enlargedDigits = await sharp(barcode)
+      .extract({
+        left: digitLeft,
+        top: digitTop + 58,
+        width: digitWidth,
+        height: digitHeight,
+      })
+      .resize({ width: enlargedWidth, height: enlargedHeight, fit: "fill", kernel: "nearest" })
+      .png()
+      .toBuffer();
+    const digitBandTop = 1248;
+    const digitBandHeight = 32;
+    overlays.push({
+      input: Buffer.from(`<svg width="${CARGO_LABEL_SIZE.width}" height="${digitBandHeight}"><rect width="100%" height="100%" fill="white"/></svg>`),
+      left: 0,
+      top: digitBandTop,
+    });
+    overlays.push({
+      input: enlargedDigits,
+      left: Math.floor((CARGO_LABEL_SIZE.width - enlargedWidth) / 2),
+      top: digitBandTop + Math.floor((digitBandHeight - enlargedHeight) / 2),
+    });
+  }
+
   return sharp(png)
-    .composite([{ input: barcode, left: 0, top: 1190 }])
+    .composite(overlays)
     .png()
     .withMetadata({ density: 300 })
     .toBuffer();
