@@ -21,7 +21,7 @@ export default function PayoutsPage() {
   return <ResourcePage config={{
     title: "Выплаты Ozon",
     eyebrow: "Деньги и затраты",
-    description: "Период — интервал отчёта Ozon, не дата зачисления на карту. Если период пересекает дату начала учёта, сумма входит в расчёт целиком.",
+    description: "Сумма выплаты и период отчёта Ozon.",
     collectionUrl: "/api/payouts",
     createUrl: "/api/payouts",
     hideCreate: true,
@@ -45,16 +45,6 @@ export default function PayoutsPage() {
           const amount = Number(row.amount ?? 0);
           return <span className="number" style={{ color: amount < 0 ? "var(--red)" : "var(--green-dark)", fontWeight: 700 }}>{payoutAmount(row)}</span>;
         },
-      },
-      {
-        key: "includedInAccounting",
-        label: "Учёт",
-        sortable: true,
-        filterable: false,
-        value: (row) => row.includedInAccounting ? "Входит в расчёт" : "До даты начала",
-        render: (row) => <span className={`badge ${row.includedInAccounting ? "green" : "orange"}`}>
-          {row.includedInAccounting ? "Входит в расчёт" : "До даты начала"}
-        </span>,
       },
     ],
     emptyTitle: "Выплат пока нет",

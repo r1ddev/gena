@@ -14,14 +14,13 @@ export async function GET(request: Request) {
     ]);
     const accountingStartDate = settingsRows[0]?.accountingStartDate ?? "0000-01-01";
     const items = rows
-      .filter((payout) => Number(payout.amount) !== 0)
+      .filter((payout) => Number(payout.amount) !== 0 && payout.periodEnd >= accountingStartDate)
       .map((payout) => ({
         id: payout.id,
         periodBegin: payout.periodBegin,
         periodEnd: payout.periodEnd,
         currencyCode: payout.currencyCode,
         amount: payout.amount,
-        includedInAccounting: payout.periodEnd >= accountingStartDate,
       }));
 
     return { items };
