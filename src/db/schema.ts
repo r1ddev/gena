@@ -174,6 +174,7 @@ export const supplyCargoLabels = pgTable(
     cargoType: text("cargo_type").notNull().default(""),
     bundleId: text("bundle_id").notNull().default(""),
     labelPng: bytea("label_png"),
+    labelFormatVersion: integer("label_format_version").notNull().default(0),
     labelError: text("label_error").notNull().default(""),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
