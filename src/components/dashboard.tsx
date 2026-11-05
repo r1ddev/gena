@@ -208,8 +208,6 @@ export function Dashboard() {
   const unrecognizedFinanceAmount = numeric(overview?.unrecognizedFinanceAmount);
   const unresolvedExternalItems = findRows(overview?.unresolvedExternalItems);
   const unmatchedNotice = unmatchedItemsNotice(unresolvedExternalItems.length, unrecognizedFinanceAmount);
-  const pendingOzon = asRecord(cashFlow?.pendingOzon) ?? {};
-  const pendingOzonCount = numeric(pendingOzon.count);
 
   function updateRecentOrderSort(key: string) {
     setRecentOrderSort((current) => cycleTableSort(current, key));
@@ -274,10 +272,9 @@ export function Dashboard() {
             <div className="panel-body notice-list">
               {warnings.length > 0 && <div className="notice critical"><AlertTriangle size={15} /><span>Есть {warnings.length} отрицательных остатка. Проверьте поставки и складские движения.</span></div>}
               {costingIssues.length > 0 && <div className="notice critical"><AlertTriangle size={15} /><span>Прибыль не рассчитана: нет полученной закупочной себестоимости у {costingIssues.length} товаров. Проверьте приёмки.</span></div>}
-              {(pendingOzonCount > 0 || unrecognizedFinanceAmount !== 0) && <div className="notice"><AlertTriangle size={15} /><span>Счётчик показывает {pendingOzonCount} финансовых операций Ozon по заказам. Это не число заказов: одному заказу соответствуют несколько операций. Чтобы операция прошла проверку, отправление должно быть связано с товаром из каталога; после обычной доставки ждём 21 день. Суммы уже учтены справа в поступлениях и расходах. Прибыль по товарам выше считает финальные отправления отдельно, поэтому счётчик не показывает, сколько операций не вошло в эту прибыль.</span></div>}
               {profitReconciliationIssues.length > 0 && <div className="notice"><AlertTriangle size={15} /><span>{profitReconciliationIssues.length} возвратов меняют остаток или требуют проверки количества; прибыль по ним требует сверки.</span></div>}
               {pendingReturns.length > 0 && <div className="notice"><Clock3 size={15} /><span>{pendingReturns.length} возвратов ожидают обработки или подтверждения получения.</span></div>}
-              {warnings.length === 0 && pendingReturns.length === 0 && costingIssues.length === 0 && profitReconciliationIssues.length === 0 && pendingOzonCount === 0 && unrecognizedFinanceAmount === 0 && <div className="empty-state" style={{ minHeight: 92, padding: 4 }}><div><div className="empty-title">Сейчас всё спокойно</div><p className="empty-description">Здесь появятся расхождения остатков и возвраты, требующие вашего действия.</p></div></div>}
+              {warnings.length === 0 && pendingReturns.length === 0 && costingIssues.length === 0 && profitReconciliationIssues.length === 0 && <div className="empty-state" style={{ minHeight: 92, padding: 4 }}><div><div className="empty-title">Сейчас всё спокойно</div><p className="empty-description">Здесь появятся расхождения остатков и возвраты, требующие вашего действия.</p></div></div>}
               {warnings.length > 0 && <Link href="/catalog" className="button secondary small">Проверить каталог</Link>}
               {costingIssues.length > 0 && <Link href="/purchases" className="button secondary small">Проверить приёмки</Link>}
               {pendingReturns.length > 0 && <Link href="/returns" className="button secondary small">Открыть возвраты</Link>}
