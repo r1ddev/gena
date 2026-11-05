@@ -321,7 +321,8 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
 .supply-label-card-head strong { overflow-wrap: anywhere; color: var(--ink); font-size: 12px; }
 .supply-label-card-head span, .supply-label-pending { color: var(--muted); font-size: 11px; }
 .supply-label-pending { margin: 0; padding: 12px; border-radius: 7px; background: #f3f6f4; }
-.supply-label-image { display: block; width: 100%; max-height: 420px; object-fit: contain; border: 1px solid #e5eae6; border-radius: 7px; background: #fff; }
+.supply-label-preview { position: relative; width: 100%; aspect-ratio: 1280 / 349; overflow: hidden; border: 1px solid #e5eae6; border-radius: 7px; background: #fff; }
+.supply-label-image { position: absolute; top: 50%; left: 50%; display: block; width: 27.265625%; height: auto; max-height: none; transform: translate(-50%, -50%) rotate(-90deg); }
 .supply-label-actions { align-items: center; justify-content: space-between; padding-top: 14px; }
 .product-edit-dialog .form-actions { padding-top: 4px; }
 .confirmation-dialog { width: min(500px, 100%); max-height: calc(100vh - 36px); overflow: auto; }

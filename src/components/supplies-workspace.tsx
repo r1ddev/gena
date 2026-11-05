@@ -193,7 +193,7 @@ function SupplyLabelsDialog({ supply, onClose }: { supply: JsonRecord; onClose: 
                       {label.ready && label.imageUrl && <a className="button secondary small" href={`${label.imageUrl}?download=1`}><Download size={13} />Скачать PNG</a>}
                     </div>
                     {label.ready && label.imageUrl
-                      ? <img className="supply-label-image" src={label.imageUrl} alt={`Этикетка грузоместа ${label.cargoId}`} />
+                      ? <div className="supply-label-preview"><img className="supply-label-image" src={label.imageUrl} alt={`Этикетка грузоместа ${label.cargoId}`} /></div>
                       : <p className="supply-label-pending">{label.needsRetry ? "Ozon не подготовил этикетку. Повторим при следующей синхронизации." : "Этикетка появится после следующей синхронизации с Ozon."}</p>}
                   </article>)}</div>}
             </>
