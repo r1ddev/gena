@@ -232,6 +232,13 @@
       "when": 1793822770672,
       "tag": "0032_add_audit_events",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793865839902,
+      "tag": "0033_exclude_ozon_payouts_from_accounting",
+      "breakpoints": true
     }
   ]
 }

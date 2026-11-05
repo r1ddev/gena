@@ -1,0 +1,1 @@
+ALTER TABLE "ozon_payouts" ADD COLUMN "excluded_from_accounting" boolean DEFAULT false NOT NULL;
