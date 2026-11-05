@@ -422,7 +422,9 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
   const finalizedOrderProfitCents = [...profitByPosting.values()].reduce((total, result) => total + (result.profitCents ?? 0), 0);
   const orderProfitIncompleteCount = [...profitByPosting.values()].filter((result) => result.missingCost).length;
 
-  const paidPayoutRows = payoutRows.filter((payout) => !new Decimal(payout.amount).isZero());
+  const paidPayoutRows = payoutRows.filter((payout) =>
+    !new Decimal(payout.amount).isZero() && payout.periodEnd >= accountingStartDate,
+  );
   const payoutByCurrency = new Map<string, Decimal>();
   for (const payout of paidPayoutRows) {
     const currencyCode = payout.currencyCode.toUpperCase();
