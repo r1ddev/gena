@@ -157,6 +157,10 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .notice.critical { border-color: #f0d8d8; color: #8b4141; background: #fff8f8; }
 .notice svg { flex: 0 0 auto; margin-top: 1px; }
 .table-wrap { width: 100%; overflow-x: auto; }
+@media (max-width: 900px) {
+  .table-wrap:has(.supply-row-edit) th:last-child { position: sticky; right: 0; z-index: 3; background: #fafbfa; box-shadow: -8px 0 10px -10px rgba(18, 34, 25, .65); }
+  .table-wrap:has(.supply-row-edit) td:last-child { position: sticky; right: 0; z-index: 2; background: #fff; box-shadow: -8px 0 10px -10px rgba(18, 34, 25, .65); }
+}
 .added-cost-history-note { margin-bottom: 14px; padding: 13px 16px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .added-cost-history-note p { margin: 0; }
 .added-cost-history-head { min-height: 66px; }
