@@ -28,7 +28,7 @@ const execFile = promisify(execFileCallback);
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const asString = (value: unknown) => value === undefined || value === null ? "" : String(value);
 const CARGO_LABEL_SIZE = { width: 349, height: 1280 };
-const CARGO_LABEL_FORMAT_VERSION = 4;
+const CARGO_LABEL_FORMAT_VERSION = 6;
 
 type CargoLabelParts = {
   supplyCode: Buffer;
@@ -67,63 +67,113 @@ async function composeLongCargoLabel(parts: CargoLabelParts) {
   return formatted;
 }
 
-async function binarizeCargoLabelBarcode(png: Buffer) {
+async function binarizeCargoLabelBarcode(png: Buffer, highResolutionPage: Buffer) {
   const barcode = await sharp(png)
     .extract({ left: 0, top: 1190, width: CARGO_LABEL_SIZE.width, height: 90 })
     .threshold(160)
     .png()
     .toBuffer();
-  const digitScan = await sharp(barcode)
-    .extract({ left: 0, top: 58, width: CARGO_LABEL_SIZE.width, height: 27 })
+  const highResolutionRotated = await sharp(highResolutionPage).rotate(90).png().toBuffer();
+  const highResolutionMetadata = await sharp(highResolutionRotated).metadata();
+  if (!highResolutionMetadata.width || !highResolutionMetadata.height) {
+    throw new Error("Не удалось прочитать цифры штрихкода из исходного PDF.");
+  }
+  const highResolutionScaleX = highResolutionMetadata.width / 600;
+  const highResolutionScaleY = highResolutionMetadata.height / 960;
+  if (Math.abs(highResolutionScaleX - highResolutionScaleY) > 0.03) {
+    throw new Error("Разрешение исходного PDF не подходит для обработки штрихкода.");
+  }
+  const sourceBarcode = await sharp(highResolutionRotated)
+    .extract({
+      left: Math.round(78 * highResolutionScaleX),
+      top: Math.round(830 * highResolutionScaleY),
+      width: Math.round(439 * highResolutionScaleX),
+      height: Math.round(100 * highResolutionScaleY),
+    })
+    .png()
+    .toBuffer();
+  const highResolutionBarcodeMetadata = await sharp(sourceBarcode).metadata();
+  if (!highResolutionBarcodeMetadata.width || !highResolutionBarcodeMetadata.height) {
+    throw new Error("Не удалось прочитать область штрихкода из исходного PDF.");
+  }
+  const sourceBarcodeMask = await sharp(sourceBarcode)
+    .threshold(160)
     .greyscale()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  let digitLeft = digitScan.info.width;
-  let digitTop = digitScan.info.height;
-  let digitRight = -1;
-  let digitBottom = -1;
-  for (let y = 0; y < digitScan.info.height; y += 1) {
-    for (let x = 0; x < digitScan.info.width; x += 1) {
-      if (digitScan.data[y * digitScan.info.width + x] >= 128) continue;
-      digitLeft = Math.min(digitLeft, x);
-      digitTop = Math.min(digitTop, y);
-      digitRight = Math.max(digitRight, x);
-      digitBottom = Math.max(digitBottom, y);
+  let lastBarRow = -1;
+  for (let y = 0; y < sourceBarcodeMask.info.height; y += 1) {
+    let blackPixels = 0;
+    for (let x = 0; x < sourceBarcodeMask.info.width; x += 1) {
+      if (sourceBarcodeMask.data[y * sourceBarcodeMask.info.width + x] < 128) blackPixels += 1;
+    }
+    if (blackPixels >= sourceBarcodeMask.info.width * 0.4) lastBarRow = y;
+  }
+  if (lastBarRow < 0 || lastBarRow >= sourceBarcodeMask.info.height - 1) {
+    throw new Error("Не удалось отделить цифры от штрихкода в исходном PDF.");
+  }
+  const digitScanTop = lastBarRow + 1;
+  const sourceDigitScan = await sharp(sourceBarcode)
+    .extract({
+      left: 0,
+      top: digitScanTop,
+      width: highResolutionBarcodeMetadata.width,
+      height: highResolutionBarcodeMetadata.height - digitScanTop,
+    })
+    .threshold(160)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let sourceDigitLeft = sourceDigitScan.info.width;
+  let sourceDigitTop = sourceDigitScan.info.height;
+  let sourceDigitRight = -1;
+  let sourceDigitBottom = -1;
+  for (let y = 0; y < sourceDigitScan.info.height; y += 1) {
+    for (let x = 0; x < sourceDigitScan.info.width; x += 1) {
+      if (sourceDigitScan.data[y * sourceDigitScan.info.width + x] >= 128) continue;
+      sourceDigitLeft = Math.min(sourceDigitLeft, x);
+      sourceDigitTop = Math.min(sourceDigitTop, y);
+      sourceDigitRight = Math.max(sourceDigitRight, x);
+      sourceDigitBottom = Math.max(sourceDigitBottom, y);
     }
   }
-
-  const overlays: { input: Buffer; left: number; top: number }[] = [
+  if (sourceDigitRight < sourceDigitLeft || sourceDigitBottom < sourceDigitTop) {
+    throw new Error("В исходном PDF не найдены цифры штрихкода.");
+  }
+  const sourceDigitWidth = sourceDigitRight - sourceDigitLeft + 1;
+  const sourceDigitHeight = sourceDigitBottom - sourceDigitTop + 1;
+  const digitScale = Math.min(
+    1.5 * CARGO_LABEL_SIZE.width / (439 * highResolutionScaleX),
+    325 / sourceDigitWidth,
+    24 / sourceDigitHeight,
+  );
+  const enlargedWidth = Math.round(sourceDigitWidth * digitScale);
+  const enlargedHeight = Math.round(sourceDigitHeight * digitScale);
+  const enlargedDigits = await sharp(sourceBarcode)
+    .extract({
+      left: sourceDigitLeft,
+      top: digitScanTop + sourceDigitTop,
+      width: sourceDigitWidth,
+      height: sourceDigitHeight,
+    })
+    .resize({ width: enlargedWidth, height: enlargedHeight, fit: "fill", kernel: "lanczos3" })
+    .png()
+    .toBuffer();
+  const digitBandTop = 1248;
+  const digitBandHeight = 32;
+  const overlays = [
     { input: barcode, left: 0, top: 1190 },
-  ];
-  if (digitRight >= digitLeft && digitBottom >= digitTop) {
-    const digitWidth = digitRight - digitLeft + 1;
-    const digitHeight = digitBottom - digitTop + 1;
-    const scale = Math.min(1.5, 325 / digitWidth, 24 / digitHeight);
-    const enlargedWidth = Math.round(digitWidth * scale);
-    const enlargedHeight = Math.round(digitHeight * scale);
-    const enlargedDigits = await sharp(barcode)
-      .extract({
-        left: digitLeft,
-        top: digitTop + 58,
-        width: digitWidth,
-        height: digitHeight,
-      })
-      .resize({ width: enlargedWidth, height: enlargedHeight, fit: "fill", kernel: "nearest" })
-      .png()
-      .toBuffer();
-    const digitBandTop = 1248;
-    const digitBandHeight = 32;
-    overlays.push({
+    {
       input: Buffer.from(`<svg width="${CARGO_LABEL_SIZE.width}" height="${digitBandHeight}"><rect width="100%" height="100%" fill="white"/></svg>`),
       left: 0,
       top: digitBandTop,
-    });
-    overlays.push({
+    },
+    {
       input: enlargedDigits,
       left: Math.floor((CARGO_LABEL_SIZE.width - enlargedWidth) / 2),
       top: digitBandTop + Math.floor((digitBandHeight - enlargedHeight) / 2),
-    });
-  }
+    },
+  ];
 
   return sharp(png)
     .composite(overlays)
@@ -132,10 +182,10 @@ async function binarizeCargoLabelBarcode(png: Buffer) {
     .toBuffer();
 }
 
-async function formatCargoLabelPng(png: Buffer) {
+async function formatCargoLabelPng(png: Buffer, highResolutionPage: Buffer) {
   const metadata = await sharp(png).metadata();
   if (metadata.width === CARGO_LABEL_SIZE.width && metadata.height === CARGO_LABEL_SIZE.height) {
-    return binarizeCargoLabelBarcode(png);
+    return binarizeCargoLabelBarcode(png, highResolutionPage);
   }
   if (!metadata.width || !metadata.height) throw new Error("Не удалось прочитать изображение этикетки.");
 
@@ -187,58 +237,21 @@ async function formatCargoLabelPng(png: Buffer) {
     cargoId,
     supplier,
     barcode,
-  }));
+  }), highResolutionPage);
 }
 
-async function reformatLegacyCargoLabel(png: Buffer) {
-  const metadata = await sharp(png).metadata();
-  if (metadata.width !== CARGO_LABEL_SIZE.width || metadata.height !== CARGO_LABEL_SIZE.height) {
-    throw new Error("Сохранённая этикетка имеет неизвестный формат.");
-  }
-  const crop = (left: number, top: number, width: number, height: number, restoredWidth: number, restoredHeight: number) =>
-    sharp(png).extract({ left, top, width, height }).resize(restoredWidth, restoredHeight, { fit: "fill" }).png().toBuffer();
-  const [supplyCode, supplyCaption, headerIcon, headerText, handoffPoint, cargoId, supplierCrop, barcode] = await Promise.all([
-    crop(80, 0, 70, 405, 70, 405),
-    crop(158, 0, 32, 589, 41, 405),
-    crop(200, 0, 149, 150, 139, 139),
-    crop(200, 150, 149, 290, 139, 440),
-    crop(16, 590, 84, 589, 84, 226),
-    crop(105, 590, 127, 589, 127, 485),
-    crop(295, 590, 54, 589, 54, 589),
-    crop(0, 1175, 349, 100, 439, 120),
-  ]);
-  const supplier = await sharp({
-    create: { width: 71, height: 590, channels: 3, background: "#fff" },
-  }).composite([{ input: supplierCrop, left: 0, top: 0 }]).png().toBuffer();
-  const barcodeForPrint = await sharp(barcode)
-    .extract({ left: 0, top: 10, width: 439, height: 100 })
-    .resize({ width: 349, kernel: "nearest" })
-    .png()
-    .toBuffer();
-  return binarizeCargoLabelBarcode(await composeLongCargoLabel({
-    supplyCode,
-    supplyCaption,
-    headerIcon,
-    headerText,
-    handoffPoint,
-    cargoId,
-    supplier,
-    barcode: barcodeForPrint,
-  }));
-}
-
-async function pdfPageToPng(pdf: Buffer) {
+async function pdfPageToPng(pdf: Buffer, resolution = 203) {
   if (pdf.byteLength < 5 || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") {
     throw new Error("Ozon вернул файл без PDF-этикетки.");
   }
 
   const directory = await mkdtemp(path.join(tmpdir(), "ozon-cargo-label-"));
   const inputPath = path.join(directory, "label.pdf");
-  const outputBase = path.join(directory, "label");
+  const outputBase = path.join(directory, `label-${resolution}`);
   const outputPath = `${outputBase}.png`;
   try {
     await writeFile(inputPath, pdf);
-    await execFile("pdftoppm", ["-png", "-singlefile", "-r", "203", "-f", "1", "-l", "1", inputPath, outputBase], {
+    await execFile("pdftoppm", ["-png", "-singlefile", "-r", String(resolution), "-f", "1", "-l", "1", inputPath, outputBase], {
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
     });
@@ -268,7 +281,12 @@ async function createCargoLabel(credentials: OzonCredentials, supplyId: string, 
     if (status === "SUCCESS") {
       const fileUrl = response.result?.file_url ?? response.file_url;
       if (!fileUrl) throw new Error("Ozon не вернул ссылку на этикетку.");
-      return formatCargoLabelPng(await pdfPageToPng(await ozonDownloadLabelFile(fileUrl, credentials)));
+      const pdf = await ozonDownloadLabelFile(fileUrl, credentials);
+      const [page, highResolutionPage] = await Promise.all([
+        pdfPageToPng(pdf),
+        pdfPageToPng(pdf, 406),
+      ]);
+      return formatCargoLabelPng(page, highResolutionPage);
     }
     if (["ERROR", "FAILED", "CANCELLED"].includes(status)) {
       throw new Error("Ozon не смог сформировать этикетку.");
@@ -358,27 +376,7 @@ export async function reconcileOzonSupplyLabels(
       .where(and(eq(supplyCargoLabels.supplyId, cargo.localSupplyId), eq(supplyCargoLabels.cargoId, cargo.cargoId)))
       .limit(1);
 
-    if (label?.labelPng) {
-      if (label.formatVersion >= CARGO_LABEL_FORMAT_VERSION) {
-        labelsReused += 1;
-        continue;
-      }
-      try {
-        const formattedLabel = label.formatVersion === 1
-          ? await reformatLegacyCargoLabel(label.labelPng)
-          : await formatCargoLabelPng(label.labelPng);
-        await db.update(supplyCargoLabels).set({
-          labelPng: formattedLabel,
-          labelFormatVersion: CARGO_LABEL_FORMAT_VERSION,
-          labelError: "",
-          updatedAt: new Date(),
-        }).where(eq(supplyCargoLabels.id, label.id));
-      } catch (error) {
-        labelsFailed += 1;
-        const detail = error instanceof Error ? error.message.slice(0, 500) : "Не удалось преобразовать этикетку.";
-        await db.update(supplyCargoLabels).set({ labelError: detail, updatedAt: new Date() }).where(eq(supplyCargoLabels.id, label.id));
-        continue;
-      }
+    if (label?.labelPng && label.formatVersion >= CARGO_LABEL_FORMAT_VERSION) {
       labelsReused += 1;
       continue;
     }
@@ -421,27 +419,12 @@ export async function listSupplyCargoLabels(supplyId: string) {
 
 export async function getSupplyCargoLabelImage(labelId: string) {
   const [label] = await db.select({
-    id: supplyCargoLabels.id,
     cargoId: supplyCargoLabels.cargoId,
     labelPng: supplyCargoLabels.labelPng,
-    formatVersion: supplyCargoLabels.labelFormatVersion,
   })
     .from(supplyCargoLabels)
     .where(eq(supplyCargoLabels.id, labelId))
     .limit(1);
   if (!label?.labelPng) return null;
-  const image = label.formatVersion >= CARGO_LABEL_FORMAT_VERSION
-    ? label.labelPng
-    : label.formatVersion === 1
-      ? await reformatLegacyCargoLabel(label.labelPng)
-      : await formatCargoLabelPng(label.labelPng);
-  if (label.formatVersion < CARGO_LABEL_FORMAT_VERSION) {
-    await db.update(supplyCargoLabels).set({
-      labelPng: image,
-      labelFormatVersion: CARGO_LABEL_FORMAT_VERSION,
-      labelError: "",
-      updatedAt: new Date(),
-    }).where(eq(supplyCargoLabels.id, label.id));
-  }
-  return { cargoId: label.cargoId, image };
+  return { cargoId: label.cargoId, image: label.labelPng };
 }
