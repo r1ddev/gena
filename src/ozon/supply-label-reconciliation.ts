@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { and, eq, isNotNull, notInArray, sql } from "drizzle-orm";
+import sharp from "sharp";
 import { db } from "@/db";
 import { supplies, supplyCargoLabels } from "@/db/schema";
 import { ozonDownloadLabelFile, ozonInteger, ozonPost } from "@/ozon/client";
@@ -26,6 +27,77 @@ type LabelOperationResponse = {
 const execFile = promisify(execFileCallback);
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const asString = (value: unknown) => value === undefined || value === null ? "" : String(value);
+const CARGO_LABEL_SIZE = { width: 349, height: 1280 };
+
+async function formatCargoLabelPng(png: Buffer) {
+  const source = sharp(png);
+  const metadata = await source.metadata();
+  if (metadata.width === CARGO_LABEL_SIZE.width && metadata.height === CARGO_LABEL_SIZE.height) return png;
+  if (!metadata.width || !metadata.height) throw new Error("Не удалось прочитать изображение этикетки.");
+
+  const rotated = await source.rotate(90).png().toBuffer();
+  const rotatedMetadata = await sharp(rotated).metadata();
+  if (!rotatedMetadata.width || !rotatedMetadata.height || Math.abs(rotatedMetadata.width / rotatedMetadata.height - 0.625) > 0.03) {
+    throw new Error("Формат этикетки Ozon изменился. Сохранить её в нужном виде не удалось.");
+  }
+
+  const normalized = await sharp(rotated).resize(600, 960, { fit: "fill" }).png().toBuffer();
+  const { data: grayscale, info } = await sharp(normalized).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const handoffInkRows: number[] = [];
+  for (let top = 0; top < Math.min(info.height, 800); top += 1) {
+    for (let left = 5; left < 80; left += 1) {
+      if (grayscale[top * info.width + left] < 230) {
+        handoffInkRows.push(top);
+        break;
+      }
+    }
+  }
+  const handoffTop = Math.max(0, (handoffInkRows[0] ?? 0) - 8);
+  const handoffBottom = Math.min(info.height, (handoffInkRows.at(-1) ?? 242) + 9);
+  const crop = (left: number, top: number, width: number, height: number, outputWidth: number, outputHeight: number) =>
+    sharp(normalized)
+      .extract({ left, top, width, height })
+      .resize(outputWidth, outputHeight, { fit: "fill" })
+      .png()
+      .toBuffer();
+  const [supplyCode, supplyCaption, headerIcon, headerText, handoffPoint, cargoId, supplier, barcode] = await Promise.all([
+    crop(350, 0, 70, 405, 70, 405),
+    crop(420, 0, 41, 405, 32, 590),
+    crop(461, 0, 139, 139, 149, 150),
+    crop(461, 139, 139, 667, 149, 440),
+    crop(0, handoffTop, 84, handoffBottom - handoffTop, 84, 590),
+    crop(84, 0, 127, 485, 127, 590),
+    crop(262, 0, 71, 590, 71, 590),
+    sharp(normalized)
+      .extract({ left: 78, top: 820, width: 439, height: 120 })
+      .resize(349, 100, { fit: "fill", kernel: "nearest" })
+      .png()
+      .toBuffer(),
+  ]);
+  const dividers = Buffer.from(
+    `<svg width="${CARGO_LABEL_SIZE.width}" height="${CARGO_LABEL_SIZE.height}"><path d="M200 0V590M0 590H349M105 590V1180M241 590V1180M0 1180H349" fill="none" stroke="#111" stroke-width="2"/></svg>`,
+  );
+  const formatted = await sharp({
+    create: { ...CARGO_LABEL_SIZE, channels: 3, background: "#fff" },
+  })
+    .composite([
+      { input: supplyCode, left: 80, top: 0 },
+      { input: supplyCaption, left: 158, top: 0 },
+      { input: headerIcon, left: 200, top: 0 },
+      { input: headerText, left: 200, top: 150 },
+      { input: handoffPoint, left: 16, top: 590 },
+      { input: cargoId, left: 105, top: 590 },
+      { input: supplier, left: 295, top: 590 },
+      { input: barcode, left: 0, top: 1175 },
+      { input: dividers, left: 0, top: 0 },
+    ])
+    .png({ compressionLevel: 9 })
+    .withMetadata({ density: 300 })
+    .toBuffer();
+
+  if (formatted.byteLength > 20 * 1024 * 1024) throw new Error("PNG-этикетка превышает допустимый размер.");
+  return formatted;
+}
 
 async function pdfPageToPng(pdf: Buffer) {
   if (pdf.byteLength < 5 || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") {
@@ -68,7 +140,7 @@ async function createCargoLabel(credentials: OzonCredentials, supplyId: string, 
     if (status === "SUCCESS") {
       const fileUrl = response.result?.file_url ?? response.file_url;
       if (!fileUrl) throw new Error("Ozon не вернул ссылку на этикетку.");
-      return pdfPageToPng(await ozonDownloadLabelFile(fileUrl, credentials));
+      return formatCargoLabelPng(await pdfPageToPng(await ozonDownloadLabelFile(fileUrl, credentials)));
     }
     if (["ERROR", "FAILED", "CANCELLED"].includes(status)) {
       throw new Error("Ozon не смог сформировать этикетку.");
@@ -149,12 +221,23 @@ export async function reconcileOzonSupplyLabels(
   let labelsFailed = 0;
   for (const [index, cargo] of cargoes.entries()) {
     await progress("Сохранение этикеток", { current: index + 1, total: cargoes.length });
-    const [label] = await db.select({ id: supplyCargoLabels.id, ready: sql<boolean>`${supplyCargoLabels.labelPng} IS NOT NULL` })
+    const [label] = await db.select({ id: supplyCargoLabels.id, labelPng: supplyCargoLabels.labelPng })
       .from(supplyCargoLabels)
       .where(and(eq(supplyCargoLabels.supplyId, cargo.localSupplyId), eq(supplyCargoLabels.cargoId, cargo.cargoId)))
       .limit(1);
 
-    if (label?.ready) {
+    if (label?.labelPng) {
+      try {
+        const formattedLabel = await formatCargoLabelPng(label.labelPng);
+        if (formattedLabel !== label.labelPng) {
+          await db.update(supplyCargoLabels).set({ labelPng: formattedLabel, labelError: "", updatedAt: new Date() }).where(eq(supplyCargoLabels.id, label.id));
+        }
+      } catch (error) {
+        labelsFailed += 1;
+        const detail = error instanceof Error ? error.message.slice(0, 500) : "Не удалось преобразовать этикетку.";
+        await db.update(supplyCargoLabels).set({ labelError: detail, updatedAt: new Date() }).where(eq(supplyCargoLabels.id, label.id));
+        continue;
+      }
       labelsReused += 1;
       continue;
     }
@@ -191,10 +274,14 @@ export async function listSupplyCargoLabels(supplyId: string) {
 }
 
 export async function getSupplyCargoLabelImage(labelId: string) {
-  const [label] = await db.select({ cargoId: supplyCargoLabels.cargoId, labelPng: supplyCargoLabels.labelPng })
+  const [label] = await db.select({ id: supplyCargoLabels.id, cargoId: supplyCargoLabels.cargoId, labelPng: supplyCargoLabels.labelPng })
     .from(supplyCargoLabels)
     .where(eq(supplyCargoLabels.id, labelId))
     .limit(1);
   if (!label?.labelPng) return null;
-  return { cargoId: label.cargoId, image: label.labelPng };
+  const image = await formatCargoLabelPng(label.labelPng);
+  if (image !== label.labelPng) {
+    await db.update(supplyCargoLabels).set({ labelPng: image, labelError: "", updatedAt: new Date() }).where(eq(supplyCargoLabels.id, label.id));
+  }
+  return { cargoId: label.cargoId, image };
 }
