@@ -197,7 +197,14 @@ function SupplyLabelsDialog({ supply, onEdit, onDeleted, onClose }: { supply: Js
 
   return <div className="product-edit-backdrop">
     <section className="panel product-edit-dialog supply-label-dialog" role="dialog" aria-modal="true" aria-labelledby="supply-label-title">
-      <div className="panel-head"><div><h2 id="supply-label-title">{title}</h2><span className="small-note">{typeof supply.marketplaceLabel === "string" ? supply.marketplaceLabel : "Поставка"}</span></div><button type="button" className="icon-button" aria-label="Закрыть" onClick={onClose}><X size={15} /></button></div>
+      <div className="panel-head supply-label-head">
+        <div className="supply-label-title-group"><h2 id="supply-label-title">{title}</h2><span className="small-note">{typeof supply.marketplaceLabel === "string" ? supply.marketplaceLabel : "Поставка"}</span></div>
+        <div className="supply-label-head-actions">
+          <button type="button" className="button secondary small" onClick={onEdit}><Pencil size={13} />Изменить</button>
+          <button type="button" className="button danger small" onClick={() => setDeletePrompt(true)}><Trash2 size={13} />Удалить поставку</button>
+          <button type="button" className="icon-button" aria-label="Закрыть" onClick={onClose}><X size={15} /></button>
+        </div>
+      </div>
       <div className="panel-body">
         {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}
         {supply.marketplace === "ozon" && ozonSupplyId
@@ -217,10 +224,6 @@ function SupplyLabelsDialog({ supply, onEdit, onDeleted, onClose }: { supply: Js
           : <p className="supply-label-empty">Этикетки доступны для поставок Ozon с привязанным номером поставки.</p>}
         <div className="form-actions supply-label-actions">
           <button type="button" className="button secondary" onClick={onClose}>Закрыть</button>
-          <div className="toolbar">
-            <button type="button" className="button secondary" onClick={onEdit}><Pencil size={13} />Изменить</button>
-            <button type="button" className="button danger" onClick={() => setDeletePrompt(true)}><Trash2 size={13} />Удалить поставку</button>
-          </div>
         </div>
       </div>
     </section>
