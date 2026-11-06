@@ -253,6 +253,13 @@
       "when": 1793884227347,
       "tag": "0035_version_cargo_label_layout",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793993127715,
+      "tag": "0036_youthful_blur",
+      "breakpoints": true
     }
   ]
 }

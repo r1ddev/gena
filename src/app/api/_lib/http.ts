@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 import { NextResponse } from "next/server";
 import { ZodError, type ZodType } from "zod";
+import { getAuthenticatedUser } from "@/security/auth";
 
 const localHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
@@ -23,6 +24,10 @@ export function json(data: unknown, status = 200) {
 }
 
 export function errorResponse(error: unknown) {
+  if (error && typeof error === "object" && "status" in error && typeof error.status === "number") {
+    const message = error instanceof Error ? error.message : "Не удалось выполнить запрос.";
+    return json({ error: message, message }, error.status);
+  }
   if (error instanceof ZodError) {
     return json({ error: "Некорректные данные", details: error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })) }, 400);
   }
@@ -35,13 +40,31 @@ export function errorResponse(error: unknown) {
   return json({ error: message, message }, status);
 }
 
-export async function handleLocalGet<T>(request: Request, operation: () => Promise<T>) {
+export async function handleLocalGet<T>(request: Request, operation: (userId: string) => Promise<T>) {
   try {
     assertLocalRequest(request);
-    return json(await operation());
+    const user = await getAuthenticatedUser(request);
+    if (!user) return json({ error: "Для продолжения войдите в аккаунт." }, 401);
+    return json(await operation(user.id));
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+export async function requireAuthenticatedUser(request: Request) {
+  assertLocalRequest(request);
+  const user = await getAuthenticatedUser(request);
+  if (!user) {
+    const error = new Error("Для продолжения войдите в аккаунт.") as Error & { status: number };
+    error.status = 401;
+    throw error;
+  }
+  return user.id;
+}
+
+export async function requireAuthenticatedMutation(request: Request) {
+  assertLocalMutation(request);
+  return requireAuthenticatedUser(request);
 }
 
 export async function parseBody<T>(request: Request, schema: ZodType<T>): Promise<T> {
