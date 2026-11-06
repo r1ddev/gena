@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { ChevronDown, ImageOff, Search } from "lucide-react";
+import { ChevronDown, ImageOff, LoaderCircle, RefreshCw, Search } from "lucide-react";
 import { findRows, getId, stringValue, type JsonRecord } from "./api";
 
 export type ProductSelectOption = {
@@ -61,6 +61,9 @@ export function ProductSelect({
   placeholder = "Выберите товар…",
   fallbackOption,
   disabled = false,
+  loading = false,
+  loadError = false,
+  onRetry,
   ariaLabel,
 }: {
   id: string;
@@ -71,6 +74,9 @@ export function ProductSelect({
   placeholder?: string;
   fallbackOption?: ProductSelectOption;
   disabled?: boolean;
+  loading?: boolean;
+  loadError?: boolean;
+  onRetry?: () => void;
   ariaLabel?: string;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -154,9 +160,12 @@ export function ProductSelect({
       aria-label={ariaLabel}
       aria-required={required || undefined}
       aria-invalid={showRequired || undefined}
+      aria-busy={loading || undefined}
+      title={loadError ? "Нажмите, чтобы повторить загрузку товаров" : undefined}
       className={`product-select-trigger${showRequired ? " invalid" : ""}`}
-      disabled={disabled}
+      disabled={disabled || loading}
       onClick={() => {
+        if (loadError) { onRetry?.(); return; }
         setOpen((current) => !current);
         setQuery("");
         setActiveIndex(-1);
@@ -169,8 +178,8 @@ export function ProductSelect({
         }
       }}
     >
-      {selected ? <><ProductPhoto product={selected} large /><ProductDetails product={selected} /></> : <span className="product-select-placeholder">{placeholder}</span>}
-      <ChevronDown size={16} aria-hidden="true" />
+      {selected ? <><ProductPhoto product={selected} large /><ProductDetails product={selected} /></> : <span className="product-select-placeholder">{loading ? "Загружаем товары…" : loadError ? "Не удалось загрузить товары" : placeholder}</span>}
+      {loading ? <LoaderCircle className="product-select-loading" size={16} aria-hidden="true" /> : loadError ? <RefreshCw size={15} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
     </button>
     <input
       className="product-select-validation"

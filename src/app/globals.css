@@ -419,6 +419,8 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
 .product-select-trigger:focus-visible { outline: none; border-color: #79c5a0; box-shadow: 0 0 0 3px rgba(23,139,99,.1); }
 .product-select-trigger.invalid { border-color: #c65d5d; }
 .product-select-trigger > svg { flex: 0 0 auto; margin-left: auto; color: #78877d; }
+.product-select-loading { animation: product-select-spin .8s linear infinite; }
+@keyframes product-select-spin { to { transform: rotate(360deg); } }
 .product-select-placeholder { color: #758279; font-size: 12px; }
 .product-select-photo { position: relative; display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; overflow: hidden; border: 1px solid #e8eee9; border-radius: 7px; color: #98a59c; background: #f5f8f6; }
 .product-select-photo.large { width: 42px; height: 42px; }
