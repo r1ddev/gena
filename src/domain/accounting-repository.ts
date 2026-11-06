@@ -33,7 +33,7 @@ import { isOzonWriteOffStatus } from "@/ozon/return-status";
 import { buildCatalogProductWhitelist, isCatalogProduct, isFinanceRowOutsideCatalog, resolveCatalogProductId } from "@/ozon/catalog-whitelist";
 import { matchOzonCompensationReports } from "@/ozon/compensation";
 
-export async function getAccountingSnapshot(now = new Date(), includeAddedCostRates = false) {
+export async function getAccountingSnapshot(now = new Date(), includeAddedCostRates = false, includeFullDailyTrend = false) {
   const [productRows, purchaseRows, receiptRows, receiptLineRows, supplyRows, supplyLineRows, expenseRows, postingRows, postingItemRows, financeRows, compensationReports, returnRows, manualRows, ozonWriteoffRows, adjustmentRows, externalRows, payoutRows, settingsRows, catalogLinkRows] = await Promise.all([
     db.select().from(products),
     db.select().from(purchases),
@@ -383,8 +383,13 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
   };
   const today = dateKey(now);
   const [year, month, day] = today.split("-").map(Number);
-  const trendStart = new Date(Date.UTC(year, month - 1, day - 29));
-  const trendDays = Array.from({ length: 30 }, (_, index) => {
+  const configuredStartParts = includeFullDailyTrend ? accountingStartDate.match(/^(\d{4})-(\d{2})-(\d{2})$/)?.slice(1).map(Number) : undefined;
+  const configuredStartIsValid = Boolean(configuredStartParts && configuredStartParts[0] >= 2000 && accountingStartDate <= today);
+  const trendStart = configuredStartIsValid && configuredStartParts
+    ? new Date(Date.UTC(configuredStartParts[0], configuredStartParts[1] - 1, configuredStartParts[2]))
+    : new Date(Date.UTC(year, month - 1, day - 29));
+  const dayCount = Math.max(1, Math.floor((Date.UTC(year, month - 1, day) - trendStart.getTime()) / 86_400_000) + 1);
+  const trendDays = Array.from({ length: includeFullDailyTrend ? dayCount : 30 }, (_, index) => {
     const date = new Date(trendStart);
     date.setUTCDate(trendStart.getUTCDate() + index);
     const dateString = date.toISOString().slice(0, 10);

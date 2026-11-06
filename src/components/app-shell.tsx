@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import {
-  Archive, ArrowLeftRight, Boxes, Calculator, ChartNoAxesCombined, CreditCard,
+  Archive, ArrowLeftRight, Boxes, Calculator, ChartNoAxesCombined, CreditCard, LineChart,
   ChevronRight, CircleDollarSign, ClipboardList, FileClock, History, LayoutDashboard,
   Menu, Package, RotateCcw, Settings2, ShoppingCart, Truck,
   Wallet, X,
@@ -37,6 +37,7 @@ const navSections = [
   {
     label: "Аналитика",
     links: [
+      { href: "/analytics", label: "Графики", icon: LineChart },
       { href: "/scenario", label: "Номинальный расчёт", icon: Calculator },
       { href: "/added-cost-history", label: "История добавочной стоимости", icon: History },
       { href: "/audit-logs", label: "Журнал действий", icon: FileClock },
