@@ -18,7 +18,7 @@ const supplyMarketplaceOptions = [
 
 function productOptions(value: unknown): ProductSelectOption[] { return productSelectOptions(value); }
 
-function SupplyEntryForm({ products, onSaved }: { products: ProductSelectOption[]; onSaved: () => void }) {
+function SupplyEntryForm({ products, productsLoading, productsLoadError, onRetryProducts, onSaved }: { products: ProductSelectOption[]; productsLoading: boolean; productsLoadError: string; onRetryProducts: () => void; onSaved: () => void }) {
   const [lines, setLines] = useState([{ productId: "", quantity: "" }]);
   const [suppliedAt, setSuppliedAt] = useState(localToday());
   const [note, setNote] = useState("");
@@ -47,12 +47,14 @@ function SupplyEntryForm({ products, onSaved }: { products: ProductSelectOption[
       <div className="form-help" style={{ marginBottom: 8, color: "#5f6d64", fontWeight: 700 }}>Состав поставки</div>
       <p className="form-help">Закупочная стоимость и себестоимость с добавочной фиксируются автоматически на момент создания.</p>
       <div className="line-items">{lines.map((line, index) => <div className="line-item" key={index}>
-        <div className="field"><label htmlFor={`supply-product-${index}`}>Товар *</label><ProductSelect id={`supply-product-${index}`} required value={line.productId} products={products} placeholder="Выберите товар…" onChange={(productId) => setLines((current) => current.map((item, row) => row === index ? { ...item, productId } : item))} /></div>
+        <div className="field"><label htmlFor={`supply-product-${index}`}>Товар *</label><ProductSelect id={`supply-product-${index}`} required value={line.productId} products={products} disabled={productsLoading || Boolean(productsLoadError) || products.length === 0} placeholder={productsLoading ? "Загружаем товары…" : productsLoadError ? "Список товаров недоступен" : products.length === 0 ? "Нет товаров в каталоге" : "Выберите товар…"} onChange={(productId) => setLines((current) => current.map((item, row) => row === index ? { ...item, productId } : item))} /></div>
         <div className="field"><label htmlFor={`supply-quantity-${index}`}>Количество, шт. *</label><input id={`supply-quantity-${index}`} type="number" min="1" step="1" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, quantity: event.target.value } : item))} /></div>
         <button type="button" className="icon-button" aria-label="Удалить товар из поставки" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((_, row) => row !== index))}><Trash2 size={14} /></button>
       </div>)}</div>
-      <div className="form-actions" style={{ justifyContent: "space-between" }}><button type="button" className="button secondary" onClick={() => setLines((current) => [...current, { productId: "", quantity: "" }])}><Plus size={14} />Добавить товар</button><button className="button" disabled={busy || products.length === 0}>{busy ? "Сохраняем…" : "Создать поставку"}</button></div>
-      {products.length === 0 && <p className="form-help">Сначала добавьте товары в каталог.</p>}
+      <div className="form-actions" style={{ justifyContent: "space-between" }}><button type="button" className="button secondary" disabled={productsLoading || Boolean(productsLoadError) || products.length === 0} onClick={() => setLines((current) => [...current, { productId: "", quantity: "" }])}><Plus size={14} />Добавить товар</button><button className="button" disabled={busy || productsLoading || Boolean(productsLoadError) || products.length === 0}>{busy ? "Сохраняем…" : "Создать поставку"}</button></div>
+      {productsLoading && <p className="form-help" role="status">Загружаем товары…</p>}
+      {!productsLoading && productsLoadError && <p className="form-help" role="alert">{productsLoadError} <button type="button" className="button secondary small" onClick={onRetryProducts}>Повторить</button></p>}
+      {!productsLoading && !productsLoadError && products.length === 0 && <p className="form-help">Сначала добавьте товары в каталог.</p>}
       <p className="form-help">Расходы на кросс-докинг загружаются вместе с общими расходами Ozon.</p>
     </form>
   </section>;
@@ -241,13 +243,31 @@ function SupplyLabelsDialog({ supply, onClose }: { supply: JsonRecord; onClose: 
 export function SuppliesWorkspace() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [products, setProducts] = useState<ProductSelectOption[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
+  const [productsLoadError, setProductsLoadError] = useState("");
+  const [productsLoadAttempt, setProductsLoadAttempt] = useState(0);
   const [editingSupply, setEditingSupply] = useState<JsonRecord | null>(null);
   const [labelsSupply, setLabelsSupply] = useState<JsonRecord | null>(null);
 
-  useEffect(() => { requestJson("/api/products").then((value) => setProducts(productOptions(value))).catch(() => setProducts([])); }, []);
+  useEffect(() => {
+    let active = true;
+    setProductsLoading(true);
+    setProductsLoadError("");
+    requestJson("/api/products").then((value) => {
+      if (active) setProducts(productOptions(value));
+    }).catch(() => {
+      if (active) {
+        setProducts([]);
+        setProductsLoadError("Не удалось загрузить список товаров.");
+      }
+    }).finally(() => {
+      if (active) setProductsLoading(false);
+    });
+    return () => { active = false; };
+  }, [productsLoadAttempt]);
 
   return <>
-    <ResourcePage refreshKey={refreshKey} beforeTable={<SupplyEntryForm products={products} onSaved={() => setRefreshKey((value) => value + 1)} />} rowActions={(row) => {
+    <ResourcePage refreshKey={refreshKey} beforeTable={<SupplyEntryForm products={products} productsLoading={productsLoading} productsLoadError={productsLoadError} onRetryProducts={() => setProductsLoadAttempt((attempt) => attempt + 1)} onSaved={() => setRefreshKey((value) => value + 1)} />} rowActions={(row) => {
       const label = `Изменить поставку ${String(row.note ?? "")}`.trim();
       return <button type="button" className="icon-button supply-row-edit" aria-label={label} title={label} onClick={() => setEditingSupply(row)}><Pencil size={14} /></button>;
     }} config={{
