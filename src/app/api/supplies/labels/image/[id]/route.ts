@@ -1,13 +1,19 @@
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { supplyCargoLabels } from "@/db/schema";
 import { getSupplyCargoLabelImage } from "@/ozon/supply-label-reconciliation";
-import { assertLocalRequest, errorResponse } from "@/app/api/_lib/http";
+import { errorResponse, requireAuthenticatedUser } from "@/app/api/_lib/http";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    assertLocalRequest(request);
+    const userId = await requireAuthenticatedUser(request);
     const { id } = await context.params;
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
       throw new Error("Этикетка не найдена.");
     }
+    const [ownedLabel] = await db.select({ id: supplyCargoLabels.id }).from(supplyCargoLabels)
+      .where(and(eq(supplyCargoLabels.id, id), eq(supplyCargoLabels.userId, userId))).limit(1);
+    if (!ownedLabel) throw new Error("Этикетка не найдена.");
     const label = await getSupplyCargoLabelImage(id);
     if (!label) throw new Error("Этикетка ещё не сохранена.");
     const download = new URL(request.url).searchParams.get("download") === "1";

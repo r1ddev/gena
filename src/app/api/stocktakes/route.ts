@@ -1,9 +1,9 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { productLinks, products, stockAdjustments, stocktakeLines, stocktakes } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
-import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+import { errorResponse, handleLocalGet, parseBody, requireAuthenticatedMutation } from "../_lib/http";
 import { isoDate, nonNegativeInteger } from "../_lib/validation";
 
 const stocktakeSchema = z.object({
@@ -15,11 +15,11 @@ const stocktakeSchema = z.object({
 const resolutionSchema = z.object({ resolutionNote: z.string().trim().max(2000).optional().default("") });
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const [headers, lines, catalog] = await Promise.all([
-      db.select().from(stocktakes).orderBy(desc(stocktakes.countedAt), desc(stocktakes.createdAt)),
-      db.select().from(stocktakeLines),
-      db.select().from(products),
+      db.select().from(stocktakes).where(eq(stocktakes.userId, userId)).orderBy(desc(stocktakes.countedAt), desc(stocktakes.createdAt)),
+      db.select().from(stocktakeLines).where(eq(stocktakeLines.userId, userId)),
+      db.select().from(products).where(eq(products.userId, userId)),
     ]);
     const activeProductIds = new Set(catalog.filter((product) => !product.archived).map((product) => product.id));
     const productById = new Map(catalog.map((product) => [product.id, product]));
@@ -40,23 +40,25 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const body = await parseBody(request, stocktakeSchema);
     const ids = new Set(body.lines.map((line) => line.productId));
     if (ids.size !== body.lines.length) throw new Error("Каждый товар в пересчёте нужно указывать один раз.");
-    const snapshot = await getAccountingSnapshot(new Date(`${body.countedAt}T23:59:59.999Z`));
+    const snapshot = await getAccountingSnapshot(userId, new Date(`${body.countedAt}T23:59:59.999Z`));
     const currentById = new Map(snapshot.products.map((product) => [product.productId, product]));
     const header = await db.transaction(async (tx) => {
       const productRows = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
-        .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(inArray(products.id, [...ids]));
+        .from(products).leftJoin(productLinks, and(eq(productLinks.productId, products.id), eq(productLinks.userId, userId)))
+        .where(and(eq(products.userId, userId), inArray(products.id, [...ids])));
       if (productRows.length !== ids.size || productRows.some((product) => product.archived)) {
         throw new Error("Выберите товары из текущего каталога.");
       }
       const productById = new Map(productRows.map((product) => [product.id, product]));
-      const [created] = await tx.insert(stocktakes).values({ warehouse: body.warehouse, countedAt: body.countedAt, note: body.note })
+      const [created] = await tx.insert(stocktakes).values({ userId, warehouse: body.warehouse, countedAt: body.countedAt, note: body.note })
         .onConflictDoNothing().returning();
       if (!created) throw new Error("Инвентаризация этого склада за эту дату уже существует.");
       await tx.insert(stocktakeLines).values(body.lines.map((line) => ({
+        userId,
         stocktakeId: created.id,
         productId: line.productId,
         productSkuSnapshot: productById.get(line.productId)!.offerId || productById.get(line.productId)!.sku,
@@ -72,19 +74,22 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new Error("Не указан идентификатор строки инвентаризации.");
     const body = await parseBody(request, resolutionSchema);
-    const line = (await db.select().from(stocktakeLines).where(eq(stocktakeLines.id, id)).limit(1))[0];
+    const line = (await db.select().from(stocktakeLines).where(and(eq(stocktakeLines.id, id), eq(stocktakeLines.userId, userId))).limit(1))[0];
     if (!line) throw new Error("Запись не найдена.");
-    const [product] = await db.select({ id: products.id, sku: products.sku, archived: products.archived }).from(products).where(eq(products.id, line.productId)).limit(1);
+    const [product] = await db.select({ id: products.id, sku: products.sku, archived: products.archived }).from(products)
+      .where(and(eq(products.id, line.productId), eq(products.userId, userId))).limit(1);
     if (!product || product.archived) throw new Error("Эта запись связана с товаром вне текущего каталога.");
-    const header = (await db.select().from(stocktakes).where(eq(stocktakes.id, line.stocktakeId)).limit(1))[0];
+    const header = (await db.select().from(stocktakes).where(and(eq(stocktakes.id, line.stocktakeId), eq(stocktakes.userId, userId))).limit(1))[0];
     if (!header) throw new Error("Инвентаризация не найдена.");
     await db.transaction(async (tx) => {
-      await tx.update(stocktakeLines).set({ resolvedAt: new Date(), resolutionNote: body.resolutionNote }).where(eq(stocktakeLines.id, id));
+      await tx.update(stocktakeLines).set({ resolvedAt: new Date(), resolutionNote: body.resolutionNote })
+        .where(and(eq(stocktakeLines.id, id), eq(stocktakeLines.userId, userId)));
       await tx.insert(stockAdjustments).values({
+        userId,
         stocktakeLineId: id,
         productId: line.productId,
         productSkuSnapshot: line.productSkuSnapshot,
@@ -93,7 +98,7 @@ export async function PATCH(request: Request) {
         actualQuantity: line.actualQuantity,
         adjustedAt: header.countedAt,
       }).onConflictDoUpdate({
-        target: stockAdjustments.stocktakeLineId,
+        target: [stockAdjustments.userId, stockAdjustments.stocktakeLineId],
         set: {
           productId: line.productId,
           productSkuSnapshot: line.productSkuSnapshot,
@@ -110,10 +115,10 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new Error("Не указан идентификатор инвентаризации.");
-    const [deleted] = await db.delete(stocktakes).where(eq(stocktakes.id, id)).returning({ id: stocktakes.id });
+    const [deleted] = await db.delete(stocktakes).where(and(eq(stocktakes.id, id), eq(stocktakes.userId, userId))).returning({ id: stocktakes.id });
     if (!deleted) throw new Error("Запись не найдена.");
     return Response.json({ deleted: deleted.id });
   } catch (error) { return errorResponse(error); }

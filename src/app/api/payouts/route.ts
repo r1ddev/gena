@@ -1,18 +1,18 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { appSettings, ozonPayouts } from "@/db/schema";
-import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+import { errorResponse, handleLocalGet, parseBody, requireAuthenticatedMutation } from "../_lib/http";
 
 const payoutUpdateSchema = z.object({ excludedFromAccounting: z.boolean() });
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const [rows, settingsRows] = await Promise.all([
-      db.select().from(ozonPayouts).orderBy(desc(ozonPayouts.periodEnd), desc(ozonPayouts.periodBegin)),
+      db.select().from(ozonPayouts).where(eq(ozonPayouts.userId, userId)).orderBy(desc(ozonPayouts.periodEnd), desc(ozonPayouts.periodBegin)),
       db.select({ accountingStartDate: appSettings.accountingStartDate })
         .from(appSettings)
-        .where(eq(appSettings.id, 1))
+        .where(eq(appSettings.userId, userId))
         .limit(1),
     ]);
     const accountingStartDate = settingsRows[0]?.accountingStartDate ?? "0000-01-01";
@@ -33,13 +33,13 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id || !z.string().uuid().safeParse(id).success) throw new Error("Не указан корректный идентификатор выплаты.");
     const body = await parseBody(request, payoutUpdateSchema);
     const [item] = await db.update(ozonPayouts)
       .set({ excludedFromAccounting: body.excludedFromAccounting, updatedAt: new Date() })
-      .where(eq(ozonPayouts.id, id))
+      .where(and(eq(ozonPayouts.id, id), eq(ozonPayouts.userId, userId)))
       .returning({ id: ozonPayouts.id, excludedFromAccounting: ozonPayouts.excludedFromAccounting });
     if (!item) throw new Error("Выплата не найдена.");
     return Response.json({ item });

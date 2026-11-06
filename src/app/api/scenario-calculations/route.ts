@@ -1,9 +1,9 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { calculateScenario, type ScenarioParameters } from "@/domain/scenario";
 import { db } from "@/db";
 import { scenarioCalculations } from "@/db/schema";
-import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+import { errorResponse, handleLocalGet, parseBody, requireAuthenticatedMutation } from "../_lib/http";
 
 const parametersSchema = z.object({
   purchase: z.number().finite(),
@@ -35,29 +35,29 @@ function valuesForSave(comment: string, inputs: ScenarioParameters) {
 }
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => ({
-    items: await db.select().from(scenarioCalculations).orderBy(desc(scenarioCalculations.createdAt)),
+  return handleLocalGet(request, async (userId) => ({
+    items: await db.select().from(scenarioCalculations).where(eq(scenarioCalculations.userId, userId)).orderBy(desc(scenarioCalculations.createdAt)),
   }));
 }
 
 export async function POST(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const body = await parseBody(request, calculationSchema);
-    const [item] = await db.insert(scenarioCalculations).values(valuesForSave(body.comment, body.inputs)).returning();
+    const [item] = await db.insert(scenarioCalculations).values({ userId, ...valuesForSave(body.comment, body.inputs) }).returning();
     return Response.json({ item }, { status: 201 });
   } catch (error) { return errorResponse(error); }
 }
 
 export async function PATCH(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id || !z.string().uuid().safeParse(id).success) throw new Error("Не указан корректный идентификатор расчёта.");
     const body = await parseBody(request, calculationSchema);
     const [item] = await db.update(scenarioCalculations)
       .set(valuesForSave(body.comment, body.inputs))
-      .where(eq(scenarioCalculations.id, id))
+      .where(and(eq(scenarioCalculations.id, id), eq(scenarioCalculations.userId, userId)))
       .returning();
     if (!item) throw new Error("Сохранённый расчёт не найден.");
     return Response.json({ item });
