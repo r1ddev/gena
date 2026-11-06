@@ -6,7 +6,7 @@ import { handleLocalGet } from "../_lib/http";
 const pageSize = 50;
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const params = new URL(request.url).searchParams;
     const page = Math.max(1, Number.parseInt(params.get("page") ?? "1", 10) || 1);
     const query = (params.get("q") ?? "").trim().slice(0, 160);
@@ -26,11 +26,11 @@ export async function GET(request: Request) {
       )!);
     }
 
-    const where = filters.length ? and(...filters) : undefined;
+    const where = and(eq(auditEvents.userId, userId), ...filters);
     const [items, [totalRow], [sources]] = await Promise.all([
       db.select().from(auditEvents).where(where).orderBy(desc(auditEvents.occurredAt), desc(auditEvents.id)).limit(pageSize).offset((page - 1) * pageSize),
       db.select({ value: count() }).from(auditEvents).where(where),
-      db.select({ values: sql<string[]>`array_agg(DISTINCT ${auditEvents.source} ORDER BY ${auditEvents.source})` }).from(auditEvents),
+      db.select({ values: sql<string[]>`array_agg(DISTINCT ${auditEvents.source} ORDER BY ${auditEvents.source})` }).from(auditEvents).where(eq(auditEvents.userId, userId)),
     ]);
 
     return {

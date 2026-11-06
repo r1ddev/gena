@@ -1,9 +1,9 @@
-import { desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { externalItems, financeAccruals, ozonWriteoffs, postingItems, postings, productLinks, products, returns } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
-import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+import { errorResponse, handleLocalGet, parseBody, requireAuthenticatedMutation } from "../_lib/http";
 import { isoDate, timestampValue } from "../_lib/validation";
 import { buildCatalogProductWhitelist, isFinanceRowOutsideCatalog, resolveCatalogProductId } from "@/ozon/catalog-whitelist";
 import { buildFinanceOrderSkuPostingMap, buildFinancePostingProductIdentifiers, isOzonWriteoffCompensation, ozonExpenseLabel, resolveFinanceAccrualPostingNumber } from "@/ozon/finance";
@@ -21,13 +21,13 @@ const returnUpdate = z.object({
 });
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const [rows, catalog, catalogLinks, externalCatalogRows, accounting] = await Promise.all([
-      db.select().from(returns).orderBy(desc(returns.updatedAt)),
-      db.select().from(products),
-      db.select({ productId: productLinks.productId, offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks),
-      db.select({ externalKey: externalItems.externalKey, offerId: externalItems.offerId, ozonSku: externalItems.ozonSku, productId: externalItems.productId }).from(externalItems),
-      getAccountingSnapshot(),
+      db.select().from(returns).where(eq(returns.userId, userId)).orderBy(desc(returns.updatedAt)),
+      db.select().from(products).where(eq(products.userId, userId)),
+      db.select({ productId: productLinks.productId, offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks).where(eq(productLinks.userId, userId)),
+      db.select({ externalKey: externalItems.externalKey, offerId: externalItems.offerId, ozonSku: externalItems.ozonSku, productId: externalItems.productId }).from(externalItems).where(eq(externalItems.userId, userId)),
+      getAccountingSnapshot(userId),
     ]);
     const whitelist = buildCatalogProductWhitelist(catalog, catalogLinks, externalCatalogRows);
     const reconciliationIds = new Set(accounting.profitReconciliationIssues.map((issue) => issue.externalId).filter(Boolean));
@@ -44,13 +44,13 @@ export async function GET(request: Request) {
     const candidateReturns = rows.filter((row) => row.destination !== "ozon");
     const candidatePostingNumbers = [...new Set(candidateReturns.map((row) => row.postingNumber).filter((value): value is string => Boolean(value)))];
     const candidatePostings = candidatePostingNumbers.length
-      ? await db.select().from(postings).where(inArray(postings.externalId, candidatePostingNumbers))
+      ? await db.select().from(postings).where(and(eq(postings.userId, userId), inArray(postings.externalId, candidatePostingNumbers)))
       : [];
     const candidatePostingIds = candidatePostings.map((posting) => posting.id);
     const candidatePostingItemRows = candidatePostingIds.length
       ? await db.select({ item: postingItems, productSku: products.sku, productTitle: products.title })
-        .from(postingItems).leftJoin(products, eq(postingItems.productId, products.id))
-        .where(inArray(postingItems.postingId, candidatePostingIds))
+        .from(postingItems).leftJoin(products, and(eq(postingItems.productId, products.id), eq(products.userId, userId)))
+        .where(and(eq(postingItems.userId, userId), inArray(postingItems.postingId, candidatePostingIds)))
       : [];
     const productIdsByCandidatePosting = new Map<string, Set<string>>();
     const resolvedItemsByCandidatePosting = new Map<string, number>();
@@ -87,9 +87,9 @@ export async function GET(request: Request) {
     });
     const skus = [...new Set(sellerReturnProducts.map((product) => product.ozonSku).filter(Boolean))];
     const [orderProducts, catalogSkuLinks, externalProducts] = await Promise.all([
-      skus.length ? db.select({ offerId: postingItems.offerId, ozonSku: postingItems.ozonSku }).from(postingItems).where(inArray(postingItems.ozonSku, skus)) : Promise.resolve([]),
-      skus.length ? db.select({ offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks).where(inArray(productLinks.ozonSku, skus)) : Promise.resolve([]),
-      skus.length ? db.select({ offerId: externalItems.offerId, ozonSku: externalItems.ozonSku }).from(externalItems).where(inArray(externalItems.ozonSku, skus)) : Promise.resolve([]),
+      skus.length ? db.select({ offerId: postingItems.offerId, ozonSku: postingItems.ozonSku }).from(postingItems).where(and(eq(postingItems.userId, userId), inArray(postingItems.ozonSku, skus))) : Promise.resolve([]),
+      skus.length ? db.select({ offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks).where(and(eq(productLinks.userId, userId), inArray(productLinks.ozonSku, skus))) : Promise.resolve([]),
+      skus.length ? db.select({ offerId: externalItems.offerId, ozonSku: externalItems.ozonSku }).from(externalItems).where(and(eq(externalItems.userId, userId), inArray(externalItems.ozonSku, skus))) : Promise.resolve([]),
     ]);
     const offersBySku = new Map<string, Set<string>>();
     for (const row of [...sellerReturnProducts, ...orderProducts, ...catalogSkuLinks, ...externalProducts]) {
@@ -109,7 +109,7 @@ export async function GET(request: Request) {
           ...(numbers.length ? [inArray(financeAccruals.postingNumber, numbers)] : []),
           ...(orderNumbers.length ? [inArray(sql<string>`${financeAccruals.raw}->>'unit_number'`, orderNumbers)] : []),
         ];
-        return conditions.length ? db.select().from(financeAccruals).where(or(...conditions)) : Promise.resolve([]);
+        return conditions.length ? db.select().from(financeAccruals).where(and(eq(financeAccruals.userId, userId), or(...conditions))) : Promise.resolve([]);
       })(),
     ]);
     const visibleLinkedItems = linkedItemRows.flatMap(({ item, productSku, productTitle }) => {
@@ -147,7 +147,7 @@ export async function GET(request: Request) {
       ...visibleLinkedItems.map(({ item }) => item.ozonSku),
     ].filter(Boolean))];
     const writeoffRows = relatedSkus.length
-      ? await db.select().from(ozonWriteoffs).where(inArray(ozonWriteoffs.ozonSku, relatedSkus))
+      ? await db.select().from(ozonWriteoffs).where(and(eq(ozonWriteoffs.userId, userId), inArray(ozonWriteoffs.ozonSku, relatedSkus)))
       : [];
     const productById = new Map(catalog.filter((product) => whitelist.productIds.has(product.id)).map((product) => [product.id, product]));
     return { items: sellerReturns.map((row) => {
@@ -232,15 +232,15 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new Error("Не указан идентификатор возврата.");
     const body = await parseBody(request, returnUpdate);
     const [current, catalog, catalogLinks, externalCatalogRows] = await Promise.all([
-      db.select().from(returns).where(eq(returns.id, id)).limit(1).then((rows) => rows[0]),
-      db.select().from(products),
-      db.select({ productId: productLinks.productId, offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks),
-      db.select({ externalKey: externalItems.externalKey, offerId: externalItems.offerId, ozonSku: externalItems.ozonSku, productId: externalItems.productId }).from(externalItems),
+      db.select().from(returns).where(and(eq(returns.id, id), eq(returns.userId, userId))).limit(1).then((rows) => rows[0]),
+      db.select().from(products).where(eq(products.userId, userId)),
+      db.select({ productId: productLinks.productId, offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks).where(eq(productLinks.userId, userId)),
+      db.select({ externalKey: externalItems.externalKey, offerId: externalItems.offerId, ozonSku: externalItems.ozonSku, productId: externalItems.productId }).from(externalItems).where(eq(externalItems.userId, userId)),
     ]);
     if (!current) throw new Error("Запись не найдена.");
     const whitelist = buildCatalogProductWhitelist(catalog, catalogLinks, externalCatalogRows);
@@ -273,9 +273,9 @@ export async function PATCH(request: Request) {
     if (body.postingNumber !== undefined) manualFields.add("postingNumber");
     if (manualFields.size > current.manualReconciliationFields.length) values.manualReconciliationFields = [...manualFields];
     if (body.postingNumber !== undefined && body.postingNumber !== null) {
-      const [posting] = await db.select().from(postings).where(eq(postings.externalId, body.postingNumber)).limit(1);
+      const [posting] = await db.select().from(postings).where(and(eq(postings.userId, userId), eq(postings.externalId, body.postingNumber))).limit(1);
       if (!posting) throw new Error("Отправление с таким номером не найдено.");
-      const matchingItems = await db.select().from(postingItems).where(eq(postingItems.postingId, posting.id));
+      const matchingItems = await db.select().from(postingItems).where(and(eq(postingItems.userId, userId), eq(postingItems.postingId, posting.id)));
       if (!matchingItems.some((item) => resolveCatalogProductId(whitelist, item) === catalogProductId)) {
         throw new Error("В этом отправлении нет товара из возврата.");
       }
@@ -283,7 +283,7 @@ export async function PATCH(request: Request) {
     } else if (body.postingNumber === null) {
       values.postingNumber = null;
     }
-    const [item] = await db.update(returns).set(values).where(eq(returns.id, id)).returning();
+    const [item] = await db.update(returns).set(values).where(and(eq(returns.id, id), eq(returns.userId, userId))).returning();
     if (!item) throw new Error("Запись не найдена.");
     return Response.json({ item });
   } catch (error) { return errorResponse(error); }

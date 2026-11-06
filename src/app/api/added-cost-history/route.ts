@@ -4,7 +4,7 @@ import { handleLocalGet } from "../_lib/http";
 const MAX_PAGE_SIZE = 100;
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const params = new URL(request.url).searchParams;
     const requestedPage = Number(params.get("page"));
     const requestedPageSize = Number(params.get("pageSize"));
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
       ? Math.min(requestedPageSize, MAX_PAGE_SIZE)
       : 50;
     const query = (params.get("q") ?? "").trim().slice(0, 120).toLocaleLowerCase("ru-RU");
-    const snapshot = await getAccountingSnapshot(new Date(), true);
+    const snapshot = await getAccountingSnapshot(userId, new Date(), true);
     // Keep the reducer order: it is the sequence that changes the balances.
     const operations = (snapshot.addedCostOperations ?? []).filter((operation) => {
       if (!query) return true;

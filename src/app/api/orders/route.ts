@@ -7,13 +7,13 @@ import { currentOrderStatus, getOrderReturnStatesByPosting, hasRestockedReturn }
 import { buildFinanceOrderSkuPostingMap, financePostingSaleSkus, financeReturnLogisticsCents, resolveFinanceAccrualPostingNumber } from "@/ozon/finance";
 import { isOzonWriteOffStatus } from "@/ozon/return-status";
 import { buildCatalogProductWhitelist, isFinanceRowOutsideCatalog, resolveCatalogProductId, type CatalogProductWhitelist } from "@/ozon/catalog-whitelist";
-import { assertLocalMutation, errorResponse, handleLocalGet } from "../_lib/http";
+import { errorResponse, handleLocalGet, requireAuthenticatedMutation } from "../_lib/http";
 
-async function loadCatalog() {
+async function loadCatalog(userId: string) {
   const [catalog, links, externalRows] = await Promise.all([
-    db.select({ id: products.id, sku: products.sku, title: products.title, archived: products.archived }).from(products),
-    db.select({ productId: productLinks.productId, offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks),
-    db.select({ externalKey: externalItems.externalKey, offerId: externalItems.offerId, ozonSku: externalItems.ozonSku, productId: externalItems.productId }).from(externalItems),
+    db.select({ id: products.id, sku: products.sku, title: products.title, archived: products.archived }).from(products).where(eq(products.userId, userId)),
+    db.select({ productId: productLinks.productId, offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks).where(eq(productLinks.userId, userId)),
+    db.select({ externalKey: externalItems.externalKey, offerId: externalItems.offerId, ozonSku: externalItems.ozonSku, productId: externalItems.productId }).from(externalItems).where(eq(externalItems.userId, userId)),
   ]);
   return {
     whitelist: buildCatalogProductWhitelist(catalog, links, externalRows),
@@ -73,16 +73,16 @@ function addedCostExplanation(
   return lines.join("\n");
 }
 
-async function orderFilterOptions() {
+async function orderFilterOptions(userId: string) {
   const [allPostingRows, catalog] = await Promise.all([
-    db.select().from(postings),
-    loadCatalog(),
+    db.select().from(postings).where(eq(postings.userId, userId)),
+    loadCatalog(userId),
   ]);
   const { whitelist, skuByProductId } = catalog;
   const allPostingItemRows = allPostingRows.length
     ? await db.select({ item: postingItems })
       .from(postingItems)
-      .where(inArray(postingItems.postingId, allPostingRows.map((posting) => posting.id)))
+      .where(and(eq(postingItems.userId, userId), inArray(postingItems.postingId, allPostingRows.map((posting) => posting.id))))
     : [];
   const allPostingItems = catalogPostingItems(allPostingItemRows.map(({ item }) => item), whitelist);
   const postingIdsWithCatalogItems = new Set(allPostingItems.map((item) => item.postingId));
@@ -91,10 +91,10 @@ async function orderFilterOptions() {
 
   const postingNumbers = allPostings.map((posting) => posting.externalId);
   const [accrualRows, financePostingByOrderSku, returnRows, accounting] = await Promise.all([
-    financeAccrualsForPostings(allPostings),
-    financePostingMapForOrders(allPostings.map((posting) => posting.orderNumber)),
-    db.select().from(returns).where(inArray(returns.postingNumber, postingNumbers)),
-    getAccountingSnapshot(),
+    financeAccrualsForPostings(allPostings, userId),
+    financePostingMapForOrders(allPostings.map((posting) => posting.orderNumber), userId),
+    db.select().from(returns).where(and(eq(returns.userId, userId), inArray(returns.postingNumber, postingNumbers))),
+    getAccountingSnapshot(userId),
   ]);
   const itemRows = allPostingItems.filter((item) => postingIdsWithCatalogItems.has(item.postingId));
   const filteredAccrualRows = accrualRows.filter((row) => {
@@ -172,32 +172,32 @@ async function orderFilterOptions() {
   };
 }
 
-function financeAccrualsForPostings(rows: { externalId: string; orderNumber: string }[]) {
+function financeAccrualsForPostings(rows: { externalId: string; orderNumber: string }[], userId: string) {
   const unitNumbers = [...new Set(rows.map((posting) => posting.orderNumber).filter(Boolean))];
   const numbers = [...new Set(rows.flatMap((posting) => [posting.externalId, posting.orderNumber]).filter(Boolean))];
   const conditions = [
     ...(numbers.length ? [inArray(financeAccruals.postingNumber, numbers)] : []),
     ...(unitNumbers.length ? [inArray(sql<string>`${financeAccruals.raw}->>'unit_number'`, unitNumbers)] : []),
   ];
-  return conditions.length ? db.select().from(financeAccruals).where(or(...conditions)) : Promise.resolve([]);
+  return conditions.length ? db.select().from(financeAccruals).where(and(eq(financeAccruals.userId, userId), or(...conditions))) : Promise.resolve([]);
 }
 
-async function financePostingMapForOrders(orderNumbers: string[]) {
+async function financePostingMapForOrders(orderNumbers: string[], userId: string) {
   const uniqueOrderNumbers = [...new Set(orderNumbers.filter(Boolean))];
   if (!uniqueOrderNumbers.length) return new Map<string, string>();
   const relatedPostings = await db.select({ id: postings.id, externalId: postings.externalId, orderNumber: postings.orderNumber })
-    .from(postings).where(inArray(postings.orderNumber, uniqueOrderNumbers));
+    .from(postings).where(and(eq(postings.userId, userId), inArray(postings.orderNumber, uniqueOrderNumbers)));
   if (!relatedPostings.length) return new Map<string, string>();
   const items = await db.select({ postingId: postingItems.postingId, ozonSku: postingItems.ozonSku })
-    .from(postingItems).where(inArray(postingItems.postingId, relatedPostings.map((posting) => posting.id)));
+    .from(postingItems).where(and(eq(postingItems.userId, userId), inArray(postingItems.postingId, relatedPostings.map((posting) => posting.id))));
   return buildFinanceOrderSkuPostingMap(relatedPostings, items);
 }
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const params = new URL(request.url).searchParams;
-    if (params.get("filterOptions") === "1") return { filterOptions: await orderFilterOptions() };
-    const catalog = await loadCatalog();
+    if (params.get("filterOptions") === "1") return { filterOptions: await orderFilterOptions(userId) };
+    const catalog = await loadCatalog(userId);
     const { whitelist, skuByProductId, titleByProductId } = catalog;
     const requestedPage = Number(params.get("page"));
     const requestedPageSize = Number(params.get("pageSize"));
@@ -222,19 +222,21 @@ export async function GET(request: Request) {
     const catalogItemCondition = or(...catalogItemConditions)!;
     const itemMatches = (value: string, includeTitle = false) => exists(db.select({ id: postingItems.id }).from(postingItems).where(and(
       eq(postingItems.postingId, postings.id),
+      eq(postingItems.userId, userId),
       catalogItemCondition,
       includeTitle
         ? or(ilike(postingItems.title, value), ilike(postingItems.offerId, value), ilike(postingItems.ozonSku, value),
-          exists(db.select({ id: products.id }).from(products).where(and(eq(products.id, postingItems.productId), ilike(products.sku, value)))),
+          exists(db.select({ id: products.id }).from(products).where(and(eq(products.id, postingItems.productId), eq(products.userId, userId), ilike(products.sku, value)))),
         )!
         : or(ilike(postingItems.offerId, value), ilike(postingItems.ozonSku, value),
-        exists(db.select({ id: products.id }).from(products).where(and(eq(products.id, postingItems.productId), ilike(products.sku, value)))),
+        exists(db.select({ id: products.id }).from(products).where(and(eq(products.id, postingItems.productId), eq(products.userId, userId), ilike(products.sku, value)))),
       )!,
     )));
     const conditions: SQL[] = [exists(db.select({ id: postingItems.id }).from(postingItems).where(and(
       eq(postingItems.postingId, postings.id),
+      eq(postingItems.userId, userId),
       catalogItemCondition,
-    )))];
+    ))), eq(postings.userId, userId)];
     if (query) conditions.push(or(
       ilike(postings.externalId, pattern), ilike(postings.orderNumber, pattern), ilike(postings.status, pattern),
       sql`${postings.orderDate}::text ILIKE ${pattern}`, sql`${postings.deliveredAt}::text ILIKE ${pattern}`, itemMatches(pattern, true),
@@ -273,16 +275,16 @@ export async function GET(request: Request) {
     const candidateExternalIds = candidates.map((posting) => posting.externalId);
     const [candidateItemRows, candidateAccruals, candidateFinancePostingByOrderSku, candidateReturns, accounting] = await Promise.all([
       candidateIds.length
-        ? db.select({ item: postingItems }).from(postingItems).where(inArray(postingItems.postingId, candidateIds))
+        ? db.select({ item: postingItems }).from(postingItems).where(and(eq(postingItems.userId, userId), inArray(postingItems.postingId, candidateIds)))
         : Promise.resolve([]),
-      financeAccrualsForPostings(candidates),
-      financePostingMapForOrders(candidates.map((posting) => posting.orderNumber)),
+      financeAccrualsForPostings(candidates, userId),
+      financePostingMapForOrders(candidates.map((posting) => posting.orderNumber), userId),
       candidateExternalIds.length
-        ? db.select().from(returns).where(inArray(returns.postingNumber, candidateExternalIds))
+        ? db.select().from(returns).where(and(eq(returns.userId, userId), inArray(returns.postingNumber, candidateExternalIds)))
         : Promise.resolve([]),
-      getAccountingSnapshot(new Date(), true),
+    getAccountingSnapshot(userId, new Date(), true),
     ]);
-    await persistAddedCostRateSnapshots(accounting);
+    await persistAddedCostRateSnapshots(userId, accounting);
     const addedCostRateByPostingId = accounting.addedCostRateByPostingId ?? {};
     const addedCostBreakdownByPostingId = accounting.addedCostBreakdownByPostingId ?? {};
     const candidateItems = catalogPostingItems(candidateItemRows.map(({ item }) => item), whitelist).map((item) => ({ item }));
@@ -452,11 +454,11 @@ export async function GET(request: Request) {
     const [itemRows, accruals, returnRows, financePostingByOrderSku] = await Promise.all([
       db.select({ item: postingItems, productSku: products.sku })
         .from(postingItems)
-        .leftJoin(products, eq(postingItems.productId, products.id))
-        .where(inArray(postingItems.postingId, postingIds)),
-      financeAccrualsForPostings(pageRows),
-      db.select().from(returns).where(inArray(returns.postingNumber, externalIds)),
-      financePostingMapForOrders(pageRows.map((posting) => posting.orderNumber)),
+        .leftJoin(products, and(eq(postingItems.productId, products.id), eq(products.userId, userId)))
+        .where(and(eq(postingItems.userId, userId), inArray(postingItems.postingId, postingIds))),
+      financeAccrualsForPostings(pageRows, userId),
+      db.select().from(returns).where(and(eq(returns.userId, userId), inArray(returns.postingNumber, externalIds))),
+      financePostingMapForOrders(pageRows.map((posting) => posting.orderNumber), userId),
     ]);
     const visibleItemRows = itemRows.flatMap((row) => {
       const productId = resolveCatalogProductId(whitelist, row.item);
@@ -559,11 +561,11 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    assertLocalMutation(request);
-    const configuredRows = await db.select().from(appSettings).limit(1);
+    const userId = await requireAuthenticatedMutation(request);
+    const configuredRows = await db.select().from(appSettings).where(eq(appSettings.userId, userId)).limit(1);
     const configured = configuredRows[0];
     if (!configured?.ozonClientId || !configured.ozonApiKeyEncrypted) throw new Error("Сначала укажи Client ID и API-ключ Ozon в настройках.");
-    const [job] = await db.insert(syncJobs).values({ kind: "orders", status: "queued", summary: { requestedBy: "user" } }).returning();
+    const [job] = await db.insert(syncJobs).values({ userId, kind: "orders", status: "queued", summary: { requestedBy: "user" } }).returning();
     return Response.json({ item: job, message: "Синхронизация поставлена в очередь." }, { status: 202 });
   } catch (error) { return errorResponse(error); }
 }

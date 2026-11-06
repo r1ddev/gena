@@ -1,8 +1,8 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { productLinks, products, purchaseReceiptLines, purchaseReceipts, purchases } from "@/db/schema";
-import { assertLocalMutation, errorResponse, parseBody } from "../../_lib/http";
+import { errorResponse, parseBody, requireAuthenticatedMutation } from "../../_lib/http";
 import { isoDate, positiveInteger } from "../../_lib/validation";
 
 const linesSchema = z.array(z.object({
@@ -26,10 +26,11 @@ const receiptUpdateSchema = z.object({
   note: z.string().trim().max(2000).optional().default(""),
 });
 
-async function ensureProductsExist(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], lines: z.infer<typeof linesSchema>) {
+async function ensureProductsExist(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], userId: string, lines: z.infer<typeof linesSchema>) {
   const productIds = lines.map((line) => line.productId);
   const existing = await tx.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
-    .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(inArray(products.id, productIds));
+    .from(products).leftJoin(productLinks, and(eq(productLinks.productId, products.id), eq(productLinks.userId, userId)))
+    .where(and(inArray(products.id, productIds), eq(products.userId, userId)));
   if (existing.length !== productIds.length || existing.some((product) => product.archived)) {
     throw new Error("Выберите товары из текущего каталога.");
   }
@@ -41,20 +42,22 @@ async function ensureProductsExist(tx: Parameters<Parameters<typeof db.transacti
 
 export async function POST(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const body = await parseBody(request, receiptSchema);
     const item = await db.transaction(async (tx) => {
       const [purchase] = await tx.select({ id: purchases.id, productId: purchases.productId, sku: products.sku, archived: products.archived })
-        .from(purchases).innerJoin(products, eq(products.id, purchases.productId)).where(eq(purchases.id, body.purchaseId)).limit(1);
+        .from(purchases).innerJoin(products, and(eq(products.id, purchases.productId), eq(products.userId, userId)))
+        .where(and(eq(purchases.id, body.purchaseId), eq(purchases.userId, userId))).limit(1);
       if (!purchase) throw new Error("Закупка не найдена.");
       if (purchase.archived) throw new Error("Эта закупка связана с товаром вне текущего каталога.");
-      const productSnapshots = await ensureProductsExist(tx, body.lines);
+      const productSnapshots = await ensureProductsExist(tx, userId, body.lines);
       const [receipt] = await tx.insert(purchaseReceipts).values({
+        userId,
         purchaseId: body.purchaseId,
         receivedAt: body.receivedAt,
         note: body.note,
       }).returning();
-      await tx.insert(purchaseReceiptLines).values(body.lines.map((line) => ({ receiptId: receipt.id, ...line, ...productSnapshots.get(line.productId)! })));
+      await tx.insert(purchaseReceiptLines).values(body.lines.map((line) => ({ userId, receiptId: receipt.id, ...line, ...productSnapshots.get(line.productId)! })));
       return { ...receipt, lines: body.lines };
     });
     return Response.json({ item }, { status: 201 });
@@ -63,20 +66,21 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id || !z.string().uuid().safeParse(id).success) throw new Error("Не указан корректный идентификатор приёмки.");
     const body = await parseBody(request, receiptUpdateSchema);
     const item = await db.transaction(async (tx) => {
       const [existing] = await tx.select({ id: purchaseReceipts.id, purchaseId: purchaseReceipts.purchaseId, productId: purchases.productId, sku: products.sku, archived: products.archived })
         .from(purchaseReceipts).innerJoin(purchases, eq(purchases.id, purchaseReceipts.purchaseId))
-        .innerJoin(products, eq(products.id, purchases.productId)).where(eq(purchaseReceipts.id, id)).limit(1);
+        .innerJoin(products, and(eq(products.id, purchases.productId), eq(products.userId, userId)))
+        .where(and(eq(purchaseReceipts.id, id), eq(purchaseReceipts.userId, userId), eq(purchases.userId, userId))).limit(1);
       if (!existing) throw new Error("Приёмка не найдена.");
       if (existing.archived) throw new Error("Эта закупка связана с товаром вне текущего каталога.");
-      const productSnapshots = await ensureProductsExist(tx, body.lines);
-      const [receipt] = await tx.update(purchaseReceipts).set({ receivedAt: body.receivedAt, note: body.note }).where(eq(purchaseReceipts.id, id)).returning();
-      await tx.delete(purchaseReceiptLines).where(eq(purchaseReceiptLines.receiptId, id));
-      await tx.insert(purchaseReceiptLines).values(body.lines.map((line) => ({ receiptId: id, ...line, ...productSnapshots.get(line.productId)! })));
+      const productSnapshots = await ensureProductsExist(tx, userId, body.lines);
+      const [receipt] = await tx.update(purchaseReceipts).set({ receivedAt: body.receivedAt, note: body.note }).where(and(eq(purchaseReceipts.id, id), eq(purchaseReceipts.userId, userId))).returning();
+      await tx.delete(purchaseReceiptLines).where(and(eq(purchaseReceiptLines.receiptId, id), eq(purchaseReceiptLines.userId, userId)));
+      await tx.insert(purchaseReceiptLines).values(body.lines.map((line) => ({ userId, receiptId: id, ...line, ...productSnapshots.get(line.productId)! })));
       return { ...receipt, lines: body.lines };
     });
     return Response.json({ item });
@@ -85,10 +89,10 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id || !z.string().uuid().safeParse(id).success) throw new Error("Не указан корректный идентификатор приёмки.");
-    const [deleted] = await db.delete(purchaseReceipts).where(eq(purchaseReceipts.id, id)).returning({ id: purchaseReceipts.id });
+    const [deleted] = await db.delete(purchaseReceipts).where(and(eq(purchaseReceipts.id, id), eq(purchaseReceipts.userId, userId))).returning({ id: purchaseReceipts.id });
     if (!deleted) throw new Error("Приёмка не найдена.");
     return Response.json({ deleted: deleted.id });
   } catch (error) { return errorResponse(error); }

@@ -51,19 +51,20 @@ function supplyMatchesCharge(supply: SupplyRecord, charge: OzonSupplyCharge) {
   return Boolean(post && charge.unitNumber.endsWith(post) && skusMatch(supply.ozonSkus, charge.relatedSkus));
 }
 
-export async function reconcileOzonSupplyCosts() {
+export async function reconcileOzonSupplyCosts(userId: string) {
   const [headerRows, lineRows, chargeRows] = await Promise.all([
-    db.select({ id: supplies.id, note: supplies.note, marketplace: supplies.marketplace, ozonSupplyId: supplies.ozonSupplyId, sourceKey: supplies.sourceKey }).from(supplies),
+    db.select({ id: supplies.id, note: supplies.note, marketplace: supplies.marketplace, ozonSupplyId: supplies.ozonSupplyId, sourceKey: supplies.sourceKey }).from(supplies).where(eq(supplies.userId, userId)),
     db.select({ supplyId: supplyLines.supplyId, ozonSku: productLinks.ozonSku })
       .from(supplyLines)
-      .leftJoin(productLinks, eq(productLinks.productId, supplyLines.productId)),
+      .leftJoin(productLinks, and(eq(productLinks.userId, userId), eq(productLinks.productId, supplyLines.productId)))
+      .where(eq(supplyLines.userId, userId)),
     db.select({
       unitNumber: sql<string>`${financeAccruals.raw}->>'unit_number'`,
       amount: financeAccruals.amount,
       relatedSkus: financeAccruals.relatedSkus,
     })
       .from(financeAccruals)
-      .where(and(eq(financeAccruals.accruedCategory, "NON_ITEM"), eq(financeAccruals.typeId, "12"))),
+      .where(and(eq(financeAccruals.userId, userId), eq(financeAccruals.accruedCategory, "NON_ITEM"), eq(financeAccruals.typeId, "12"))),
   ]);
 
   const suppliesById = new Map<string, SupplyRecord>();
@@ -121,7 +122,7 @@ export async function reconcileOzonSupplyCosts() {
       const cost = charge.amount.negated().toDecimalPlaces(2).toFixed(2);
       await tx.update(supplies)
         .set({ marketplace: "ozon", ozonSupplyId: unitNumber, shippingCost: cost })
-        .where(eq(supplies.id, supplyId));
+        .where(and(eq(supplies.userId, userId), eq(supplies.id, supplyId)));
       matched += 1;
     }
 
@@ -129,7 +130,7 @@ export async function reconcileOzonSupplyCosts() {
       if (supply.marketplace !== "unknown") continue;
       const inferredMarketplace = platformFromNote(supply.note) ?? (supply.sourceKey === null ? "ozon" : null);
       if (!inferredMarketplace) continue;
-      await tx.update(supplies).set({ marketplace: inferredMarketplace }).where(eq(supplies.id, supply.id));
+      await tx.update(supplies).set({ marketplace: inferredMarketplace }).where(and(eq(supplies.userId, userId), eq(supplies.id, supply.id)));
     }
   });
 

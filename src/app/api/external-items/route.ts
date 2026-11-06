@@ -8,7 +8,7 @@ import { ozonSkuFromExternalKey } from "@/ozon/ignored-products";
 import { ozonPost } from "@/ozon/client";
 import { decryptSecret } from "@/security/secrets";
 import { readProductImage } from "../_lib/product-image";
-import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+import { errorResponse, handleLocalGet, parseBody, requireAuthenticatedMutation } from "../_lib/http";
 
 function sourceKind(raw: Record<string, unknown>, hasOrderRow: boolean) {
   const visual = raw.visual && typeof raw.visual === "object" && !Array.isArray(raw.visual) ? raw.visual as Record<string, unknown> : {};
@@ -38,9 +38,9 @@ function uniqueOfferIdsBySku(rows: { offerId: string; ozonSku: string }[]) {
   return new Map([...candidates].flatMap(([sku, offerIds]) => offerIds.size === 1 ? [[sku, [...offerIds][0]] as const] : []));
 }
 
-async function fetchOfferIdsBySku(skus: string[]) {
+async function fetchOfferIdsBySku(skus: string[], userId: string) {
   if (skus.length === 0) return new Map<string, string>();
-  const [settings] = await db.select().from(appSettings).limit(1);
+  const [settings] = await db.select().from(appSettings).where(eq(appSettings.userId, userId)).limit(1);
   if (!settings?.ozonClientId || !settings.ozonApiKeyEncrypted) return new Map<string, string>();
 
   const credentials = { clientId: settings.ozonClientId, apiKey: decryptSecret(settings.ozonApiKeyEncrypted) };
@@ -97,20 +97,21 @@ const actionSchema = z.discriminatedUnion("action", [
 ]);
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const disposition = new URL(request.url).searchParams.get("disposition") ?? "pending";
     await db.update(externalItems)
       .set({ disposition: "pending" })
       .where(and(
         inArray(externalItems.disposition, ["mapped", "created"]),
         isNull(externalItems.productId),
+        eq(externalItems.userId, userId),
       ));
     const items = disposition === "all"
-      ? await db.select().from(externalItems).orderBy(desc(externalItems.lastSeenAt))
+      ? await db.select().from(externalItems).where(eq(externalItems.userId, userId)).orderBy(desc(externalItems.lastSeenAt))
       : await db.select().from(externalItems)
-        .where(eq(externalItems.disposition, disposition === "ignored" ? "ignored" : "pending"))
+        .where(and(eq(externalItems.userId, userId), eq(externalItems.disposition, disposition === "ignored" ? "ignored" : "pending")))
         .orderBy(desc(externalItems.lastSeenAt));
-    const catalog = await db.select().from(products);
+    const catalog = await db.select().from(products).where(eq(products.userId, userId));
     const byId = new Map(catalog.map((product) => [product.id, product]));
     const externalKeys = [...new Set(items.map((item) => item.externalKey))];
     const skus = [...new Set(items.map((item) => item.ozonSku).filter(Boolean))];
@@ -126,35 +127,35 @@ export async function GET(request: Request) {
     const [orderRows, returnRows, writeoffRows, itemAccruals, knownOrderProducts, knownReturnProducts, knownWriteoffProducts, knownExternalProducts, knownProductLinks] = await Promise.all([
       externalKeys.length
         ? db.select({ externalKey: postingItems.externalKey, postingNumber: postings.externalId })
-          .from(postingItems).innerJoin(postings, eq(postingItems.postingId, postings.id)).where(inArray(postingItems.externalKey, externalKeys))
+          .from(postingItems).innerJoin(postings, and(eq(postingItems.postingId, postings.id), eq(postings.userId, userId))).where(and(eq(postingItems.userId, userId), inArray(postingItems.externalKey, externalKeys)))
         : Promise.resolve([]),
       externalKeys.length
         ? db.select({ externalKey: returns.externalKey, postingNumber: returns.postingNumber, status: returns.status, destination: returns.destination })
-          .from(returns).where(inArray(returns.externalKey, externalKeys))
+          .from(returns).where(and(eq(returns.userId, userId), inArray(returns.externalKey, externalKeys)))
         : Promise.resolve([]),
       externalKeys.length
         ? db.select({ externalKey: ozonWriteoffs.externalKey, amount: ozonWriteoffs.compensationAmount })
-          .from(ozonWriteoffs).where(inArray(ozonWriteoffs.externalKey, externalKeys))
+          .from(ozonWriteoffs).where(and(eq(ozonWriteoffs.userId, userId), inArray(ozonWriteoffs.externalKey, externalKeys)))
         : Promise.resolve([]),
       skus.length
-        ? db.select().from(financeAccruals).where(eq(financeAccruals.accruedCategory, "ITEM"))
+        ? db.select().from(financeAccruals).where(and(eq(financeAccruals.userId, userId), eq(financeAccruals.accruedCategory, "ITEM")))
         : Promise.resolve([]),
       skus.length
-        ? db.select({ offerId: postingItems.offerId, ozonSku: postingItems.ozonSku }).from(postingItems).where(inArray(postingItems.ozonSku, skus))
+        ? db.select({ offerId: postingItems.offerId, ozonSku: postingItems.ozonSku }).from(postingItems).where(and(eq(postingItems.userId, userId), inArray(postingItems.ozonSku, skus)))
         : Promise.resolve([]),
       skus.length
-        ? db.select({ offerId: returns.offerId, ozonSku: returns.ozonSku }).from(returns).where(inArray(returns.ozonSku, skus))
+        ? db.select({ offerId: returns.offerId, ozonSku: returns.ozonSku }).from(returns).where(and(eq(returns.userId, userId), inArray(returns.ozonSku, skus)))
         : Promise.resolve([]),
       skus.length
-        ? db.select({ offerId: ozonWriteoffs.offerId, ozonSku: ozonWriteoffs.ozonSku }).from(ozonWriteoffs).where(inArray(ozonWriteoffs.ozonSku, skus))
+        ? db.select({ offerId: ozonWriteoffs.offerId, ozonSku: ozonWriteoffs.ozonSku }).from(ozonWriteoffs).where(and(eq(ozonWriteoffs.userId, userId), inArray(ozonWriteoffs.ozonSku, skus)))
         : Promise.resolve([]),
       skus.length
-        ? db.select({ offerId: externalItems.offerId, ozonSku: externalItems.ozonSku }).from(externalItems).where(inArray(externalItems.ozonSku, skus))
+        ? db.select({ offerId: externalItems.offerId, ozonSku: externalItems.ozonSku }).from(externalItems).where(and(eq(externalItems.userId, userId), inArray(externalItems.ozonSku, skus)))
         : Promise.resolve([]),
       productLinkConditions.length
         ? db.select({ offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks)
-          .innerJoin(products, eq(products.id, productLinks.productId))
-          .where(or(...productLinkConditions))
+          .innerJoin(products, and(eq(products.id, productLinks.productId), eq(products.userId, userId)))
+          .where(and(eq(productLinks.userId, userId), or(...productLinkConditions)))
         : Promise.resolve([]),
     ]);
     const visibleItems = disposition === "pending" ? items.filter((item) => {
@@ -181,11 +182,11 @@ export async function GET(request: Request) {
     }))];
     let ozonOfferIdBySku = new Map<string, string>();
     try {
-      ozonOfferIdBySku = await fetchOfferIdsBySku(unresolvedSkus);
+      ozonOfferIdBySku = await fetchOfferIdsBySku(unresolvedSkus, userId);
       if (ozonOfferIdBySku.size) {
         await db.transaction(async (tx) => {
           for (const [sku, offerId] of ozonOfferIdBySku) {
-            await tx.update(externalItems).set({ offerId }).where(and(eq(externalItems.ozonSku, sku), eq(externalItems.offerId, "")));
+            await tx.update(externalItems).set({ offerId }).where(and(eq(externalItems.userId, userId), eq(externalItems.ozonSku, sku), eq(externalItems.offerId, "")));
           }
         });
       }
@@ -265,7 +266,7 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new Error("Не указан идентификатор артикула Ozon.");
     let rawBody: unknown;
@@ -279,13 +280,14 @@ export async function PATCH(request: Request) {
     }
     const body = actionSchema.parse(rawBody);
     if (image && body.action !== "create") throw new Error("Изображение можно добавить только при создании товара.");
-    const external = (await db.select().from(externalItems).where(eq(externalItems.id, id)).limit(1))[0];
+    const external = (await db.select().from(externalItems).where(and(eq(externalItems.userId, userId), eq(externalItems.id, id))).limit(1))[0];
     if (!external) throw new Error("Запись не найдена.");
     if (body.action === "restore") {
       const ignoredRows = await db.update(externalItems)
         .set({ disposition: "pending", productId: null })
         .where(and(
           eq(externalItems.disposition, "ignored"),
+          eq(externalItems.userId, userId),
           external.ozonSku ? eq(externalItems.ozonSku, external.ozonSku) : eq(externalItems.id, external.id),
         ))
         .returning();
@@ -294,23 +296,23 @@ export async function PATCH(request: Request) {
     if (body.action === "ignore") {
       const item = await db.transaction(async (tx) => {
         const ignoredRows = external.ozonSku
-          ? await tx.update(externalItems).set({ disposition: "ignored", productId: null }).where(eq(externalItems.ozonSku, external.ozonSku)).returning()
-          : await tx.update(externalItems).set({ disposition: "ignored", productId: null }).where(eq(externalItems.id, external.id)).returning();
+          ? await tx.update(externalItems).set({ disposition: "ignored", productId: null }).where(and(eq(externalItems.userId, userId), eq(externalItems.ozonSku, external.ozonSku))).returning()
+          : await tx.update(externalItems).set({ disposition: "ignored", productId: null }).where(and(eq(externalItems.userId, userId), eq(externalItems.id, external.id))).returning();
         const ignored = ignoredRows.find((row) => row.id === id) ?? ignoredRows[0];
         if (external.ozonSku) {
-          await tx.delete(productLinks).where(eq(productLinks.ozonSku, external.ozonSku));
-          await tx.update(postingItems).set({ productId: null }).where(eq(postingItems.ozonSku, external.ozonSku));
-          await tx.update(returns).set({ productId: null, updatedAt: new Date() }).where(eq(returns.ozonSku, external.ozonSku));
-          await tx.update(ozonWriteoffs).set({ productId: null, updatedAt: new Date() }).where(eq(ozonWriteoffs.ozonSku, external.ozonSku));
-          const itemAccruals = await tx.select({ id: financeAccruals.id, externalKey: financeAccruals.externalKey, raw: financeAccruals.raw }).from(financeAccruals);
+          await tx.delete(productLinks).where(and(eq(productLinks.userId, userId), eq(productLinks.ozonSku, external.ozonSku)));
+          await tx.update(postingItems).set({ productId: null }).where(and(eq(postingItems.userId, userId), eq(postingItems.ozonSku, external.ozonSku)));
+          await tx.update(returns).set({ productId: null, updatedAt: new Date() }).where(and(eq(returns.userId, userId), eq(returns.ozonSku, external.ozonSku)));
+          await tx.update(ozonWriteoffs).set({ productId: null, updatedAt: new Date() }).where(and(eq(ozonWriteoffs.userId, userId), eq(ozonWriteoffs.ozonSku, external.ozonSku)));
+          const itemAccruals = await tx.select({ id: financeAccruals.id, externalKey: financeAccruals.externalKey, raw: financeAccruals.raw }).from(financeAccruals).where(eq(financeAccruals.userId, userId));
           const matchingAccrualIds = itemAccruals
             .filter((accrual) => ozonSkuFromExternalKey(accrual.externalKey) === external.ozonSku || financeRowContainsSku(accrual.raw, external.ozonSku!))
             .map((accrual) => accrual.id);
-          if (matchingAccrualIds.length) await tx.update(financeAccruals).set({ productId: null }).where(inArray(financeAccruals.id, matchingAccrualIds));
+          if (matchingAccrualIds.length) await tx.update(financeAccruals).set({ productId: null }).where(and(eq(financeAccruals.userId, userId), inArray(financeAccruals.id, matchingAccrualIds)));
         } else {
-          await tx.update(postingItems).set({ productId: null }).where(eq(postingItems.externalKey, external.externalKey));
-          await tx.update(returns).set({ productId: null, updatedAt: new Date() }).where(eq(returns.externalKey, external.externalKey));
-          await tx.update(ozonWriteoffs).set({ productId: null, updatedAt: new Date() }).where(eq(ozonWriteoffs.externalKey, external.externalKey));
+          await tx.update(postingItems).set({ productId: null }).where(and(eq(postingItems.userId, userId), eq(postingItems.externalKey, external.externalKey)));
+          await tx.update(returns).set({ productId: null, updatedAt: new Date() }).where(and(eq(returns.userId, userId), eq(returns.externalKey, external.externalKey)));
+          await tx.update(ozonWriteoffs).set({ productId: null, updatedAt: new Date() }).where(and(eq(ozonWriteoffs.userId, userId), eq(ozonWriteoffs.externalKey, external.externalKey)));
         }
         return ignored;
       });
@@ -325,11 +327,11 @@ export async function PATCH(request: Request) {
       if (body.action === "create" && (!offerId || !ozonSku)) throw new Error("Для товара нужны артикул продавца и SKU Ozon.");
 
       if (body.action === "create") {
-        const [created] = await tx.insert(products).values({ sku: offerId || ozonSku, title: body.title }).returning();
+        const [created] = await tx.insert(products).values({ userId, sku: offerId || ozonSku, title: body.title }).returning();
         productId = created.id;
-        if (image) await tx.insert(productImages).values({ productId, ...image });
+        if (image) await tx.insert(productImages).values({ userId, productId, ...image });
       }
-      const [product] = await tx.select().from(products).where(eq(products.id, productId)).limit(1);
+      const [product] = await tx.select().from(products).where(and(eq(products.userId, userId), eq(products.id, productId))).limit(1);
       if (!product) throw new Error("Сначала создайте товар в каталоге.");
 
       const identifiers = [
@@ -337,12 +339,12 @@ export async function PATCH(request: Request) {
         ozonSku ? eq(productLinks.ozonSku, ozonSku) : undefined,
       ].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined);
       const matchingLinks = identifiers.length
-        ? await tx.select().from(productLinks).where(or(...identifiers))
+        ? await tx.select().from(productLinks).where(and(eq(productLinks.userId, userId), or(...identifiers)))
         : [];
       if (matchingLinks.some((link) => link.productId !== productId)) {
         throw new Error("Этот артикул или SKU Ozon уже указан у другого товара.");
       }
-      const [currentProductIdentifiers] = await tx.select().from(productLinks).where(eq(productLinks.productId, productId)).limit(1);
+      const [currentProductIdentifiers] = await tx.select().from(productLinks).where(and(eq(productLinks.userId, userId), eq(productLinks.productId, productId))).limit(1);
       const offerIdConflict = Boolean(offerId && currentProductIdentifiers?.offerId && currentProductIdentifiers.offerId !== offerId);
       const ozonSkuConflict = Boolean(ozonSku && currentProductIdentifiers?.ozonSku && currentProductIdentifiers.ozonSku !== ozonSku);
       if (currentProductIdentifiers && (offerIdConflict || ozonSkuConflict)) {
@@ -352,20 +354,20 @@ export async function PATCH(request: Request) {
         await tx.update(productLinks).set({
           offerId: currentProductIdentifiers.offerId || offerId,
           ozonSku: currentProductIdentifiers.ozonSku || ozonSku,
-        }).where(eq(productLinks.id, currentProductIdentifiers.id));
+        }).where(and(eq(productLinks.userId, userId), eq(productLinks.id, currentProductIdentifiers.id)));
       } else if (!currentProductIdentifiers) {
         if (!offerId || !ozonSku) throw new Error("Для товара нужны артикул продавца и SKU Ozon. Укажите их в каталоге и повторите сопоставление.");
-        await tx.insert(productLinks).values({ productId, offerId, ozonSku });
+        await tx.insert(productLinks).values({ userId, productId, offerId, ozonSku });
       }
 
       const disposition = body.action === "create" ? "created" : "mapped";
       const siblingRows = ozonSku
         ? await tx.select({ id: externalItems.id, externalKey: externalItems.externalKey }).from(externalItems)
-          .where(and(eq(externalItems.ozonSku, ozonSku), ne(externalItems.disposition, "ignored")))
+          .where(and(eq(externalItems.userId, userId), eq(externalItems.ozonSku, ozonSku), ne(externalItems.disposition, "ignored")))
         : [];
       const relatedExternalIds = [...new Set([external.id, ...siblingRows.map((row) => row.id)])];
       const relatedExternalKeys = [...new Set([external.externalKey, ...siblingRows.map((row) => row.externalKey)])];
-      const [updated] = await tx.update(externalItems).set({ productId, disposition }).where(inArray(externalItems.id, relatedExternalIds)).returning();
+      const [updated] = await tx.update(externalItems).set({ productId, disposition }).where(and(eq(externalItems.userId, userId), inArray(externalItems.id, relatedExternalIds))).returning();
       const orderCondition = ozonSku
         ? or(eq(postingItems.ozonSku, ozonSku), inArray(postingItems.externalKey, relatedExternalKeys))
         : inArray(postingItems.externalKey, relatedExternalKeys);
@@ -375,17 +377,17 @@ export async function PATCH(request: Request) {
       const writeoffCondition = ozonSku
         ? or(eq(ozonWriteoffs.ozonSku, ozonSku), inArray(ozonWriteoffs.externalKey, relatedExternalKeys))
         : inArray(ozonWriteoffs.externalKey, relatedExternalKeys);
-      await tx.update(postingItems).set({ productId }).where(orderCondition);
-      await tx.update(returns).set({ productId, updatedAt: new Date() }).where(returnCondition);
-      await tx.update(ozonWriteoffs).set({ productId, updatedAt: new Date() }).where(writeoffCondition);
+      await tx.update(postingItems).set({ productId }).where(and(eq(postingItems.userId, userId), orderCondition));
+      await tx.update(returns).set({ productId, updatedAt: new Date() }).where(and(eq(returns.userId, userId), returnCondition));
+      await tx.update(ozonWriteoffs).set({ productId, updatedAt: new Date() }).where(and(eq(ozonWriteoffs.userId, userId), writeoffCondition));
       const itemAccruals = await tx.select({ id: financeAccruals.id, externalKey: financeAccruals.externalKey, raw: financeAccruals.raw })
         .from(financeAccruals)
-        .where(eq(financeAccruals.accruedCategory, "ITEM"));
+        .where(and(eq(financeAccruals.userId, userId), eq(financeAccruals.accruedCategory, "ITEM")));
       const matchingAccrualIds = itemAccruals
         .filter((accrual) => external.ozonSku && financeAccrualRowContainsSku(accrual.externalKey, accrual.raw, external.ozonSku))
         .map((accrual) => accrual.id);
       if (matchingAccrualIds.length) {
-        await tx.update(financeAccruals).set({ productId }).where(inArray(financeAccruals.id, matchingAccrualIds));
+        await tx.update(financeAccruals).set({ productId }).where(and(eq(financeAccruals.userId, userId), inArray(financeAccruals.id, matchingAccrualIds)));
       }
       return updated;
     });

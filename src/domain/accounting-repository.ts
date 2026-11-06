@@ -33,27 +33,27 @@ import { isOzonWriteOffStatus } from "@/ozon/return-status";
 import { buildCatalogProductWhitelist, isCatalogProduct, isFinanceRowOutsideCatalog, resolveCatalogProductId } from "@/ozon/catalog-whitelist";
 import { matchOzonCompensationReports } from "@/ozon/compensation";
 
-export async function getAccountingSnapshot(now = new Date(), includeAddedCostRates = false, includeFullDailyTrend = false) {
+export async function getAccountingSnapshot(userId: string, now = new Date(), includeAddedCostRates = false, includeFullDailyTrend = false) {
   const [productRows, purchaseRows, receiptRows, receiptLineRows, supplyRows, supplyLineRows, expenseRows, postingRows, postingItemRows, financeRows, compensationReports, returnRows, manualRows, ozonWriteoffRows, adjustmentRows, externalRows, payoutRows, settingsRows, catalogLinkRows] = await Promise.all([
-    db.select().from(products),
-    db.select().from(purchases),
-    db.select().from(purchaseReceipts),
-    db.select().from(purchaseReceiptLines),
-    db.select().from(supplies),
-    db.select().from(supplyLines),
-    db.select().from(expenses),
-    db.select().from(postings),
-    db.select().from(postingItems),
-    db.select().from(financeAccruals),
-    db.select().from(ozonCompensationReports),
-    db.select().from(returns),
-    db.select().from(manualWriteoffs),
-    db.select().from(ozonWriteoffs),
-    db.select().from(stockAdjustments),
-    db.select().from(externalItems),
-    db.select().from(ozonPayouts),
-    db.select().from(appSettings).where(eq(appSettings.id, 1)).limit(1),
-    db.select().from(productLinks),
+    db.select().from(products).where(eq(products.userId, userId)),
+    db.select().from(purchases).where(eq(purchases.userId, userId)),
+    db.select().from(purchaseReceipts).where(eq(purchaseReceipts.userId, userId)),
+    db.select().from(purchaseReceiptLines).where(eq(purchaseReceiptLines.userId, userId)),
+    db.select().from(supplies).where(eq(supplies.userId, userId)),
+    db.select().from(supplyLines).where(eq(supplyLines.userId, userId)),
+    db.select().from(expenses).where(eq(expenses.userId, userId)),
+    db.select().from(postings).where(eq(postings.userId, userId)),
+    db.select().from(postingItems).where(eq(postingItems.userId, userId)),
+    db.select().from(financeAccruals).where(eq(financeAccruals.userId, userId)),
+    db.select().from(ozonCompensationReports).where(eq(ozonCompensationReports.userId, userId)),
+    db.select().from(returns).where(eq(returns.userId, userId)),
+    db.select().from(manualWriteoffs).where(eq(manualWriteoffs.userId, userId)),
+    db.select().from(ozonWriteoffs).where(eq(ozonWriteoffs.userId, userId)),
+    db.select().from(stockAdjustments).where(eq(stockAdjustments.userId, userId)),
+    db.select().from(externalItems).where(eq(externalItems.userId, userId)),
+    db.select().from(ozonPayouts).where(eq(ozonPayouts.userId, userId)),
+    db.select().from(appSettings).where(eq(appSettings.userId, userId)).limit(1),
+    db.select().from(productLinks).where(eq(productLinks.userId, userId)),
   ]);
 
   const catalogWhitelist = buildCatalogProductWhitelist(productRows, catalogLinkRows, externalRows);
@@ -493,7 +493,7 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
   };
 }
 
-export async function persistAddedCostRateSnapshots(snapshot: {
+export async function persistAddedCostRateSnapshots(userId: string, snapshot: {
   postingRows: { id: string }[];
   addedCostRateByPostingId?: Record<string, string>;
   addedCostBreakdownByPostingId?: Record<string, AddedCostBreakdown>;
@@ -515,6 +515,7 @@ export async function persistAddedCostRateSnapshots(snapshot: {
           added_cost_breakdown = rates.breakdown
       FROM (VALUES ${sql.join(tuples, sql`, `)}) AS rates(id, rate, breakdown)
       WHERE posting.id = rates.id
+        AND posting.user_id = ${userId}::uuid
         AND (posting.added_cost_rate_percent IS DISTINCT FROM rates.rate
           OR posting.added_cost_breakdown IS DISTINCT FROM rates.breakdown)
     `);

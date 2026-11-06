@@ -1,8 +1,8 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { externalItems, manualWriteoffs, ozonWriteoffs, productLinks, products } from "@/db/schema";
-import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+import { errorResponse, handleLocalGet, parseBody, requireAuthenticatedMutation } from "../_lib/http";
 import { isoDate, positiveInteger } from "../_lib/validation";
 import { buildCatalogProductWhitelist, resolveCatalogProductId } from "@/ozon/catalog-whitelist";
 
@@ -14,13 +14,13 @@ const writeoffSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const [manualRows, ozonRows, catalog, links, externalRows] = await Promise.all([
-      db.select().from(manualWriteoffs).orderBy(desc(manualWriteoffs.writtenOffAt), desc(manualWriteoffs.createdAt)),
-      db.select().from(ozonWriteoffs).orderBy(desc(ozonWriteoffs.occurredAt), desc(ozonWriteoffs.updatedAt)),
-      db.select().from(products),
-      db.select({ productId: productLinks.productId, offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks),
-      db.select({ externalKey: externalItems.externalKey, offerId: externalItems.offerId, ozonSku: externalItems.ozonSku, productId: externalItems.productId }).from(externalItems),
+      db.select().from(manualWriteoffs).where(eq(manualWriteoffs.userId, userId)).orderBy(desc(manualWriteoffs.writtenOffAt), desc(manualWriteoffs.createdAt)),
+      db.select().from(ozonWriteoffs).where(eq(ozonWriteoffs.userId, userId)).orderBy(desc(ozonWriteoffs.occurredAt), desc(ozonWriteoffs.updatedAt)),
+      db.select().from(products).where(eq(products.userId, userId)),
+      db.select({ productId: productLinks.productId, offerId: productLinks.offerId, ozonSku: productLinks.ozonSku }).from(productLinks).where(eq(productLinks.userId, userId)),
+      db.select({ externalKey: externalItems.externalKey, offerId: externalItems.offerId, ozonSku: externalItems.ozonSku, productId: externalItems.productId }).from(externalItems).where(eq(externalItems.userId, userId)),
     ]);
     const whitelist = buildCatalogProductWhitelist(catalog, links, externalRows);
     const manual = manualRows.filter((row) => whitelist.productIds.has(row.productId));
@@ -31,8 +31,8 @@ export async function GET(request: Request) {
     const byId = new Map(catalog.filter((product) => whitelist.productIds.has(product.id)).map((product) => [product.id, product]));
     const skus = [...new Set(ozon.map((row) => row.ozonSku).filter(Boolean))];
     const [skuLinks, externalProducts] = await Promise.all([
-      skus.length ? db.select().from(productLinks).where(inArray(productLinks.ozonSku, skus)) : Promise.resolve([]),
-      skus.length ? db.select().from(externalItems).where(inArray(externalItems.ozonSku, skus)).orderBy(desc(externalItems.lastSeenAt)) : Promise.resolve([]),
+      skus.length ? db.select().from(productLinks).where(and(eq(productLinks.userId, userId), inArray(productLinks.ozonSku, skus))) : Promise.resolve([]),
+      skus.length ? db.select().from(externalItems).where(and(eq(externalItems.userId, userId), inArray(externalItems.ozonSku, skus))).orderBy(desc(externalItems.lastSeenAt)) : Promise.resolve([]),
     ]);
     const linkBySku = new Map(skuLinks.map((link) => [link.ozonSku, link]));
     const offersBySku = new Map<string, Set<string>>();
@@ -77,12 +77,13 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const body = await parseBody(request, writeoffSchema);
     const [product] = await db.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
-      .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(eq(products.id, body.productId)).limit(1);
+      .from(products).leftJoin(productLinks, and(eq(productLinks.productId, products.id), eq(productLinks.userId, userId))).where(and(eq(products.id, body.productId), eq(products.userId, userId))).limit(1);
     if (!product || product.archived) throw new Error("Выберите товар из текущего каталога.");
     const [item] = await db.insert(manualWriteoffs).values({
+      userId,
       ...body,
       productSkuSnapshot: product.offerId || product.sku,
       productTitleSnapshot: product.title,
@@ -93,10 +94,10 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new Error("Не указан идентификатор списания.");
-    const [deleted] = await db.delete(manualWriteoffs).where(eq(manualWriteoffs.id, id)).returning({ id: manualWriteoffs.id });
+    const [deleted] = await db.delete(manualWriteoffs).where(and(eq(manualWriteoffs.id, id), eq(manualWriteoffs.userId, userId))).returning({ id: manualWriteoffs.id });
     if (!deleted) throw new Error("Запись не найдена.");
     return Response.json({ deleted: deleted.id });
   } catch (error) { return errorResponse(error); }

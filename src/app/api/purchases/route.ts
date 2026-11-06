@@ -1,9 +1,9 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import Decimal from "decimal.js";
 import { z } from "zod";
 import { db } from "@/db";
 import { productLinks, products, purchaseReceiptLines, purchaseReceipts, purchases, purchaseStatusEnum } from "@/db/schema";
-import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+import { errorResponse, handleLocalGet, parseBody, requireAuthenticatedMutation } from "../_lib/http";
 import { isoDate, nonNegativeDecimal, positiveInteger } from "../_lib/validation";
 
 const purchaseSchema = z.object({
@@ -17,12 +17,12 @@ const purchaseSchema = z.object({
 const purchaseStatusSchema = z.object({ status: z.enum(purchaseStatusEnum.enumValues) });
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const [purchaseRows, receipts, receiptLines, catalog] = await Promise.all([
-      db.select().from(purchases).orderBy(desc(purchases.purchasedAt), desc(purchases.createdAt)),
-      db.select().from(purchaseReceipts),
-      db.select().from(purchaseReceiptLines),
-      db.select().from(products),
+      db.select().from(purchases).where(eq(purchases.userId, userId)).orderBy(desc(purchases.purchasedAt), desc(purchases.createdAt)),
+      db.select().from(purchaseReceipts).where(eq(purchaseReceipts.userId, userId)),
+      db.select().from(purchaseReceiptLines).where(eq(purchaseReceiptLines.userId, userId)),
+      db.select().from(products).where(eq(products.userId, userId)),
     ]);
     const activeProductIds = new Set(catalog.filter((product) => !product.archived).map((product) => product.id));
     const visiblePurchases = purchaseRows.filter((purchase) => activeProductIds.has(purchase.productId));
@@ -59,12 +59,13 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const body = await parseBody(request, purchaseSchema);
     const [product] = await db.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
-      .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(eq(products.id, body.productId)).limit(1);
+      .from(products).leftJoin(productLinks, and(eq(productLinks.productId, products.id), eq(productLinks.userId, userId))).where(and(eq(products.id, body.productId), eq(products.userId, userId))).limit(1);
     if (!product || product.archived) throw new Error("Выберите товар из текущего каталога.");
     const [item] = await db.insert(purchases).values({
+      userId,
       ...body,
       productSkuSnapshot: product.offerId || product.sku,
       productTitleSnapshot: product.title,
@@ -75,28 +76,28 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id || !z.string().uuid().safeParse(id).success) throw new Error("Не указан корректный идентификатор закупки.");
     const body = await parseBody(request, z.union([purchaseSchema, purchaseStatusSchema]));
     if ("status" in body) {
       const [existing] = await db.select({ productArchived: products.archived }).from(purchases)
-        .innerJoin(products, eq(products.id, purchases.productId)).where(eq(purchases.id, id)).limit(1);
+        .innerJoin(products, and(eq(products.id, purchases.productId), eq(products.userId, userId))).where(and(eq(purchases.id, id), eq(purchases.userId, userId))).limit(1);
       if (!existing) throw new Error("Закупка не найдена.");
       if (existing.productArchived) throw new Error("Эта закупка связана с товаром вне текущего каталога.");
-      const [item] = await db.update(purchases).set({ status: body.status }).where(eq(purchases.id, id)).returning();
+      const [item] = await db.update(purchases).set({ status: body.status }).where(and(eq(purchases.id, id), eq(purchases.userId, userId))).returning();
       if (!item) throw new Error("Закупка не найдена.");
       return Response.json({ item });
     }
 
     const [product] = await db.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
-      .from(products).leftJoin(productLinks, eq(productLinks.productId, products.id)).where(eq(products.id, body.productId)).limit(1);
+      .from(products).leftJoin(productLinks, and(eq(productLinks.productId, products.id), eq(productLinks.userId, userId))).where(and(eq(products.id, body.productId), eq(products.userId, userId))).limit(1);
     if (!product || product.archived) throw new Error("Выберите товар из текущего каталога.");
     const [item] = await db.update(purchases).set({
       ...body,
       productSkuSnapshot: product.offerId || product.sku,
       productTitleSnapshot: product.title,
-    }).where(eq(purchases.id, id)).returning();
+    }).where(and(eq(purchases.id, id), eq(purchases.userId, userId))).returning();
     if (!item) throw new Error("Закупка не найдена.");
     return Response.json({ item });
   } catch (error) { return errorResponse(error); }
@@ -104,10 +105,10 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new Error("Не указан идентификатор закупки.");
-    const [deleted] = await db.delete(purchases).where(eq(purchases.id, id)).returning({ id: purchases.id });
+    const [deleted] = await db.delete(purchases).where(and(eq(purchases.id, id), eq(purchases.userId, userId))).returning({ id: purchases.id });
     if (!deleted) throw new Error("Запись не найдена.");
     return Response.json({ deleted: deleted.id });
   } catch (error) { return errorResponse(error); }

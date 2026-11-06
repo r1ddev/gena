@@ -145,13 +145,14 @@ async function loadBundleSkus(credentials: OzonCredentials, bundleId: string, pr
   throw new Error(`Состав поставки Ozon ${bundleId} превысил ограничение по числу страниц.`);
 }
 
-export async function reconcileOzonSupplyIds(credentials: OzonCredentials, progress: ProgressReporter = () => undefined) {
+export async function reconcileOzonSupplyIds(userId: string, credentials: OzonCredentials, progress: ProgressReporter = () => undefined) {
   const [headers, lineRows] = await Promise.all([
-    db.select().from(supplies),
+    db.select().from(supplies).where(eq(supplies.userId, userId)),
     db.select({ supplyId: supplyLines.supplyId, ozonSku: productLinks.ozonSku, archived: products.archived })
       .from(supplyLines)
-      .innerJoin(products, eq(products.id, supplyLines.productId))
-      .leftJoin(productLinks, eq(productLinks.productId, supplyLines.productId)),
+      .innerJoin(products, and(eq(products.id, supplyLines.productId), eq(products.userId, userId)))
+      .leftJoin(productLinks, and(eq(productLinks.productId, supplyLines.productId), eq(productLinks.userId, userId)))
+      .where(eq(supplyLines.userId, userId)),
   ]);
 
   const skusBySupplyId = new Map<string, Set<string>>();
@@ -219,7 +220,7 @@ export async function reconcileOzonSupplyIds(credentials: OzonCredentials, progr
       }
       const [updated] = await tx.update(supplies)
         .set({ marketplace: "ozon", ozonSupplyId: supplyId })
-        .where(and(eq(supplies.id, target.id), isNull(supplies.ozonSupplyId)))
+        .where(and(eq(supplies.userId, userId), eq(supplies.id, target.id), isNull(supplies.ozonSupplyId)))
         .returning({ id: supplies.id });
       if (updated) {
         usedOzonIds.add(supplyId);

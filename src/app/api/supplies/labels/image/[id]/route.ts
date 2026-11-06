@@ -14,7 +14,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const [ownedLabel] = await db.select({ id: supplyCargoLabels.id }).from(supplyCargoLabels)
       .where(and(eq(supplyCargoLabels.id, id), eq(supplyCargoLabels.userId, userId))).limit(1);
     if (!ownedLabel) throw new Error("Этикетка не найдена.");
-    const label = await getSupplyCargoLabelImage(id);
+    const label = await getSupplyCargoLabelImage(userId, id);
     if (!label) throw new Error("Этикетка ещё не сохранена.");
     const download = new URL(request.url).searchParams.get("download") === "1";
     return new Response(new Uint8Array(label.image), {

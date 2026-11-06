@@ -13,8 +13,8 @@ function moscowDateKey(value: Date) {
 }
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
-    const snapshot = await getAccountingSnapshot(new Date(), true, true);
+  return handleLocalGet(request, async (userId) => {
+    const snapshot = await getAccountingSnapshot(userId, new Date(), true, true);
     const ratePoints = snapshot.postingRows.flatMap((posting) => {
       const rate = snapshot.addedCostRateByPostingId?.[posting.id];
       if (!posting.orderDate || rate == null || !Number.isFinite(Number(rate))) return [];

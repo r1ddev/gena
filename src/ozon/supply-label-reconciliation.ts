@@ -296,12 +296,13 @@ async function createCargoLabel(credentials: OzonCredentials, supplyId: string, 
 }
 
 export async function reconcileOzonSupplyLabels(
+  userId: string,
   credentials: OzonCredentials,
   progress: ProgressReporter = async () => undefined,
 ) {
   const localSupplies = await db.select({ id: supplies.id, ozonSupplyId: supplies.ozonSupplyId })
     .from(supplies)
-    .where(and(eq(supplies.marketplace, "ozon"), isNotNull(supplies.ozonSupplyId)));
+    .where(and(eq(supplies.userId, userId), eq(supplies.marketplace, "ozon"), isNotNull(supplies.ozonSupplyId)));
   const supplyByOzonId = new Map(localSupplies.flatMap((supply) =>
     supply.ozonSupplyId && /^\d{1,20}$/.test(supply.ozonSupplyId) ? [[supply.ozonSupplyId, supply] as const] : [],
   ));
@@ -333,6 +334,7 @@ export async function reconcileOzonSupplyLabels(
       await db.transaction(async (tx) => {
         if (uniqueCargoes.length) {
           await tx.insert(supplyCargoLabels).values(uniqueCargoes.map((cargo) => ({
+            userId,
             supplyId: cargo.localSupplyId,
             ozonSupplyId: cargo.supplyId,
             cargoId: cargo.cargoId,
@@ -341,7 +343,7 @@ export async function reconcileOzonSupplyLabels(
             lastSeenAt: new Date(),
             updatedAt: new Date(),
           }))).onConflictDoUpdate({
-            target: [supplyCargoLabels.supplyId, supplyCargoLabels.cargoId],
+            target: [supplyCargoLabels.userId, supplyCargoLabels.supplyId, supplyCargoLabels.cargoId],
             set: {
               ozonSupplyId: sql`excluded.ozon_supply_id`,
               cargoType: sql`excluded.cargo_type`,
@@ -351,11 +353,12 @@ export async function reconcileOzonSupplyLabels(
             },
           });
           await tx.delete(supplyCargoLabels).where(and(
+            eq(supplyCargoLabels.userId, userId),
             eq(supplyCargoLabels.supplyId, localSupply.id),
             notInArray(supplyCargoLabels.cargoId, currentCargoIds),
           ));
         } else {
-          await tx.delete(supplyCargoLabels).where(eq(supplyCargoLabels.supplyId, localSupply.id));
+          await tx.delete(supplyCargoLabels).where(and(eq(supplyCargoLabels.userId, userId), eq(supplyCargoLabels.supplyId, localSupply.id)));
         }
       });
       cargoes.push(...uniqueCargoes);
@@ -373,7 +376,7 @@ export async function reconcileOzonSupplyLabels(
       formatVersion: supplyCargoLabels.labelFormatVersion,
     })
       .from(supplyCargoLabels)
-      .where(and(eq(supplyCargoLabels.supplyId, cargo.localSupplyId), eq(supplyCargoLabels.cargoId, cargo.cargoId)))
+      .where(and(eq(supplyCargoLabels.userId, userId), eq(supplyCargoLabels.supplyId, cargo.localSupplyId), eq(supplyCargoLabels.cargoId, cargo.cargoId)))
       .limit(1);
 
     if (label?.labelPng && label.formatVersion >= CARGO_LABEL_FORMAT_VERSION) {
@@ -388,12 +391,12 @@ export async function reconcileOzonSupplyLabels(
         labelFormatVersion: CARGO_LABEL_FORMAT_VERSION,
         labelError: "",
         updatedAt: new Date(),
-      }).where(eq(supplyCargoLabels.id, label!.id));
+      }).where(and(eq(supplyCargoLabels.userId, userId), eq(supplyCargoLabels.id, label!.id)));
       labelsSaved += 1;
     } catch (error) {
       labelsFailed += 1;
       const detail = error instanceof Error ? error.message.slice(0, 500) : "Не удалось сохранить этикетку.";
-      await db.update(supplyCargoLabels).set({ labelError: detail, updatedAt: new Date() }).where(eq(supplyCargoLabels.id, label!.id));
+      await db.update(supplyCargoLabels).set({ labelError: detail, updatedAt: new Date() }).where(and(eq(supplyCargoLabels.userId, userId), eq(supplyCargoLabels.id, label!.id)));
       console.warn("Ozon cargo label was not saved:", { supplyId: cargo.supplyId, cargoId: cargo.cargoId, detail });
     }
   }
@@ -401,7 +404,7 @@ export async function reconcileOzonSupplyLabels(
   return { suppliesChecked: supplyIds.length, cargoesFound: cargoes.length, labelsSaved, labelsReused, labelsFailed };
 }
 
-export async function listSupplyCargoLabels(supplyId: string) {
+export async function listSupplyCargoLabels(userId: string, supplyId: string) {
   const rows = await db.select({
     id: supplyCargoLabels.id,
     cargoId: supplyCargoLabels.cargoId,
@@ -409,7 +412,7 @@ export async function listSupplyCargoLabels(supplyId: string) {
     bundleId: supplyCargoLabels.bundleId,
     ready: sql<boolean>`${supplyCargoLabels.labelPng} IS NOT NULL`,
     needsRetry: sql<boolean>`${supplyCargoLabels.labelError} <> ''`,
-  }).from(supplyCargoLabels).where(eq(supplyCargoLabels.supplyId, supplyId));
+  }).from(supplyCargoLabels).where(and(eq(supplyCargoLabels.userId, userId), eq(supplyCargoLabels.supplyId, supplyId)));
   return rows.map((row) => ({
     ...row,
     needsRetry: !row.ready && row.needsRetry,
@@ -417,13 +420,13 @@ export async function listSupplyCargoLabels(supplyId: string) {
   })).sort((first, second) => first.cargoId.localeCompare(second.cargoId, "en", { numeric: true }));
 }
 
-export async function getSupplyCargoLabelImage(labelId: string) {
+export async function getSupplyCargoLabelImage(userId: string, labelId: string) {
   const [label] = await db.select({
     cargoId: supplyCargoLabels.cargoId,
     labelPng: supplyCargoLabels.labelPng,
   })
     .from(supplyCargoLabels)
-    .where(eq(supplyCargoLabels.id, labelId))
+    .where(and(eq(supplyCargoLabels.userId, userId), eq(supplyCargoLabels.id, labelId)))
     .limit(1);
   if (!label?.labelPng) return null;
   return { cargoId: label.cargoId, image: label.labelPng };

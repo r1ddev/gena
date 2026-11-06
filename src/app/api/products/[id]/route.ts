@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { externalItems, productImages, productLinks, products } from "@/db/schema";
 import { readProductImage } from "@/app/api/_lib/product-image";
-import { assertLocalMutation, errorResponse, json } from "@/app/api/_lib/http";
+import { errorResponse, json, requireAuthenticatedMutation } from "@/app/api/_lib/http";
 
 const productSchema = z.object({
   title: z.string().trim().min(1).max(300),
@@ -14,7 +14,7 @@ const productSchema = z.object({
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = z.string().uuid().parse((await context.params).id);
     let rawBody: unknown;
     let image: Awaited<ReturnType<typeof readProductImage>> = null;
@@ -35,41 +35,41 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const result = await db.transaction(async (tx) => {
       const [product] = await tx.select({ id: products.id }).from(products)
-        .where(eq(products.id, id)).limit(1);
+        .where(and(eq(products.id, id), eq(products.userId, userId))).limit(1);
       if (!product) throw new Error("Товар не найден.");
 
-      const links = await tx.select().from(productLinks).where(eq(productLinks.productId, id));
+      const links = await tx.select().from(productLinks).where(and(eq(productLinks.userId, userId), eq(productLinks.productId, id)));
       const identifiers = [
         body.offerId ? eq(productLinks.offerId, body.offerId) : undefined,
         body.ozonSku ? eq(productLinks.ozonSku, body.ozonSku) : undefined,
       ].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined);
       const matchingLinks = identifiers.length
-        ? await tx.select().from(productLinks).where(or(...identifiers))
+        ? await tx.select().from(productLinks).where(and(eq(productLinks.userId, userId), or(...identifiers)))
         : [];
       if (matchingLinks.some((link) => link.productId !== id)) {
         throw new Error("Этот артикул или SKU Ozon уже указан у другого товара.");
       }
       const productSku = body.offerId || body.ozonSku;
       const [duplicateProduct] = await tx.select({ id: products.id }).from(products)
-        .where(and(eq(products.sku, productSku), ne(products.id, id))).limit(1);
+        .where(and(eq(products.userId, userId), eq(products.sku, productSku), ne(products.id, id))).limit(1);
       if (duplicateProduct) throw new Error("Этот артикул или SKU Ozon уже используется другим товаром.");
 
-      await tx.update(products).set({ sku: productSku, title: body.title, updatedAt: new Date() }).where(eq(products.id, id));
+      await tx.update(products).set({ sku: productSku, title: body.title, updatedAt: new Date() }).where(and(eq(products.id, id), eq(products.userId, userId)));
       if (links[0]) {
-        await tx.update(productLinks).set({ offerId: body.offerId, ozonSku: body.ozonSku }).where(eq(productLinks.id, links[0].id));
+        await tx.update(productLinks).set({ offerId: body.offerId, ozonSku: body.ozonSku }).where(and(eq(productLinks.id, links[0].id), eq(productLinks.userId, userId)));
       } else {
-        await tx.insert(productLinks).values({ productId: id, offerId: body.offerId, ozonSku: body.ozonSku });
+        await tx.insert(productLinks).values({ userId, productId: id, offerId: body.offerId, ozonSku: body.ozonSku });
       }
 
       if (image) {
-        await tx.insert(productImages).values({ productId: id, ...image })
-          .onConflictDoUpdate({ target: productImages.productId, set: { ...image, updatedAt: new Date() } });
+        await tx.insert(productImages).values({ userId, productId: id, ...image })
+          .onConflictDoUpdate({ target: productImages.productId, set: { ...image, userId, updatedAt: new Date() } });
       } else if (body.removeImage) {
-        await tx.delete(productImages).where(eq(productImages.productId, id));
+        await tx.delete(productImages).where(and(eq(productImages.userId, userId), eq(productImages.productId, id)));
       }
 
       const currentImage = !image && !body.removeImage
-        ? await tx.select({ productId: productImages.productId }).from(productImages).where(eq(productImages.productId, id)).limit(1)
+        ? await tx.select({ productId: productImages.productId }).from(productImages).where(and(eq(productImages.userId, userId), eq(productImages.productId, id))).limit(1)
         : [];
       return {
         id,
@@ -90,16 +90,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = z.string().uuid().parse((await context.params).id);
     const outcome = await db.transaction(async (tx) => {
       const [product] = await tx.select({ id: products.id }).from(products)
-        .where(eq(products.id, id)).for("update").limit(1);
+        .where(and(eq(products.id, id), eq(products.userId, userId))).for("update").limit(1);
       if (!product) return false;
       await tx.update(externalItems)
         .set({ productId: null, disposition: "pending" })
-        .where(eq(externalItems.productId, id));
-      await tx.delete(products).where(eq(products.id, id));
+        .where(and(eq(externalItems.productId, id), eq(externalItems.userId, userId)));
+      await tx.delete(products).where(and(eq(products.id, id), eq(products.userId, userId)));
       return true;
     });
 
