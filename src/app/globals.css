@@ -193,16 +193,36 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .pagination-ellipsis { min-width: 26px; color: var(--muted); text-align: center; }
 .pagination-page:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 table { width: 100%; border-collapse: collapse; text-align: left; }
-th { padding: 10px 13px; color: #849089; background: #fafbfa; font-size: 10px; font-weight: 700; letter-spacing: .35px; text-transform: uppercase; white-space: nowrap; }
+th { position: relative; padding: 10px 13px; color: #849089; background: #fafbfa; font-size: 10px; font-weight: 700; letter-spacing: .35px; text-transform: uppercase; white-space: nowrap; }
+.table-column-resize-handle { position: absolute; top: 0; right: -5px; bottom: 0; z-index: 4; display: block; width: 12px; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: col-resize; touch-action: none; }
+.table-column-resize-handle::after { position: absolute; top: 22%; bottom: 22%; left: 50%; width: 1px; border-radius: 1px; background: transparent; content: ""; transform: translateX(-50%); }
+.table-column-resize-handle:hover::after, .table-column-resize-handle:focus-visible::after, .table-column-resizing-active .table-column-resize-handle::after { width: 2px; background: var(--green); }
+.table-column-resize-handle:focus-visible { outline: 2px solid rgba(23,139,99,.25); outline-offset: 1px; }
+body.table-column-resizing-active, body.table-column-resizing-active * { cursor: col-resize !important; user-select: none !important; }
+@media (pointer: coarse) {
+  .table-column-resize-handle { right: -8px; width: 18px; }
+  .table-column-resize-handle::after { top: 30%; bottom: 30%; background: #dce5df; }
+  .table-column-resize-handle:active::after { width: 2px; background: var(--green); }
+}
 .table-sort-button { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; font: inherit; letter-spacing: inherit; text-align: left; text-transform: inherit; }
 .table-sort-button:hover { color: var(--green-dark); }
 .table-sort-button:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
 .table-sort-indicator { min-width: 10px; color: var(--green); font-size: 13px; line-height: 1; }
 .table-filter-row th { padding: 5px 8px; border-bottom: 1px solid var(--line); background: #fff; }
 .table-filter-row input { width: 100%; min-width: 95px; min-height: 30px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; outline: none; color: var(--ink); background: white; font-family: inherit; font-size: 11px; text-transform: none; }
-.table-date-filter { display: grid; width: 160px; max-width: 100%; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
-.table-date-filter label { display: grid; min-width: 0; gap: 2px; color: var(--muted); font-size: 8px; font-weight: 600; letter-spacing: 0; text-transform: none; }
-.table-date-filter input[type="date"] { width: 100%; min-width: 0; max-width: 100%; min-height: 30px; height: 30px; padding: 3px 1px; font-size: 9px; line-height: 1.2; }
+.table-date-filter { display: flex; width: 100%; min-width: 0; }
+.table-date-filter-trigger { display: flex; width: fit-content; max-width: 100%; min-width: 0; min-height: 30px; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--line); border-radius: 6px; color: #59675f; background: white; font-size: 10px; font-weight: 600; text-align: left; }
+.table-date-filter-trigger > svg { flex: 0 0 auto; color: #839188; }
+.table-date-filter-trigger > span { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.table-date-filter-trigger:hover, .table-date-filter-trigger.active { border-color: #c6e2d2; color: var(--green-dark); background: #f5fbf7; }
+.table-date-filter-trigger:hover > svg, .table-date-filter-trigger.active > svg { color: var(--green); }
+.table-date-filter-trigger:focus-visible { outline: 2px solid rgba(23,139,99,.2); outline-offset: 1px; }
+.table-date-range-popover { position: fixed; z-index: 1600; display: grid; align-content: start; gap: 11px; overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: white; box-shadow: 0 10px 28px rgba(24,39,31,.18); }
+.table-date-range-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.table-date-range-field { display: grid; min-width: 0; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 600; }
+.table-date-range-field input[type="date"] { width: 100%; min-width: 0; min-height: 34px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; outline: none; color: var(--ink); background: white; font-family: inherit; font-size: 11px; }
+.table-date-range-field input[type="date"]:focus { border-color: #82c5a4; box-shadow: 0 0 0 2px rgba(23,139,99,.08); }
+.table-date-range-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .table-filter-row input:focus { border-color: #82c5a4; box-shadow: 0 0 0 2px rgba(23,139,99,.08); }
 .table-filter-combobox { width: 100%; min-width: 0; }
 .table-filter-options { position: fixed; z-index: 1600; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 12px 28px rgba(24,39,31,.16); color: var(--ink); }

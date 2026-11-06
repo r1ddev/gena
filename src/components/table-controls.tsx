@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { CalendarDays, ChevronDown } from "lucide-react";
 
 export const TABLE_PAGE_SIZE = 50;
 
@@ -266,6 +267,128 @@ function TableFilterInput({
   </div>;
 }
 
+function formatDateRangeLabel(range: DateRangeFilter) {
+  const compactDate = (value: string) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    return match ? `${match[3]}.${match[2]}` : value;
+  };
+  if (range.from && range.to) return `${compactDate(range.from)}–${compactDate(range.to)}`;
+  if (range.from) return `с ${compactDate(range.from)}`;
+  if (range.to) return `до ${compactDate(range.to)}`;
+  return "Дата";
+}
+
+function TableDateRangeFilter({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const id = useId().replace(/:/g, "");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<FilterMenuPosition | null>(null);
+  const range = readDateRangeFilter(value);
+  const hasRange = Boolean(range.from || range.to);
+  const rangeLabel = formatDateRangeLabel(range);
+
+  const updatePosition = () => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(304, window.innerWidth - 16);
+    const availableBelow = Math.max(0, window.innerHeight - rect.bottom - 8);
+    const availableAbove = Math.max(0, rect.top - 8);
+    const above = availableBelow < 150 && availableAbove > availableBelow;
+    setPosition({
+      left: Math.min(Math.max(8, rect.left), window.innerWidth - width - 8),
+      top: above ? rect.top : rect.bottom + 4,
+      width,
+      maxHeight: Math.max(120, Math.min(260, above ? availableAbove : availableBelow)),
+      above,
+    });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+    };
+  }, [open]);
+
+  const updateRange = (nextRange: DateRangeFilter) => {
+    onChange(nextRange.from || nextRange.to ? JSON.stringify(nextRange) : "");
+  };
+  const closeOnEscape = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const popover = open && position && typeof document !== "undefined" ? createPortal(
+    <div
+      ref={popoverRef}
+      id={`table-date-range-${id}`}
+      className="table-date-range-popover"
+      role="dialog"
+      aria-label={`Фильтр по дате: ${label}`}
+      onKeyDown={closeOnEscape}
+      style={{ left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight, transform: position.above ? "translateY(-100%)" : undefined }}
+    >
+      <div className="table-date-range-fields">
+        <label className="table-date-range-field">
+          <span>От</span>
+          <input type="date" aria-label={`Фильтр «${label}»: от`} max={range.to || undefined} value={range.from} onChange={(event) => updateRange({ ...range, from: event.target.value })} />
+        </label>
+        <label className="table-date-range-field">
+          <span>До</span>
+          <input type="date" aria-label={`Фильтр «${label}»: до`} min={range.from || undefined} value={range.to} onChange={(event) => updateRange({ ...range, to: event.target.value })} />
+        </label>
+      </div>
+      <div className="table-date-range-actions">
+        <button type="button" className="button secondary small" disabled={!hasRange} onClick={() => { updateRange({ from: "", to: "" }); setOpen(false); triggerRef.current?.focus(); }}>Сбросить</button>
+        <button type="button" className="button small" onClick={() => { setOpen(false); triggerRef.current?.focus(); }}>Готово</button>
+      </div>
+    </div>,
+    document.body,
+  ) : null;
+
+  return <div className="table-date-filter">
+    <button
+      ref={triggerRef}
+      type="button"
+      className={`table-date-filter-trigger${hasRange ? " active" : ""}`}
+      aria-label={hasRange ? `Фильтр «${label}»: ${rangeLabel}` : `Фильтр «${label}» по диапазону дат`}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      aria-controls={open ? `table-date-range-${id}` : undefined}
+      title={hasRange ? `${range.from || "…"} – ${range.to || "…"}` : "Выбрать диапазон дат"}
+      onClick={() => { setOpen((current) => !current); updatePosition(); }}
+    >
+      <CalendarDays size={14} aria-hidden="true" />
+      <span>{rangeLabel}</span>
+      <ChevronDown size={12} aria-hidden="true" />
+    </button>
+    {popover}
+  </div>;
+}
+
 function comparable(value: unknown, kind: TableColumn<unknown>["kind"]) {
   if (value === null || value === undefined || value === "") return null;
   if (kind === "date" || kind === "time") {
@@ -346,7 +469,7 @@ export function TableHead<Row>({
   })), [columns, filterOptions, rows]);
 
   return <thead>
-    <tr>{columns.map((column) => {
+    <tr>{columns.map((column, index) => {
       const sortable = columnIsSortable(column);
       const active = sort?.key === column.key;
       const sortState = active ? sort.direction === "asc" ? "ascending" : "descending" : "none";
@@ -357,18 +480,14 @@ export function TableHead<Row>({
             {column.label}<span className="table-sort-indicator" aria-hidden="true">{active ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span>
           </button>
           : <span>{column.label}</span>}
+        <button type="button" className="table-column-resize-handle" data-table-column-resize-index={index} aria-label={`Изменить ширину столбца «${column.label}»`} title="Перетащите границу, чтобы изменить ширину" />
       </th>;
-    })}{trailingHeaders.map((header, index) => <th key={`trailing-${index}`} scope="col">{header}</th>)}</tr>
+    })}{trailingHeaders.map((header, index) => <th key={`trailing-${index}`} scope="col">{header}<button type="button" className="table-column-resize-handle" data-table-column-resize-index={columns.length + index} aria-label={`Изменить ширину дополнительного столбца ${index + 1}`} title="Перетащите границу, чтобы изменить ширину" /></th>)}</tr>
     <tr className="table-filter-row" aria-label="Фильтры таблицы">
       {columns.map((column) => <th key={column.key} scope="col">
-        {column.filterable === false ? null : column.kind === "date" ? (() => {
-          const range = readDateRangeFilter(filters[column.key] ?? "");
-          const updateRange = (nextRange: DateRangeFilter) => onFilter(column.key, nextRange.from || nextRange.to ? JSON.stringify(nextRange) : "");
-          return <div className="table-date-filter">
-            <label><span>От</span><input type="date" aria-label={`Фильтр «${column.label}»: от`} max={range.to || undefined} value={range.from} onChange={(event) => updateRange({ ...range, from: event.target.value })} /></label>
-            <label><span>До</span><input type="date" aria-label={`Фильтр «${column.label}»: до`} min={range.from || undefined} value={range.to} onChange={(event) => updateRange({ ...range, to: event.target.value })} /></label>
-          </div>;
-        })() : <TableFilterInput label={column.label} options={optionsByColumn[column.key] ?? []} value={filters[column.key] ?? ""} onChange={(value) => onFilter(column.key, value)} />}
+        {column.filterable === false ? null : column.kind === "date"
+          ? <TableDateRangeFilter label={column.label} value={filters[column.key] ?? ""} onChange={(value) => onFilter(column.key, value)} />
+          : <TableFilterInput label={column.label} options={optionsByColumn[column.key] ?? []} value={filters[column.key] ?? ""} onChange={(value) => onFilter(column.key, value)} />}
       </th>)}
       {trailingHeaders.map((_, index) => <th key={`trailing-filter-${index}`} aria-hidden="true" />)}
     </tr>

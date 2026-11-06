@@ -187,14 +187,14 @@ export function AddedCostHistoryWorkspace() {
       </div>
       <div className="table-wrap">
         <table className="added-cost-history-table">
-          <thead><tr>
-            <th>Дата расчёта / заказа</th>
-            <th>Операция</th>
-            <th>Заказ или товар</th>
-            <th>Нераспределённые расходы: до · изменение · после</th>
-            <th>Закупочная стоимость остатков: до · изменение · после</th>
-            <th>Как посчитано</th>
-          </tr></thead>
+          <thead><tr>{[
+            "Дата расчёта / заказа",
+            "Операция",
+            "Заказ или товар",
+            "Нераспределённые расходы: до · изменение · после",
+            "Закупочная стоимость остатков: до · изменение · после",
+            "Как посчитано",
+          ].map((label, index) => <th key={label}>{label}<button type="button" className="table-column-resize-handle" data-table-column-resize-index={index} aria-label={`Изменить ширину столбца «${label}»`} title="Перетащите границу, чтобы изменить ширину" /></th>)}</tr></thead>
           <tbody>
             {error ? <TableEmptyRow colSpan={6} message={error} />
               : loading && rows.length === 0 ? <TableEmptyRow colSpan={6} message="Загружаем историю…" />
