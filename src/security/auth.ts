@@ -109,8 +109,9 @@ export async function registerAccount(request: Request, body: unknown, json: (bo
 
   const user = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(701234567890)`);
-    const [legacy] = await tx.select({ id: users.id }).from(users).where(eq(users.id, LEGACY_OWNER_ID)).limit(1);
-    if (legacy) throw Object.assign(new Error("Создание первого аккаунта владельца выполняется отдельно."), { status: 403 });
+    const [legacyPlaceholder] = await tx.select({ id: users.id }).from(users)
+      .where(and(eq(users.id, LEGACY_OWNER_ID), eq(users.login, LEGACY_OWNER_LOGIN))).limit(1);
+    if (legacyPlaceholder) throw Object.assign(new Error("Создание первого аккаунта владельца выполняется отдельно."), { status: 403 });
     const [created] = await tx.insert(users).values({ login, passwordHash }).returning({ id: users.id, login: users.login });
     await tx.insert(appSettings).values({ userId: created.id });
     return created;
@@ -125,8 +126,9 @@ export async function bootstrapFirstOwner(loginInput: string) {
   const normalizedLogin = login.toLowerCase();
   const user = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(701234567890)`);
-    const [legacy] = await tx.select({ id: users.id }).from(users).where(eq(users.id, LEGACY_OWNER_ID)).limit(1);
-    if (!legacy) throw new Error("Первый аккаунт уже создан.");
+    const [legacyPlaceholder] = await tx.select({ id: users.id }).from(users)
+      .where(and(eq(users.id, LEGACY_OWNER_ID), eq(users.login, LEGACY_OWNER_LOGIN))).limit(1);
+    if (!legacyPlaceholder) throw new Error("Первый аккаунт уже создан.");
     const [claimed] = await tx.update(users).set({ login: normalizedLogin, passwordHash }).where(eq(users.id, LEGACY_OWNER_ID)).returning({ id: users.id, login: users.login });
     if (!claimed) throw new Error("Не удалось создать аккаунт владельца.");
     const [settings] = await tx.select({ id: appSettings.id }).from(appSettings).where(eq(appSettings.userId, claimed.id)).limit(1);
