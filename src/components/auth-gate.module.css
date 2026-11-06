@@ -17,6 +17,12 @@
   box-shadow: 0 12px 40px rgba(24, 50, 40, .08);
 }
 
+.card[role="status"] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .brandMark {
   display: grid;
   width: 43px;
@@ -160,6 +166,8 @@
 }
 
 .spinner {
+  display: block;
+  flex: 0 0 18px;
   width: 18px;
   height: 18px;
   border: 2px solid #d5e7dd;
