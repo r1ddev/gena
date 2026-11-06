@@ -5,7 +5,7 @@ import { LoaderCircle } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, Brush, CartesianGrid, Cell, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
 import { asRecord, requestJson } from "./api";
 
-type TrendDay = { date: string; orders: number; deliveredOrders: number; profitCents: number; incompleteProfitCount: number };
+type TrendDay = { date: string; sentUnits: number; purchasedUnits: number; profitCents: number; incompleteProfitCount: number };
 type RatePoint = { date: string; timestamp: number; postingNumber: string; ratePercent: number };
 type AnalyticsData = { days: TrendDay[]; ratePoints: RatePoint[]; availableFrom: string; availableTo: string };
 type BrushRange = { startIndex: number; endIndex: number };
@@ -42,8 +42,8 @@ function parseAnalyticsData(value: unknown): AnalyticsData {
     if (!row || typeof row.date !== "string") return [];
     return [{
       date: row.date,
-      orders: Number(row.orders) || 0,
-      deliveredOrders: Number(row.deliveredOrders) || 0,
+      sentUnits: Number(row.sentUnits) || 0,
+      purchasedUnits: Number(row.purchasedUnits) || 0,
       profitCents: Number(row.profitCents) || 0,
       incompleteProfitCount: Number(row.incompleteProfitCount) || 0,
     }];
@@ -84,13 +84,13 @@ function useChartTooltipTrigger() {
   };
 }
 
-function OrdersTooltip({ active, payload }: TooltipContentProps) {
+function UnitsTooltip({ active, payload }: TooltipContentProps) {
   const day = payload?.[0]?.payload as TrendDay | undefined;
   if (!active || !day) return null;
   return <div className="analytics-tooltip">
     <strong>{fullDate(day.date)}</strong>
-    <span>Заказов <b>{countFormat.format(day.orders)}</b></span>
-    <span>Доставлено <b className="positive">{countFormat.format(day.deliveredOrders)}</b></span>
+    <span>Отправлено товаров <b>{countFormat.format(day.sentUnits)}</b></span>
+    <span>Куплено товаров <b className="positive">{countFormat.format(day.purchasedUnits)}</b></span>
   </div>;
 }
 
@@ -115,26 +115,26 @@ function RateTooltip({ active, payload }: TooltipContentProps) {
   </div>;
 }
 
-function OrdersChart({ days }: { days: TrendDay[] }) {
+function UnitsChart({ days }: { days: TrendDay[] }) {
   const tooltip = useChartTooltipTrigger();
-  const totals = days.reduce((sum, day) => ({ orders: sum.orders + day.orders, delivered: sum.delivered + day.deliveredOrders }), { orders: 0, delivered: 0 });
+  const totals = days.reduce((sum, day) => ({ sentUnits: sum.sentUnits + day.sentUnits, purchasedUnits: sum.purchasedUnits + day.purchasedUnits }), { sentUnits: 0, purchasedUnits: 0 });
   return <section className="panel analytics-chart-panel analytics-orders-panel">
-    <div className="panel-head"><h2>Заказы по дням</h2></div>
+    <div className="panel-head"><h2>Товары по дням</h2></div>
     <div className="panel-body analytics-chart-body">
-      <div className="analytics-chart-total"><span>Заказов <b>{countFormat.format(totals.orders)}</b></span><span>Доставлено <b className="positive">{countFormat.format(totals.delivered)}</b></span></div>
+      <div className="analytics-chart-total"><span>Отправлено товаров <b>{countFormat.format(totals.sentUnits)}</b></span><span>Куплено товаров <b className="positive">{countFormat.format(totals.purchasedUnits)}</b></span></div>
       <div className="analytics-chart-canvas" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 600, height: 270 }}>
           <ComposedChart data={days} margin={{ top: 10, right: 12, bottom: 4, left: -10 }}>
             <CartesianGrid vertical={false} stroke="#e8ede9" />
             <XAxis dataKey="date" tickFormatter={(date: string) => dateLabel(date)} interval="preserveStartEnd" minTickGap={18} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#dfe6e1" }} tickMargin={9} height={32} />
             <YAxis width={40} tickCount={5} allowDecimals={false} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
-            <Tooltip trigger={tooltip.trigger} content={OrdersTooltip} cursor={{ fill: "rgba(22, 136, 95, .08)" }} isAnimationActive={false} />
-            <Bar dataKey="orders" name="Заказов" fill="#dce9e2" maxBarSize={22} radius={[3, 3, 0, 0]} isAnimationActive={false} />
-            <Line dataKey="deliveredOrders" name="Доставлено" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} isAnimationActive={false} />
+            <Tooltip trigger={tooltip.trigger} content={UnitsTooltip} cursor={{ fill: "rgba(22, 136, 95, .08)" }} isAnimationActive={false} />
+            <Bar dataKey="sentUnits" name="Отправлено товаров" fill="#dce9e2" maxBarSize={22} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+            <Line dataKey="purchasedUnits" name="Куплено товаров" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} isAnimationActive={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      <div className="analytics-legend"><span><i className="orders" />Все заказы</span><span><i className="delivered" />Доставлено</span></div>
+      <div className="analytics-legend"><span><i className="orders" />Отправлено товаров</span><span><i className="delivered" />Куплено товаров</span></div>
     </div>
   </section>;
 }
@@ -254,7 +254,7 @@ export function AnalyticsWorkspace() {
 
   return <>
     <header className="page-heading">
-      <div><div className="eyebrow">Аналитика</div><h1>Графики</h1><p className="page-description">Заказы, добавочная стоимость и прибыль за выбранный период.</p></div>
+      <div><div className="eyebrow">Аналитика</div><h1>Графики</h1><p className="page-description">Товары, добавочная стоимость и прибыль за выбранный период.</p></div>
     </header>
 
     <section className="panel analytics-period-panel">
@@ -278,10 +278,10 @@ export function AnalyticsWorkspace() {
           <div className="analytics-brush-chart">
             <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 88 }}>
               <AreaChart data={rangeDays} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
-                <Area dataKey="orders" stroke="#16885f" fill="#dcefe5" strokeWidth={1.5} isAnimationActive={false} />
+                <Area dataKey="sentUnits" stroke="#16885f" fill="#dcefe5" strokeWidth={1.5} isAnimationActive={false} />
                 <Brush dataKey="date" startIndex={startIndex} endIndex={endIndex} onChange={updateBrush} height={48} travellerWidth={16} stroke="#16885f" fill="#f4f8f5" tickFormatter={(date: string) => dateLabel(date)}>
                   <AreaChart data={rangeDays}>
-                    <Area dataKey="orders" stroke="#16885f" fill="#cfe6d9" isAnimationActive={false} />
+                    <Area dataKey="sentUnits" stroke="#16885f" fill="#cfe6d9" isAnimationActive={false} />
                   </AreaChart>
                 </Brush>
               </AreaChart>
@@ -293,7 +293,7 @@ export function AnalyticsWorkspace() {
     </section>
 
     {!error && data && <div className="analytics-charts-grid">
-      <OrdersChart days={visibleDays} />
+      <UnitsChart days={visibleDays} />
       <ProfitChart days={visibleDays} />
       <RateChart points={visibleRates} days={visibleDays} />
     </div>}

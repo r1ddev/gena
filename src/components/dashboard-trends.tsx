@@ -18,8 +18,8 @@ import {
 
 export type DailyTrendDay = {
   date: string;
-  orders: number;
-  deliveredOrders: number;
+  sentUnits: number;
+  purchasedUnits: number;
   profitCents: number;
   incompleteProfitCount: number;
 };
@@ -82,8 +82,8 @@ function SalesTooltip({ active, payload }: TooltipContentProps) {
 
   return <div className="dashboard-chart-tooltip">
     <strong className="dashboard-chart-tooltip-date">{fullDate(day.date)}</strong>
-    <div className="dashboard-chart-tooltip-row"><span>Заказов</span><b>{countFormat.format(day.orders)}</b></div>
-    <div className="dashboard-chart-tooltip-row"><span>Доставлено</span><b className="positive">{countFormat.format(day.deliveredOrders)}</b></div>
+    <div className="dashboard-chart-tooltip-row"><span>Отправлено товаров</span><b>{countFormat.format(day.sentUnits)}</b></div>
+    <div className="dashboard-chart-tooltip-row"><span>Куплено товаров</span><b className="positive">{countFormat.format(day.purchasedUnits)}</b></div>
   </div>;
 }
 
@@ -106,18 +106,18 @@ function ProfitTooltip({ active, payload }: TooltipContentProps) {
 function SalesChart({ days }: { days: DailyTrendDay[] }) {
   const tooltip = useChartTooltipTrigger();
   const totals = days.reduce((total, day) => ({
-    orders: total.orders + day.orders,
-    deliveredOrders: total.deliveredOrders + day.deliveredOrders,
-  }), { orders: 0, deliveredOrders: 0 });
+    sentUnits: total.sentUnits + day.sentUnits,
+    purchasedUnits: total.purchasedUnits + day.purchasedUnits,
+  }), { sentUnits: 0, purchasedUnits: 0 });
 
   return <section className="panel dashboard-trend-panel">
-    <div className="panel-head"><div><h2>Продажи по дням</h2><span className="small-note">Последние 30 дней</span></div></div>
+    <div className="panel-head"><div><h2>Товары по дням</h2><span className="small-note">Последние 30 дней</span></div></div>
     <div className="panel-body dashboard-trend-body">
       <div className="dashboard-trend-totals">
-        <span>Заказов: <strong>{countFormat.format(totals.orders)}</strong></span>
-        <span>Доставлено: <strong>{countFormat.format(totals.deliveredOrders)}</strong></span>
+        <span>Отправлено товаров: <strong>{countFormat.format(totals.sentUnits)}</strong></span>
+        <span>Куплено товаров: <strong className="positive">{countFormat.format(totals.purchasedUnits)}</strong></span>
       </div>
-      <div className="dashboard-trend-chart" role="group" aria-label="Заказы и доставки по дням оформления" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
+      <div className="dashboard-trend-chart" role="group" aria-label="Отправленные и купленные товары по дням заказа" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 320, height: 230 }}>
           <ComposedChart data={days} margin={{ top: 10, right: 12, bottom: 4, left: -16 }}>
             <CartesianGrid vertical={false} stroke="#e8ede9" />
@@ -141,14 +141,14 @@ function SalesChart({ days }: { days: DailyTrendDay[] }) {
               axisLine={false}
             />
             <Tooltip trigger={tooltip.trigger} content={SalesTooltip} cursor={{ fill: "rgba(22, 136, 95, .08)" }} isAnimationActive={false} />
-            <Bar dataKey="orders" name="Заказов" fill="#dce9e2" maxBarSize={20} radius={[3, 3, 0, 0]} isAnimationActive={false} />
-            <Line dataKey="deliveredOrders" name="Доставлено" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} isAnimationActive={false} />
+            <Bar dataKey="sentUnits" name="Отправлено товаров" fill="#dce9e2" maxBarSize={20} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+            <Line dataKey="purchasedUnits" name="Куплено товаров" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} isAnimationActive={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
       <div className="dashboard-trend-legend">
-        <span><i className="dashboard-trend-legend-swatch muted" />Заказы</span>
-        <span><i className="dashboard-trend-legend-swatch success" />Доставлено</span>
+        <span><i className="dashboard-trend-legend-swatch muted" />Отправлено товаров</span>
+        <span><i className="dashboard-trend-legend-swatch success" />Куплено товаров</span>
       </div>
     </div>
   </section>;

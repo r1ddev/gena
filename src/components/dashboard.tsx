@@ -196,8 +196,8 @@ export function Dashboard() {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
     return [{
       date,
-      orders: numeric(day.orders),
-      deliveredOrders: numeric(day.deliveredOrders),
+      sentUnits: numeric(day.sentUnits),
+      purchasedUnits: numeric(day.purchasedUnits),
       profitCents: numeric(day.profitCents),
       incompleteProfitCount: numeric(day.incompleteProfitCount),
     }];

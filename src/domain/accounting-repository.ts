@@ -26,7 +26,7 @@ import { calculateAccounting, hasAccountablePostingItems, type AccountingInput }
 import { calculateAddedCostHistoryByPosting } from "./added-cost-history";
 import type { AddedCostBreakdown, AddedCostHistoryOperation } from "./added-cost-history";
 import { resolveOzonReturnTimeline } from "@/ozon/return-status";
-import { calculateFinalPostingProfits, isFinalPostingStatus } from "./order-profit";
+import { calculateFinalPostingProfits, isDeliveredPostingStatus, isFinalPostingStatus } from "./order-profit";
 import { currentOrderStatus, getOrderReturnStatesByPosting, hasRestockedReturn } from "./order-return-state";
 import { buildFinanceOrderSkuPostingMap, buildFinancePostingProductIdentifiers, financeAccrualRelatedOfferIds, financeAccrualRelatedSkus, financePostingSaleSkus, isOzonBuyerOrderAccrual, isOzonSharedExpense, isOzonWriteoffCompensation, ozonExpenseLabel, resolveFinanceAccrualPostingNumber } from "@/ozon/finance";
 import { isOzonWriteOffStatus } from "@/ozon/return-status";
@@ -393,32 +393,31 @@ export async function getAccountingSnapshot(now = new Date(), includeAddedCostRa
     const date = new Date(trendStart);
     date.setUTCDate(trendStart.getUTCDate() + index);
     const dateString = date.toISOString().slice(0, 10);
-    return { date: dateString, orders: 0, deliveredOrders: 0, profitCents: 0, incompleteProfitCount: 0 };
+    return { date: dateString, sentUnits: 0, purchasedUnits: 0, profitCents: 0, incompleteProfitCount: 0 };
   });
   const trendByDate = new Map(trendDays.map((entry) => [entry.date, entry]));
-  const trendOrdersByDate = new Map<string, Map<string, { postingCount: number; deliveredPostingCount: number }>>();
+  const unitsByPosting = new Map<string, Decimal>();
+  for (const item of postingItemRows) {
+    if (!visiblePostingIds.has(item.postingId)) continue;
+    const quantity = new Decimal(item.quantity);
+    if (!quantity.isFinite() || !quantity.gt(0)) continue;
+    unitsByPosting.set(item.postingId, (unitsByPosting.get(item.postingId) ?? new Decimal(0)).plus(quantity));
+  }
   for (const posting of visiblePostingRows) {
     if (!posting.orderDate) continue;
     const orderDay = dateKey(posting.orderDate);
     const day = trendByDate.get(orderDay);
     if (!day) continue;
+    const units = unitsByPosting.get(posting.id) ?? new Decimal(0);
+    day.sentUnits += units.toNumber();
+    if (currentOrderStatus(posting.status, returnStatesByPosting.get(posting.externalId)) === "Доставлен") {
+      day.purchasedUnits += units.toNumber();
+    }
     const isFinal = isFinalPostingStatus(posting.status);
-    const orderKey = posting.orderNumber.trim() || posting.externalId;
-    const orderGroups = trendOrdersByDate.get(orderDay) ?? new Map();
-    const orderGroup = orderGroups.get(orderKey) ?? { postingCount: 0, deliveredPostingCount: 0 };
-    orderGroup.postingCount += 1;
-    if (posting.deliveredAt) orderGroup.deliveredPostingCount += 1;
-    orderGroups.set(orderKey, orderGroup);
-    trendOrdersByDate.set(orderDay, orderGroups);
     if (!isFinal) continue;
     const profit = profitByPosting.get(posting.externalId)?.profitCents;
     if (profit === null || profit === undefined) day.incompleteProfitCount += 1;
     else day.profitCents += profit;
-  }
-  for (const day of trendDays) {
-    const orders = [...(trendOrdersByDate.get(day.date)?.values() ?? [])];
-    day.orders = orders.length;
-    day.deliveredOrders = orders.filter((order) => order.deliveredPostingCount === order.postingCount).length;
   }
   const dailyTrend = {
     days: trendDays,

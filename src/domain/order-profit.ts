@@ -28,9 +28,14 @@ export type OrderProfitPostingReturn = OrderProfitReturn & {
   postingNumber: string;
 };
 
+export function isDeliveredPostingStatus(status: string) {
+  const normalized = status.trim().toLocaleLowerCase("ru-RU").replace(/[\s-]+/g, "_");
+  return normalized === "delivered" || /^доставлен[аоы]?$/.test(normalized);
+}
+
 export function isFinalPostingStatus(status: string) {
   const normalized = status.trim().toLocaleLowerCase("ru-RU").replace(/[\s-]+/g, "_");
-  return normalized === "delivered" || /^доставлен[аоы]?$/.test(normalized) || /cancel|отмен|declin|reject/i.test(normalized);
+  return isDeliveredPostingStatus(normalized) || /cancel|отмен|declin|reject/i.test(normalized);
 }
 
 export function calculateFinalPostingProfitCents(input: {
