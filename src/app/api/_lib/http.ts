@@ -88,7 +88,10 @@ export function assertLocalMutation(request: Request) {
   assertLocalRequest(request);
   const rawHost = request.headers.get("host");
   const requestUrl = new URL(request.url);
-  const expectedOrigin = new URL(`${requestUrl.protocol}//${rawHost ?? ""}`).origin;
+  const expectedOrigins = new Set([
+    new URL(`${requestUrl.protocol}//${rawHost ?? ""}`).origin,
+    new URL(`http://${rawHost ?? ""}`).origin,
+  ]);
   const origin = request.headers.get("origin");
   if (origin) {
     let originUrl: URL;
@@ -100,7 +103,7 @@ export function assertLocalMutation(request: Request) {
     const originHost = originUrl.hostname.toLowerCase();
     if (
       !isAllowedLocalHost(originHost) ||
-      originUrl.origin !== expectedOrigin ||
+      !expectedOrigins.has(originUrl.origin) ||
       originUrl.username ||
       originUrl.password ||
       originUrl.pathname !== "/" ||
