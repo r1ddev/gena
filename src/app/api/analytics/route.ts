@@ -27,7 +27,9 @@ export async function GET(request: Request) {
     }).sort((left, right) => left.timestamp - right.timestamp);
 
     return {
-      days: snapshot.dailyTrend.days,
+      days: snapshot.dailyTrend.days.map(({ date, sentUnits, purchasedUnits }) => ({ date, sentUnits, purchasedUnits })),
+      catalogProducts: snapshot.products.map(({ id, sku, title }) => ({ id, sku, title })),
+      productProfitDays: snapshot.productProfitDays ?? [],
       ratePoints,
       availableFrom: snapshot.dailyTrend.days[0]?.date ?? null,
       availableTo: snapshot.dailyTrend.days.at(-1)?.date ?? null,

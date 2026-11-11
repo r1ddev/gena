@@ -27,6 +27,7 @@ import { calculateAddedCostHistoryByPosting } from "./added-cost-history";
 import type { AddedCostBreakdown, AddedCostHistoryOperation } from "./added-cost-history";
 import { resolveOzonReturnTimeline } from "@/ozon/return-status";
 import { calculateFinalPostingProfits, isDeliveredPostingStatus, isFinalPostingStatus } from "./order-profit";
+import { calculateProductProfitDays } from "./product-profit-trend";
 import { currentOrderStatus, getOrderReturnStatesByPosting, hasRestockedReturn } from "./order-return-state";
 import { buildFinanceOrderSkuPostingMap, buildFinancePostingProductIdentifiers, financeAccrualRelatedOfferIds, financeAccrualRelatedSkus, financePostingSaleSkus, isOzonBuyerOrderAccrual, isOzonSharedExpense, isOzonWriteoffCompensation, ozonExpenseLabel, resolveFinanceAccrualPostingNumber } from "@/ozon/finance";
 import { isOzonWriteOffStatus } from "@/ozon/return-status";
@@ -423,6 +424,24 @@ export async function getAccountingSnapshot(userId: string, now = new Date(), in
     days: trendDays,
     incompleteProfitCount: trendDays.reduce((total, entry) => total + entry.incompleteProfitCount, 0),
   };
+  const productProfitDays = includeFullDailyTrend && addedCostHistoryByPostingId
+    ? calculateProductProfitDays({
+      saleDays: addedCostHistoryByPostingId.operations.flatMap((operation) => operation.kind === "sale" && operation.postingId
+        ? [{ postingId: operation.postingId, date: dateKey(new Date(operation.occurredAt)) }]
+        : []),
+      items: accountingInput.postingItems,
+      accruals: accountingInput.financeAccruals,
+      now,
+      returns: visibleReturnRows.flatMap((returned) => {
+        const postingId = returned.postingNumber ? postingIdByExternalId.get(returned.postingNumber) : null;
+        const restockedAt = returned.destination === "seller" ? returned.receivedBySellerAt : returned.availableAtOzon;
+        return postingId && returned.productId
+          ? [{ postingId, productId: returned.productId, quantity: returned.quantity, restocked: Boolean(restockedAt && restockedAt <= now && hasRestockedReturn(returned)) }]
+          : [];
+      }),
+      saleCostsByPostingProduct: addedCostHistoryByPostingId.saleCostsByPostingProduct,
+    })
+    : undefined;
   const finalizedOrderProfitCents = [...profitByPosting.values()].reduce((total, result) => total + (result.profitCents ?? 0), 0);
   const orderProfitIncompleteCount = [...profitByPosting.values()].filter((result) => result.missingCost).length;
 
@@ -450,6 +469,7 @@ export async function getAccountingSnapshot(userId: string, now = new Date(), in
     ...(addedCostRateByPostingId ? { addedCostRateByPostingId } : {}),
     ...(addedCostBreakdownByPostingId ? { addedCostBreakdownByPostingId } : {}),
     ...(addedCostOperations ? { addedCostOperations } : {}),
+    ...(productProfitDays ? { productProfitDays } : {}),
     profitBreakdown: {
       ...result.profitBreakdown,
       orderProfit: (finalizedOrderProfitCents / 100).toFixed(2),

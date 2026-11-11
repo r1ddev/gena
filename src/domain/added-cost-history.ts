@@ -85,6 +85,7 @@ export type AddedCostHistory = {
   rates: Map<string, string>;
   breakdowns: Map<string, AddedCostBreakdown>;
   operations: AddedCostHistoryOperation[];
+  saleCostsByPostingProduct: Map<string, { quantity: string; unitLandedCost: string }>;
 };
 
 function timestamp(value: string | null | undefined) {
@@ -110,6 +111,7 @@ export function calculateAddedCostHistoryByPosting(input: AccountingInput, now =
   const allocations = new Map<string, SaleAllocation>();
   const rates = new Map<string, string>();
   const breakdowns = new Map<string, AddedCostBreakdown>();
+  const saleCostsByPostingProduct = new Map<string, { quantity: string; unitLandedCost: string }>();
   const operations: AddedCostHistoryOperation[] = [];
   let unallocatedSharedCosts = new Decimal(0);
 
@@ -261,6 +263,10 @@ export function calculateAddedCostHistoryByPosting(input: AccountingInput, now =
           quantity: (previous?.quantity ?? new Decimal(0)).plus(removedQuantity),
           unitCost,
           rate,
+        });
+        saleCostsByPostingProduct.set(allocationKey, {
+          quantity: removedQuantity.toString(),
+          unitLandedCost: unitCost.times(new Decimal(1).plus(rate.div(100))).toString(),
         });
         purchaseValueSold = purchaseValueSold.plus(removedPurchaseValue);
         unallocatedSharedCosts = unallocatedSharedCosts.minus(removedPurchaseValue.times(rate).div(100));
@@ -485,7 +491,7 @@ export function calculateAddedCostHistoryByPosting(input: AccountingInput, now =
     const returnNote = "Позже весь товар по отправлению вернулся: распределённая сумма расходов восстановлена.";
     return { ...operation, explanation: operation.explanation ? `${operation.explanation} ${returnNote}` : returnNote };
   });
-  return { rates, breakdowns, operations: completeOperations };
+  return { rates, breakdowns, operations: completeOperations, saleCostsByPostingProduct };
 }
 
 export function calculateAddedCostRateByPosting(input: AccountingInput, now = new Date()) {

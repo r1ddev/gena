@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, Brush, CartesianGrid, Cell, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
+import { Area, AreaChart, Bar, Brush, CartesianGrid, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
 import { asRecord, requestJson } from "./api";
 
-type TrendDay = { date: string; sentUnits: number; purchasedUnits: number; profitCents: number; incompleteProfitCount: number };
+type TrendDay = { date: string; sentUnits: number; purchasedUnits: number };
 type RatePoint = { date: string; timestamp: number; postingNumber: string; ratePercent: number };
-type AnalyticsData = { days: TrendDay[]; ratePoints: RatePoint[]; availableFrom: string; availableTo: string };
+type CatalogProduct = { id: string; sku: string; title: string };
+type ProductProfitDay = { date: string; productId: string; profitCents: number; units: number };
+type AnalyticsData = { days: TrendDay[]; catalogProducts: CatalogProduct[]; productProfitDays: ProductProfitDay[]; ratePoints: RatePoint[]; availableFrom: string; availableTo: string };
 type BrushRange = { startIndex: number; endIndex: number };
 
 const countFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
@@ -44,9 +46,22 @@ function parseAnalyticsData(value: unknown): AnalyticsData {
       date: row.date,
       sentUnits: Number(row.sentUnits) || 0,
       purchasedUnits: Number(row.purchasedUnits) || 0,
-      profitCents: Number(row.profitCents) || 0,
-      incompleteProfitCount: Number(row.incompleteProfitCount) || 0,
     }];
+  }) : [];
+  const catalogProducts = Array.isArray(record?.catalogProducts) ? record.catalogProducts.flatMap((item) => {
+    const row = asRecord(item);
+    return row && typeof row.id === "string" && typeof row.sku === "string" && typeof row.title === "string"
+      ? [{ id: row.id, sku: row.sku, title: row.title }]
+      : [];
+  }) : [];
+  const productProfitDays = Array.isArray(record?.productProfitDays) ? record.productProfitDays.flatMap((item) => {
+    const row = asRecord(item);
+    if (!row || typeof row.date !== "string" || typeof row.productId !== "string") return [];
+    const profitCents = Number(row.profitCents);
+    const units = Number(row.units);
+    return Number.isFinite(profitCents) && Number.isFinite(units) && units > 0
+      ? [{ date: row.date, productId: row.productId, profitCents, units }]
+      : [];
   }) : [];
   const ratePoints = Array.isArray(record?.ratePoints) ? record.ratePoints.flatMap((item) => {
     const row = asRecord(item);
@@ -59,6 +74,8 @@ function parseAnalyticsData(value: unknown): AnalyticsData {
   }) : [];
   return {
     days,
+    catalogProducts,
+    productProfitDays,
     ratePoints,
     availableFrom: typeof record?.availableFrom === "string" ? record.availableFrom : days[0]?.date ?? "",
     availableTo: typeof record?.availableTo === "string" ? record.availableTo : days.at(-1)?.date ?? "",
@@ -91,17 +108,6 @@ function UnitsTooltip({ active, payload }: TooltipContentProps) {
     <strong>{fullDate(day.date)}</strong>
     <span>Отправлено товаров <b>{countFormat.format(day.sentUnits)}</b></span>
     <span>Куплено товаров <b className="positive">{countFormat.format(day.purchasedUnits)}</b></span>
-  </div>;
-}
-
-function ProfitTooltip({ active, payload }: TooltipContentProps) {
-  const day = payload?.[0]?.payload as TrendDay | undefined;
-  if (!active || !day) return null;
-  const amount = day.profitCents / 100;
-  return <div className="analytics-tooltip">
-    <strong>{fullDate(day.date)}</strong>
-    <span>{amount < 0 ? "Убыток" : "Прибыль"} <b className={amount < 0 ? "negative" : "positive"}>{amount > 0 ? "+" : amount < 0 ? "−" : ""}{moneyFormat.format(Math.abs(amount))} ₽</b></span>
-    {day.incompleteProfitCount > 0 && <small>Без полной себестоимости: {countFormat.format(day.incompleteProfitCount)}</small>}
   </div>;
 }
 
@@ -139,29 +145,82 @@ function UnitsChart({ days }: { days: TrendDay[] }) {
   </section>;
 }
 
-function ProfitChart({ days }: { days: TrendDay[] }) {
+const productLineColors = ["#16885f", "#4978b8", "#c17d16", "#8a63b8", "#cf5d5d", "#168e9e", "#76604e"];
+
+type ProductProfitChartDay = { date: string; unitsByProduct: Record<string, number>; [key: string]: unknown };
+
+function ProductProfitTooltip({ active, payload }: TooltipContentProps) {
+  const day = payload?.[0]?.payload as ProductProfitChartDay | undefined;
+  if (!active || !day) return null;
+  const rows = (payload ?? []).flatMap((entry) => {
+    const profitPerUnit = Number(entry.value);
+    const productId = String(entry.dataKey ?? "").replace(/^profit_/, "");
+    const units = day.unitsByProduct[productId] ?? 0;
+    return Number.isFinite(profitPerUnit) && profitPerUnit > 0 && units > 0
+      ? [{ productId, title: String(entry.name ?? "Товар"), color: String(entry.color ?? "#16885f"), profitPerUnit, units }]
+      : [];
+  });
+  if (!rows.length) return null;
+  return <div className="analytics-tooltip analytics-product-tooltip">
+    <strong>{fullDate(day.date)}</strong>
+    {rows.map((row) => <span key={row.productId}>
+      <i className="analytics-tooltip-dot" style={{ backgroundColor: row.color }} />
+      <span className="analytics-product-tooltip-value">{row.title}<b className="positive">{moneyFormat.format(row.profitPerUnit)} ₽ / шт.</b><small>Продано: {countFormat.format(row.units)} шт.</small></span>
+    </span>)}
+  </div>;
+}
+
+function ProductProfitChart({ days, products, productProfitDays }: { days: TrendDay[]; products: CatalogProduct[]; productProfitDays: ProductProfitDay[] }) {
   const tooltip = useChartTooltipTrigger();
-  const chartDays = days.map((day) => ({ ...day, profitRubles: day.profitCents / 100 }));
-  const total = days.reduce((sum, day) => sum + day.profitCents, 0) / 100;
-  return <section className="panel analytics-chart-panel">
-    <div className="panel-head"><h2>Прибыль по товарам</h2></div>
+  const [hiddenProducts, setHiddenProducts] = useState<string[]>([]);
+  const visibleProducts = products.filter((product) => !hiddenProducts.includes(product.id));
+  const pointByProductDay = useMemo(() => new Map(productProfitDays.map((point) => [`${point.date}\u0000${point.productId}`, point])), [productProfitDays]);
+  const chartDays = useMemo(() => days.map((day) => {
+    const unitsByProduct: Record<string, number> = {};
+    const chartDay: ProductProfitChartDay = { date: day.date, unitsByProduct };
+    for (const product of products) {
+      const point = pointByProductDay.get(`${day.date}\u0000${product.id}`);
+      chartDay[`profit_${product.id}`] = point && point.profitCents > 0 && point.units > 0 ? point.profitCents / point.units / 100 : null;
+      unitsByProduct[product.id] = point?.units ?? 0;
+    }
+    return chartDay;
+  }), [days, pointByProductDay, products]);
+  const hasVisibleData = chartDays.some((day) => visibleProducts.some((product) => Number(day[`profit_${product.id}`]) > 0));
+
+  function toggleProduct(productId: string) {
+    setHiddenProducts((current) => current.includes(productId)
+      ? current.filter((id) => id !== productId)
+      : [...current, productId]);
+  }
+
+  return <section className="panel analytics-chart-panel analytics-product-profit-panel">
+    <div className="panel-head"><div><h2>Прибыль с проданного товара</h2><span className="small-note">Рубли с одной штуки · дата доставки или выкупа</span></div></div>
     <div className="panel-body analytics-chart-body">
-      <div className={`analytics-chart-total ${total < 0 ? "negative" : "positive"}`}>За период <b>{total > 0 ? "+" : total < 0 ? "−" : ""}{moneyFormat.format(Math.abs(total))} ₽</b></div>
-      <div className="analytics-chart-canvas" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
-        <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 440, height: 270 }}>
-          <BarChart data={chartDays} margin={{ top: 10, right: 12, bottom: 4, left: -4 }}>
+      <p className="analytics-profit-chart-note">Начисления Ozon минус закупка и добавочная стоимость на дату продажи. Показана положительная прибыль по невозвращённым товарам.</p>
+      <div className="analytics-product-legend" aria-label="Показывать товары на графике">
+        {products.map((product, index) => {
+          const selected = !hiddenProducts.includes(product.id);
+          return <button key={product.id} type="button" className="analytics-product-toggle" aria-label={`${product.title}, артикул ${product.sku}`} title={`${product.title} · ${product.sku}`} aria-pressed={selected} onClick={() => toggleProduct(product.id)}>
+            <i style={{ backgroundColor: selected ? productLineColors[index % productLineColors.length] : "#b9c2bd" }} />
+            <span>{product.title}</span>
+          </button>;
+        })}
+      </div>
+      {hasVisibleData ? <div className="analytics-chart-canvas" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}>
+          <LineChart data={chartDays} margin={{ top: 10, right: 12, bottom: 4, left: -4 }}>
             <CartesianGrid vertical={false} stroke="#e8ede9" />
             <XAxis dataKey="date" tickFormatter={(date: string) => dateLabel(date)} interval="preserveStartEnd" minTickGap={18} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#dfe6e1" }} tickMargin={9} height={32} />
-            <YAxis width={48} tickCount={5} tickFormatter={(value: number) => `${compactMoneyFormat.format(value)} ₽`} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
+            <YAxis width={56} tickCount={5} domain={[0, "auto"]} tickFormatter={(value: number) => `${compactMoneyFormat.format(value)} ₽`} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
             <ReferenceLine y={0} stroke="#8e9992" strokeWidth={1.5} />
-            <Tooltip trigger={tooltip.trigger} content={ProfitTooltip} cursor={{ fill: "rgba(22, 136, 95, .08)" }} isAnimationActive={false} />
-            <Bar dataKey="profitRubles" name="Прибыль" maxBarSize={22} radius={[3, 3, 3, 3]} isAnimationActive={false}>
-              {chartDays.map((day) => <Cell key={day.date} fill={day.profitCents < 0 ? "#d96565" : "#2d9a70"} />)}
-            </Bar>
-          </BarChart>
+            <Tooltip trigger={tooltip.trigger} content={ProductProfitTooltip} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
+            {visibleProducts.map((product) => {
+              const index = products.findIndex((candidate) => candidate.id === product.id);
+              return <Line key={product.id} dataKey={`profit_${product.id}`} name={`${product.title} · ${product.sku}`} type="monotone" stroke={productLineColors[index % productLineColors.length]} strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} connectNulls={false} isAnimationActive={false} />;
+            })}
+          </LineChart>
         </ResponsiveContainer>
-      </div>
-      <div className="analytics-legend"><span><i className="profit" />Прибыль</span><span><i className="loss" />Убыток</span></div>
+      </div> : <p className="analytics-empty">За выбранный период нет продаж с положительной прибылью.</p>}
     </div>
   </section>;
 }
@@ -254,7 +313,7 @@ export function AnalyticsWorkspace() {
 
   return <>
     <header className="page-heading">
-      <div><div className="eyebrow">Аналитика</div><h1>Графики</h1><p className="page-description">Товары, добавочная стоимость и прибыль за выбранный период.</p></div>
+      <div><div className="eyebrow">Аналитика</div><h1>Графики</h1><p className="page-description">Продажи, прибыль с одной штуки и добавочная стоимость за выбранный период.</p></div>
     </header>
 
     <section className="panel analytics-period-panel">
@@ -294,7 +353,7 @@ export function AnalyticsWorkspace() {
 
     {!error && data && <div className="analytics-charts-grid">
       <UnitsChart days={visibleDays} />
-      <ProfitChart days={visibleDays} />
+      <ProductProfitChart days={visibleDays} products={data.catalogProducts} productProfitDays={data.productProfitDays.filter((point) => visibleDates.has(point.date))} />
       <RateChart points={visibleRates} days={visibleDays} />
     </div>}
   </>;

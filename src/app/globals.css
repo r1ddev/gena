@@ -145,12 +145,21 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .analytics-charts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .analytics-chart-panel { min-width: 0; }
 .analytics-orders-panel { grid-column: 1 / -1; }
+.analytics-product-profit-panel { grid-column: 1 / -1; }
 .analytics-chart-body { padding-top: 12px; }
 .analytics-chart-total { display: flex; min-height: 22px; flex-wrap: wrap; align-items: baseline; gap: 8px 18px; color: var(--muted); font-size: 12px; }
 .analytics-chart-total b { color: var(--ink); font-size: 13px; font-weight: 800; }
 .analytics-chart-total.positive b { color: var(--green-dark); }
 .analytics-chart-total.negative b { color: var(--red); }
 .analytics-chart-canvas { width: 100%; height: 280px; min-width: 0; margin-top: 5px; touch-action: pan-y; }
+.analytics-product-profit-panel .analytics-chart-canvas { height: 310px; }
+.analytics-profit-chart-note { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+.analytics-product-legend { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 4px 0 2px; }
+.analytics-product-toggle { display: inline-flex; min-width: 0; align-items: center; gap: 7px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #fff; font: inherit; font-size: 11px; cursor: pointer; }
+.analytics-product-toggle[aria-pressed="true"] { color: var(--ink); }
+.analytics-product-toggle:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.analytics-product-toggle i { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; }
+.analytics-product-toggle span { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .analytics-legend { display: flex; flex-wrap: wrap; gap: 8px 17px; margin-top: 2px; color: #647168; font-size: 12px; }
 .analytics-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .analytics-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: #dce9e2; }
@@ -164,6 +173,11 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .analytics-tooltip b.positive { color: var(--green-dark); }
 .analytics-tooltip b.negative { color: var(--red); }
 .analytics-tooltip small { color: var(--muted); }
+.analytics-product-tooltip { max-height: min(50vh, 360px); overflow-y: auto; }
+.analytics-product-tooltip > span { justify-content: flex-start; gap: 8px; align-items: flex-start; }
+.analytics-product-tooltip-value { display: grid; min-width: 0; gap: 2px; }
+.analytics-product-tooltip-value b { font-size: 12px; }
+.analytics-tooltip-dot { width: 8px; height: 8px; flex: 0 0 8px; margin-top: 4px; border-radius: 50%; }
 .analytics-empty { margin: 30px 0; color: var(--muted); text-align: center; }
 .analytics-error { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--red); font-size: 12px; }
 .analytics-loading { display: inline-flex; align-items: center; gap: 6px; }
@@ -574,6 +588,7 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
   .dashboard-trends-grid { grid-template-columns: 1fr; gap: 12px; }
   .analytics-charts-grid { grid-template-columns: 1fr; gap: 12px; }
   .analytics-orders-panel { grid-column: auto; }
+  .analytics-product-profit-panel { grid-column: auto; }
   .analytics-period-controls { align-items: stretch; flex-direction: column; }
   .analytics-date-fields { justify-content: flex-start; }
   .sales-summary-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 9px; }
@@ -595,6 +610,8 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
   .dashboard-trend-chart { height: 242px; }
   .analytics-chart-body { padding: 12px 10px 16px; }
   .analytics-chart-canvas { height: 248px; }
+  .analytics-product-profit-panel .analytics-chart-canvas { height: 270px; }
+  .analytics-product-toggle span { max-width: 150px; }
   .analytics-period-panel > .panel-head { padding: 0 13px; }
   .analytics-period-body { padding: 13px; }
   .analytics-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
