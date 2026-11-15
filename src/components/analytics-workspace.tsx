@@ -312,7 +312,10 @@ function ProductProfitTooltip({ active, payload }: TooltipContentProps) {
     <strong>{fullDate(day.date)}</strong>
     {rows.map((row) => <span key={row.key}>
       <i className="analytics-tooltip-dot" style={{ backgroundColor: row.color }} />
-      <span className="analytics-product-tooltip-value">{row.title}<b className="positive">{moneyFormat.format(row.profitPerUnit)} ₽ / шт.</b><small>Продано {row.isAverage ? `за ${day.averageWindowDays} дн.` : "за день"}: {countFormat.format(row.units)} шт.</small></span>
+      <span className="analytics-product-tooltip-value">
+        <span className="analytics-product-tooltip-title">{row.title}</span>
+        <span className="analytics-product-tooltip-stats"><b className="positive">{moneyFormat.format(row.profitPerUnit)} ₽ / шт.</b><small>Продано {row.isAverage ? `за ${day.averageWindowDays} дн.` : "за день"}: {countFormat.format(row.units)} шт.</small></span>
+      </span>
     </span>)}
   </div>;
 }

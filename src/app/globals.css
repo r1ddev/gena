@@ -173,9 +173,12 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .analytics-tooltip b.negative { color: var(--red); }
 .analytics-tooltip small { color: var(--muted); }
 .analytics-product-tooltip { max-height: min(50vh, 360px); overflow-y: auto; }
-.analytics-product-tooltip > span { justify-content: flex-start; gap: 8px; align-items: flex-start; }
-.analytics-product-tooltip-value { display: grid; min-width: 0; gap: 2px; }
-.analytics-product-tooltip-value b { font-size: 12px; }
+.analytics-product-tooltip > span { display: grid; grid-template-columns: 8px minmax(0, 1fr); justify-content: initial; gap: 8px; align-items: flex-start; }
+.analytics-product-tooltip .analytics-product-tooltip-value { display: grid; min-width: 0; gap: 3px; }
+.analytics-product-tooltip-title { overflow-wrap: anywhere; }
+.analytics-product-tooltip .analytics-product-tooltip-stats { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; }
+.analytics-product-tooltip-stats b { font-size: 12px; }
+.analytics-product-tooltip-stats small { text-align: right; }
 .analytics-tooltip-dot { width: 8px; height: 8px; flex: 0 0 8px; margin-top: 4px; border-radius: 50%; }
 .analytics-empty { margin: 30px 0; color: var(--muted); text-align: center; }
 .analytics-error { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--red); font-size: 12px; }
