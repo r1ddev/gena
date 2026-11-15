@@ -232,7 +232,7 @@ function RateChart({ points, days }: { points: RatePoint[]; days: TrendDay[] }) 
   const domain: [number, number] = firstDay && lastDay
     ? [moscowDayStart(firstDay), moscowDayStart(lastDay) + 86_400_000]
     : [0, 1];
-  return <section className="panel analytics-chart-panel">
+  return <section className="panel analytics-chart-panel analytics-added-cost-panel">
     <div className="panel-head"><h2>Добавочная стоимость</h2></div>
     <div className="panel-body analytics-chart-body">
       <div className="analytics-chart-total">Процент, сохранённый для каждого заказа</div>

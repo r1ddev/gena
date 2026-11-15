@@ -146,6 +146,7 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .analytics-chart-panel { min-width: 0; }
 .analytics-orders-panel { grid-column: 1 / -1; }
 .analytics-product-profit-panel { grid-column: 1 / -1; }
+.analytics-added-cost-panel { grid-column: 1 / -1; }
 .analytics-chart-body { padding-top: 12px; }
 .analytics-chart-total { display: flex; min-height: 22px; flex-wrap: wrap; align-items: baseline; gap: 8px 18px; color: var(--muted); font-size: 12px; }
 .analytics-chart-total b { color: var(--ink); font-size: 13px; font-weight: 800; }
