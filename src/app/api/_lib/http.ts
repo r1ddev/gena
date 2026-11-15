@@ -15,8 +15,45 @@ function isPrivateNetworkHost(host: string) {
   return isIP(ipv6) === 6 && (/^(fc|fd)/.test(ipv6) || /^fe[89ab]/.test(ipv6));
 }
 
-function isAllowedLocalHost(host: string) {
-  return localHosts.has(host) || isPrivateNetworkHost(host);
+function getConfiguredPublicOrigin() {
+  const value = process.env.APP_PUBLIC_ORIGIN?.trim();
+  if (!value) return undefined;
+  try {
+    const origin = new URL(value);
+    if (
+      origin.protocol !== "https:" ||
+      origin.origin !== value ||
+      origin.username ||
+      origin.password ||
+      origin.pathname !== "/" ||
+      origin.search ||
+      origin.hash
+    ) return undefined;
+    return origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function getRequestHost(rawHost: string | null) {
+  if (!rawHost) return undefined;
+  try {
+    const url = new URL(`http://${rawHost}`);
+    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) return undefined;
+    return { hostname: url.hostname.toLowerCase(), authority: rawHost.toLowerCase() };
+  } catch {
+    return undefined;
+  }
+}
+
+function isAllowedRequestHost(host: string, authority: string) {
+  if (localHosts.has(host) || isPrivateNetworkHost(host)) return true;
+  const publicOrigin = getConfiguredPublicOrigin();
+  return Boolean(
+    publicOrigin &&
+    host === publicOrigin.hostname &&
+    [publicOrigin.hostname, publicOrigin.host].includes(authority),
+  );
 }
 
 export function json(data: unknown, status = 200) {
@@ -79,19 +116,30 @@ export async function parseBody<T>(request: Request, schema: ZodType<T>): Promis
 
 export function assertLocalRequest(request: Request) {
   const rawHost = request.headers.get("host");
-  let host = "";
-  try { host = new URL(`http://${rawHost ?? ""}`).hostname.toLowerCase(); } catch { /* reject below */ }
-  if (!host || !isAllowedLocalHost(host)) throw new Error("Приложение доступно только на этом компьютере и в локальной сети.");
+  const host = getRequestHost(rawHost);
+  if (!host || !isAllowedRequestHost(host.hostname, host.authority)) {
+    throw new Error("Приложение доступно только на этом компьютере и в локальной сети.");
+  }
 }
 
 export function assertLocalMutation(request: Request) {
   assertLocalRequest(request);
   const rawHost = request.headers.get("host");
+  const requestHost = getRequestHost(rawHost);
+  const publicOrigin = getConfiguredPublicOrigin();
+  const isPublicRequest = Boolean(
+    requestHost &&
+    publicOrigin &&
+    requestHost.hostname === publicOrigin.hostname &&
+    [publicOrigin.hostname, publicOrigin.host].includes(requestHost.authority),
+  );
   const requestUrl = new URL(request.url);
-  const expectedOrigins = new Set([
-    new URL(`${requestUrl.protocol}//${rawHost ?? ""}`).origin,
-    new URL(`http://${rawHost ?? ""}`).origin,
-  ]);
+  const expectedOrigins = isPublicRequest && publicOrigin
+    ? new Set([publicOrigin.origin])
+    : new Set([
+        new URL(`${requestUrl.protocol}//${rawHost ?? ""}`).origin,
+        new URL(`http://${rawHost ?? ""}`).origin,
+      ]);
   const origin = request.headers.get("origin");
   if (origin) {
     let originUrl: URL;
@@ -101,8 +149,10 @@ export function assertLocalMutation(request: Request) {
       throw new Error("Некорректный источник запроса.");
     }
     const originHost = originUrl.hostname.toLowerCase();
+    const isAllowedOriginHost = localHosts.has(originHost) || isPrivateNetworkHost(originHost) ||
+      (isPublicRequest && publicOrigin?.origin === originUrl.origin);
     if (
-      !isAllowedLocalHost(originHost) ||
+      !isAllowedOriginHost ||
       !expectedOrigins.has(originUrl.origin) ||
       originUrl.username ||
       originUrl.password ||

@@ -33,6 +33,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-gena}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-gena}
       PGAPPNAME: gena-web
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Run npm run start:local to create a local .env file}
+      APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-}
       APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
       PORT: 3000
       HOSTNAME: 0.0.0.0
