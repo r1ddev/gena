@@ -126,6 +126,7 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .analytics-date-fields { justify-content: flex-end; }
 .analytics-date-fields label { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .analytics-date-fields input { width: 146px; min-height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-size: 12px; }
+.analytics-date-fields select { width: 104px; min-height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-size: 12px; }
 .analytics-brush-hint { margin: 0; color: var(--muted); font-size: 11px; }
 .analytics-brush-chart { width: 100%; height: 90px; min-width: 0; touch-action: pan-y; }
 .analytics-brush-chart .recharts-wrapper,
@@ -166,6 +167,9 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .analytics-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .analytics-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: #dce9e2; }
 .analytics-legend i.delivered { border-radius: 50%; background: #16885f; }
+.analytics-legend i.average { width: 18px; height: 0; border-top: 2px dashed #16885f; border-radius: 0; background: none; }
+.analytics-legend i.average-sent { border-top-color: #a5b9ad; }
+.analytics-legend i.average-delivered { border-top-color: #16885f; }
 .analytics-legend i.profit { background: #2d9a70; }
 .analytics-legend i.loss { background: #d96565; }
 .analytics-tooltip { display: grid; min-width: 170px; max-width: min(260px, calc(100vw - 48px)); gap: 5px; padding: 10px 12px; border: 1px solid #dfe7e1; border-radius: 10px; color: #536158; background: #fff; box-shadow: 0 8px 24px rgba(24, 50, 40, .15); font-size: 12px; }
@@ -622,6 +626,7 @@ tbody tr[aria-haspopup="dialog"]:focus-visible { outline: 2px solid rgba(23,139,
   .analytics-date-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
   .analytics-date-fields label { display: grid; gap: 4px; }
   .analytics-date-fields input { width: 100%; min-width: 0; }
+  .analytics-date-fields select { width: 100%; min-width: 0; }
   .analytics-reset-zoom { grid-column: 1 / -1; }
   .page-heading > .button { align-self: stretch; }
   .form-grid { grid-template-columns: 1fr; }
