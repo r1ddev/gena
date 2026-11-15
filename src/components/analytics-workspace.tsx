@@ -20,6 +20,7 @@ type ProductProfitDay = { date: string; productId: string; profitCents: number; 
 type AnalyticsData = { days: TrendDay[]; catalogProducts: CatalogProduct[]; productProfitDays: ProductProfitDay[]; ratePoints: RatePoint[]; availableFrom: string; availableTo: string };
 type BrushRange = { startIndex: number; endIndex: number };
 type BuyoutDay = AnalyticsChartDay;
+type ChartSeries = { key: string; label: string; color: string; dashed?: boolean; bar?: boolean };
 
 const countFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 const averageCountFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
@@ -157,33 +158,62 @@ function useChartTooltipTrigger() {
   };
 }
 
+function useSeriesVisibility() {
+  const [hiddenKeys, setHiddenKeys] = useState<string[]>([]);
+  return {
+    hiddenKeys,
+    isVisible: (key: string) => !hiddenKeys.includes(key),
+    toggle: (key: string) => setHiddenKeys((current) => current.includes(key)
+      ? current.filter((item) => item !== key)
+      : [...current, key]),
+  };
+}
+
+function SeriesLegend({ items, hiddenKeys, onToggle }: { items: ChartSeries[]; hiddenKeys: string[]; onToggle: (key: string) => void }) {
+  return <div className="analytics-series-legend">
+    {items.map((item) => <button key={item.key} type="button" className="analytics-series-toggle" aria-pressed={!hiddenKeys.includes(item.key)} onClick={() => onToggle(item.key)}>
+      <i className={`analytics-series-swatch${item.bar ? " bar" : ""}${item.dashed ? " dashed" : ""}`} style={{ color: item.color }} />
+      <span>{item.label}</span>
+    </button>)}
+  </div>;
+}
+
 function UnitsTooltip({ active, payload }: TooltipContentProps) {
   const day = payload?.[0]?.payload as AnalyticsChartDay | undefined;
   if (!active || !day) return null;
+  const visibleKeys = new Set((payload ?? []).map((entry) => String(entry.dataKey ?? "")));
   return <div className="analytics-tooltip">
     <strong>{fullDate(day.date)}</strong>
-    <span>Отправлено товаров <b>{countFormat.format(day.sentUnits)}</b></span>
-    <span>Куплено товаров <b className="positive">{countFormat.format(day.purchasedUnits)}</b></span>
-    {day.averageWindowDays && <>
-      <span>Среднее отправлений за {day.averageWindowDays} дн. <b>{averageCountFormat.format(day.averageSentUnits ?? 0)}</b></span>
-      <span>Среднее покупок за {day.averageWindowDays} дн. <b className="positive">{averageCountFormat.format(day.averagePurchasedUnits ?? 0)}</b></span>
-    </>}
+    {visibleKeys.has("sentUnits") && <span>Отправлено товаров <b>{countFormat.format(day.sentUnits)}</b></span>}
+    {visibleKeys.has("purchasedUnits") && <span>Куплено товаров <b className="positive">{countFormat.format(day.purchasedUnits)}</b></span>}
+    {day.averageWindowDays && visibleKeys.has("averageSentUnits") && <span>Среднее отправлений за {day.averageWindowDays} дн. <b>{averageCountFormat.format(day.averageSentUnits ?? 0)}</b></span>}
+    {day.averageWindowDays && visibleKeys.has("averagePurchasedUnits") && <span>Среднее покупок за {day.averageWindowDays} дн. <b className="positive">{averageCountFormat.format(day.averagePurchasedUnits ?? 0)}</b></span>}
   </div>;
 }
 
 function RateTooltip({ active, payload }: TooltipContentProps) {
   const point = payload?.[0]?.payload as RateChartPoint | undefined;
   if (!active || !point) return null;
+  const visibleKeys = new Set((payload ?? []).map((entry) => String(entry.dataKey ?? "")));
   return <div className="analytics-tooltip">
     <strong>{fullDate(point.date)}</strong>
     <span>Отправление <b>{point.postingNumber}</b></span>
-    <span>Добавочная стоимость <b>{percentFormat.format(point.ratePercent)}%</b></span>
-    {point.averageWindowDays && point.averageRatePercent !== undefined && <span>Среднее за {point.averageWindowDays} дн. <b>{percentFormat.format(point.averageRatePercent)}%</b></span>}
+    {visibleKeys.has("ratePercent") && <span>Добавочная стоимость <b>{percentFormat.format(point.ratePercent)}%</b></span>}
+    {point.averageWindowDays && point.averageRatePercent !== undefined && visibleKeys.has("averageRatePercent") && <span>Среднее за {point.averageWindowDays} дн. <b>{percentFormat.format(point.averageRatePercent)}%</b></span>}
   </div>;
 }
 
 function UnitsChart({ days, smoothingDays }: { days: AnalyticsChartDay[]; smoothingDays: number | null }) {
   const tooltip = useChartTooltipTrigger();
+  const series = useSeriesVisibility();
+  const legendItems: ChartSeries[] = [
+    { key: "sentUnits", label: "Отправлено товаров", color: "#dce9e2", bar: true },
+    { key: "purchasedUnits", label: "Куплено товаров", color: "#16885f" },
+    ...(smoothingDays ? [
+      { key: "averageSentUnits", label: "Среднее отправлений", color: "#a5b9ad", dashed: true },
+      { key: "averagePurchasedUnits", label: "Среднее покупок", color: "#16885f", dashed: true },
+    ] : []),
+  ];
   const totals = days.reduce((sum, day) => ({ sentUnits: sum.sentUnits + day.sentUnits, purchasedUnits: sum.purchasedUnits + day.purchasedUnits }), { sentUnits: 0, purchasedUnits: 0 });
   return <section className="panel analytics-chart-panel analytics-orders-panel">
     <div className="panel-head"><div><h2>Товары по дням</h2>{smoothingDays && <span className="small-note">Пунктир — среднее за {smoothingDays} дн.</span>}</div></div>
@@ -196,16 +226,16 @@ function UnitsChart({ days, smoothingDays }: { days: AnalyticsChartDay[]; smooth
             <XAxis dataKey="date" tickFormatter={(date: string) => dateLabel(date)} interval="preserveStartEnd" minTickGap={18} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#dfe6e1" }} tickMargin={9} height={32} />
             <YAxis width={40} tickCount={5} allowDecimals={Boolean(smoothingDays)} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
             <Tooltip trigger={tooltip.trigger} content={UnitsTooltip} cursor={{ fill: "rgba(22, 136, 95, .08)" }} isAnimationActive={false} />
-            <Bar dataKey="sentUnits" name="Отправлено товаров" fill="#dce9e2" maxBarSize={22} radius={[3, 3, 0, 0]} isAnimationActive={false} />
-            <Line dataKey="purchasedUnits" name="Куплено товаров" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} isAnimationActive={false} />
+            {series.isVisible("sentUnits") && <Bar dataKey="sentUnits" name="Отправлено товаров" fill="#dce9e2" maxBarSize={22} radius={[3, 3, 0, 0]} isAnimationActive={false} />}
+            {series.isVisible("purchasedUnits") && <Line dataKey="purchasedUnits" name="Куплено товаров" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} isAnimationActive={false} />}
             {smoothingDays && <>
-              <Line dataKey="averageSentUnits" name={`Среднее отправлений · ${smoothingDays} дн.`} type="monotone" stroke="#a5b9ad" strokeWidth={2} strokeDasharray="6 4" dot={false} isAnimationActive={false} />
-              <Line dataKey="averagePurchasedUnits" name={`Среднее покупок · ${smoothingDays} дн.`} type="monotone" stroke="#16885f" strokeWidth={2} strokeDasharray="6 4" dot={false} isAnimationActive={false} />
+              {series.isVisible("averageSentUnits") && <Line dataKey="averageSentUnits" name={`Среднее отправлений · ${smoothingDays} дн.`} type="monotone" stroke="#a5b9ad" strokeWidth={2} strokeDasharray="6 4" dot={false} isAnimationActive={false} />}
+              {series.isVisible("averagePurchasedUnits") && <Line dataKey="averagePurchasedUnits" name={`Среднее покупок · ${smoothingDays} дн.`} type="monotone" stroke="#16885f" strokeWidth={2} strokeDasharray="6 4" dot={false} isAnimationActive={false} />}
             </>}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      <div className="analytics-legend"><span><i className="orders" />Отправлено товаров</span><span><i className="delivered" />Куплено товаров</span>{smoothingDays && <><span><i className="average average-sent" />Среднее отправлений</span><span><i className="average average-delivered" />Среднее покупок</span></>}</div>
+      <SeriesLegend items={legendItems} hiddenKeys={series.hiddenKeys} onToggle={series.toggle} />
     </div>
   </section>;
 }
@@ -213,18 +243,24 @@ function UnitsChart({ days, smoothingDays }: { days: AnalyticsChartDay[]; smooth
 function BuyoutTooltip({ active, payload }: TooltipContentProps) {
   const day = payload?.[0]?.payload as BuyoutDay | undefined;
   if (!active || !day || (day.buyoutPercent === null && day.averageBuyoutPercent == null)) return null;
+  const visibleKeys = new Set((payload ?? []).map((entry) => String(entry.dataKey ?? "")));
   return <div className="analytics-tooltip">
     <strong>{fullDate(day.date)}</strong>
-    {day.buyoutPercent !== null && <>
+    {day.buyoutPercent !== null && visibleKeys.has("buyoutPercent") && <>
       <span>Процент выкупа <b className="positive">{buyoutPercentFormat.format(day.buyoutPercent)}%</b></span>
       <span>Выкуплено <b>{countFormat.format(day.purchasedUnits)} из {countFormat.format(day.sentUnits)}</b></span>
     </>}
-    {day.averageWindowDays && day.averageBuyoutPercent !== null && day.averageBuyoutPercent !== undefined && <span>Среднее за {day.averageWindowDays} дн. <b className="positive">{buyoutPercentFormat.format(day.averageBuyoutPercent)}%</b></span>}
+    {day.averageWindowDays && day.averageBuyoutPercent !== null && day.averageBuyoutPercent !== undefined && visibleKeys.has("averageBuyoutPercent") && <span>Среднее за {day.averageWindowDays} дн. <b className="positive">{buyoutPercentFormat.format(day.averageBuyoutPercent)}%</b></span>}
   </div>;
 }
 
 function BuyoutChart({ days, smoothingDays }: { days: AnalyticsChartDay[]; smoothingDays: number | null }) {
   const tooltip = useChartTooltipTrigger();
+  const series = useSeriesVisibility();
+  const legendItems: ChartSeries[] = [
+    { key: "buyoutPercent", label: "Процент по дням", color: "#16885f" },
+    ...(smoothingDays ? [{ key: "averageBuyoutPercent", label: `Среднее за ${smoothingDays} дней`, color: "#16885f", dashed: true }] : []),
+  ];
   const totals = days.reduce((sum, day) => ({
     sentUnits: sum.sentUnits + day.sentUnits,
     purchasedUnits: sum.purchasedUnits + day.purchasedUnits,
@@ -244,12 +280,12 @@ function BuyoutChart({ days, smoothingDays }: { days: AnalyticsChartDay[]; smoot
             <XAxis dataKey="date" tickFormatter={(date: string) => dateLabel(date)} interval="preserveStartEnd" minTickGap={18} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#dfe6e1" }} tickMargin={9} height={32} />
             <YAxis width={48} tickCount={5} domain={[0, 100]} tickFormatter={(value: number) => `${Math.round(value)}%`} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
             <Tooltip trigger={tooltip.trigger} content={BuyoutTooltip} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
-            <Line dataKey="buyoutPercent" name="Процент выкупа" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} connectNulls isAnimationActive={false} />
-            {smoothingDays && <Line dataKey="averageBuyoutPercent" name={`Среднее за ${smoothingDays} дн.`} type="monotone" stroke="#16885f" strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={{ r: 4, strokeWidth: 1 }} connectNulls isAnimationActive={false} />}
+            {series.isVisible("buyoutPercent") && <Line dataKey="buyoutPercent" name="Процент выкупа" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} connectNulls isAnimationActive={false} />}
+            {smoothingDays && series.isVisible("averageBuyoutPercent") && <Line dataKey="averageBuyoutPercent" name={`Среднее за ${smoothingDays} дн.`} type="monotone" stroke="#16885f" strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={{ r: 4, strokeWidth: 1 }} connectNulls isAnimationActive={false} />}
           </LineChart>
         </ResponsiveContainer>
       </div> : <p className="analytics-empty">За выбранный период нет отправленных товаров.</p>}
-      {smoothingDays && totals.sentUnits > 0 && <div className="analytics-legend"><span><i className="delivered" />По дням</span><span><i className="average" />Скользящее среднее</span></div>}
+      <SeriesLegend items={legendItems} hiddenKeys={series.hiddenKeys} onToggle={series.toggle} />
     </div>
   </section>;
 }
@@ -283,8 +319,14 @@ function ProductProfitTooltip({ active, payload }: TooltipContentProps) {
 
 function ProductProfitChart({ days, allDays, products, productProfitDays, smoothingDays }: { days: AnalyticsChartDay[]; allDays: AnalyticsChartDay[]; products: CatalogProduct[]; productProfitDays: ProductProfitDay[]; smoothingDays: number | null }) {
   const tooltip = useChartTooltipTrigger();
-  const [hiddenProducts, setHiddenProducts] = useState<string[]>([]);
-  const visibleProducts = products.filter((product) => !hiddenProducts.includes(product.id));
+  const series = useSeriesVisibility();
+  const legendItems: ChartSeries[] = products.flatMap((product, index) => {
+    const color = productLineColors[index % productLineColors.length];
+    return [
+      { key: `profit_${product.id}`, label: `${product.title} · день`, color },
+      ...(smoothingDays ? [{ key: `average_profit_${product.id}`, label: `${product.title} · среднее`, color, dashed: true }] : []),
+    ];
+  });
   const pointByProductDay = useMemo(() => new Map(productProfitDays.map((point) => [`${point.date}\u0000${point.productId}`, point])), [productProfitDays]);
   const allChartDays = useMemo(() => allDays.map((day, dayIndex) => {
     const unitsByProduct: Record<string, number> = {};
@@ -313,29 +355,15 @@ function ProductProfitChart({ days, allDays, products, productProfitDays, smooth
   }), [allDays, pointByProductDay, products, smoothingDays]);
   const visibleDates = useMemo(() => new Set(days.map((day) => day.date)), [days]);
   const chartDays = useMemo(() => allChartDays.filter((day) => visibleDates.has(day.date)), [allChartDays, visibleDates]);
-  const hasVisibleData = chartDays.some((day) => visibleProducts.some((product) =>
+  const hasVisibleData = chartDays.some((day) => products.some((product) =>
     Number(day[`profit_${product.id}`]) > 0 || Number(day[`average_profit_${product.id}`]) > 0,
   ));
-
-  function toggleProduct(productId: string) {
-    setHiddenProducts((current) => current.includes(productId)
-      ? current.filter((id) => id !== productId)
-      : [...current, productId]);
-  }
 
   return <section className="panel analytics-chart-panel analytics-product-profit-panel">
     <div className="panel-head"><div><h2>Прибыль с проданного товара</h2><span className="small-note">Рубли с одной штуки · дата доставки или выкупа{smoothingDays ? ` · пунктир — среднее за ${smoothingDays} дн.` : ""}</span></div></div>
     <div className="panel-body analytics-chart-body">
       <p className="analytics-profit-chart-note">Начисления Ozon минус закупка и добавочная стоимость на дату продажи. Показана положительная прибыль по невозвращённым товарам.</p>
-      <div className="analytics-product-legend" aria-label="Показывать товары на графике">
-        {products.map((product, index) => {
-          const selected = !hiddenProducts.includes(product.id);
-          return <button key={product.id} type="button" className="analytics-product-toggle" aria-label={`${product.title}, артикул ${product.sku}`} title={`${product.title} · ${product.sku}`} aria-pressed={selected} onClick={() => toggleProduct(product.id)}>
-            <i style={{ backgroundColor: selected ? productLineColors[index % productLineColors.length] : "#b9c2bd" }} />
-            <span>{product.title}</span>
-          </button>;
-        })}
-      </div>
+      <SeriesLegend items={legendItems} hiddenKeys={series.hiddenKeys} onToggle={series.toggle} />
       {hasVisibleData ? <div className="analytics-chart-canvas" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}>
           <LineChart data={chartDays} margin={{ top: 10, right: 12, bottom: 4, left: -4 }}>
@@ -344,12 +372,12 @@ function ProductProfitChart({ days, allDays, products, productProfitDays, smooth
             <YAxis width={56} tickCount={5} domain={[0, "auto"]} tickFormatter={(value: number) => `${compactMoneyFormat.format(value)} ₽`} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
             <ReferenceLine y={0} stroke="#8e9992" strokeWidth={1.5} />
             <Tooltip trigger={tooltip.trigger} content={ProductProfitTooltip} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
-            {visibleProducts.map((product) => {
+            {products.map((product) => {
               const index = products.findIndex((candidate) => candidate.id === product.id);
               const color = productLineColors[index % productLineColors.length];
               return <Fragment key={product.id}>
-                <Line dataKey={`profit_${product.id}`} name={`${product.title} · ${product.sku}`} type="monotone" stroke={color} strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} connectNulls={false} isAnimationActive={false} />
-                {smoothingDays && <Line dataKey={`average_profit_${product.id}`} name={`${product.title} · ${product.sku} · среднее`} type="monotone" stroke={color} strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={{ r: 4, strokeWidth: 1 }} connectNulls={false} isAnimationActive={false} />}
+                {series.isVisible(`profit_${product.id}`) && <Line dataKey={`profit_${product.id}`} name={`${product.title} · ${product.sku}`} type="monotone" stroke={color} strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} connectNulls={false} isAnimationActive={false} />}
+                {smoothingDays && series.isVisible(`average_profit_${product.id}`) && <Line dataKey={`average_profit_${product.id}`} name={`${product.title} · ${product.sku} · среднее`} type="monotone" stroke={color} strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={{ r: 4, strokeWidth: 1 }} connectNulls={false} isAnimationActive={false} />}
               </Fragment>;
             })}
           </LineChart>
@@ -361,6 +389,11 @@ function ProductProfitChart({ days, allDays, products, productProfitDays, smooth
 
 function RateChart({ points, days, smoothingDays }: { points: RateChartPoint[]; days: AnalyticsChartDay[]; smoothingDays: number | null }) {
   const tooltip = useChartTooltipTrigger();
+  const series = useSeriesVisibility();
+  const legendItems: ChartSeries[] = [
+    { key: "ratePercent", label: "По заказам", color: "#16885f" },
+    ...(smoothingDays ? [{ key: "averageRatePercent", label: `Среднее за ${smoothingDays} дней`, color: "#16885f", dashed: true }] : []),
+  ];
   const firstDay = days[0]?.date;
   const lastDay = days.at(-1)?.date;
   const domain: [number, number] = firstDay && lastDay
@@ -378,12 +411,12 @@ function RateChart({ points, days, smoothingDays }: { points: RateChartPoint[]; 
             <YAxis width={54} tickCount={5} tickFormatter={(value: number) => `${percentFormat.format(value)}%`} domain={["auto", "auto"]} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
             <ReferenceLine y={0} stroke="#8e9992" strokeWidth={1.5} />
             <Tooltip trigger={tooltip.trigger} content={RateTooltip} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
-            <Line dataKey="ratePercent" name="Добавочная стоимость" type="stepAfter" stroke="#16885f" strokeWidth={2.5} dot={{ r: 3, strokeWidth: 1 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive={false} />
-            {smoothingDays && <Line dataKey="averageRatePercent" name={`Среднее · ${smoothingDays} дн.`} type="monotone" stroke="#16885f" strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={{ r: 4, strokeWidth: 1 }} connectNulls isAnimationActive={false} />}
+            {series.isVisible("ratePercent") && <Line dataKey="ratePercent" name="Добавочная стоимость" type="stepAfter" stroke="#16885f" strokeWidth={2.5} dot={{ r: 3, strokeWidth: 1 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive={false} />}
+            {smoothingDays && series.isVisible("averageRatePercent") && <Line dataKey="averageRatePercent" name={`Среднее · ${smoothingDays} дн.`} type="monotone" stroke="#16885f" strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={{ r: 4, strokeWidth: 1 }} connectNulls isAnimationActive={false} />}
           </LineChart>
         </ResponsiveContainer>
       </div> : <p className="analytics-empty">За выбранный период нет заказов с рассчитанным процентом.</p>}
-      {smoothingDays && points.length > 0 && <div className="analytics-legend"><span><i className="delivered" />По заказам</span><span><i className="average" />Скользящее среднее</span></div>}
+      <SeriesLegend items={legendItems} hiddenKeys={series.hiddenKeys} onToggle={series.toggle} />
     </div>
   </section>;
 }
