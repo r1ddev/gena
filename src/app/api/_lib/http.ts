@@ -46,16 +46,6 @@ function getRequestHost(rawHost: string | null) {
   }
 }
 
-function isAllowedRequestHost(host: string, authority: string) {
-  if (localHosts.has(host) || isPrivateNetworkHost(host)) return true;
-  const publicOrigin = getConfiguredPublicOrigin();
-  return Boolean(
-    publicOrigin &&
-    host === publicOrigin.hostname &&
-    [publicOrigin.hostname, publicOrigin.host].includes(authority),
-  );
-}
-
 export function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status, headers: { "Cache-Control": "no-store" } });
 }
@@ -79,7 +69,6 @@ export function errorResponse(error: unknown) {
 
 export async function handleLocalGet<T>(request: Request, operation: (userId: string) => Promise<T>) {
   try {
-    assertLocalRequest(request);
     const user = await getAuthenticatedUser(request);
     if (!user) return json({ error: "Для продолжения войдите в аккаунт." }, 401);
     return json(await operation(user.id));
@@ -89,7 +78,6 @@ export async function handleLocalGet<T>(request: Request, operation: (userId: st
 }
 
 export async function requireAuthenticatedUser(request: Request) {
-  assertLocalRequest(request);
   const user = await getAuthenticatedUser(request);
   if (!user) {
     const error = new Error("Для продолжения войдите в аккаунт.") as Error & { status: number };
@@ -114,16 +102,7 @@ export async function parseBody<T>(request: Request, schema: ZodType<T>): Promis
   return schema.parse(body);
 }
 
-export function assertLocalRequest(request: Request) {
-  const rawHost = request.headers.get("host");
-  const host = getRequestHost(rawHost);
-  if (!host || !isAllowedRequestHost(host.hostname, host.authority)) {
-    throw new Error("Приложение доступно только на этом компьютере и в локальной сети.");
-  }
-}
-
 export function assertLocalMutation(request: Request) {
-  assertLocalRequest(request);
   const rawHost = request.headers.get("host");
   const requestHost = getRequestHost(rawHost);
   const publicOrigin = getConfiguredPublicOrigin();
