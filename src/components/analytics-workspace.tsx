@@ -11,11 +11,13 @@ type CatalogProduct = { id: string; sku: string; title: string };
 type ProductProfitDay = { date: string; productId: string; profitCents: number; units: number };
 type AnalyticsData = { days: TrendDay[]; catalogProducts: CatalogProduct[]; productProfitDays: ProductProfitDay[]; ratePoints: RatePoint[]; availableFrom: string; availableTo: string };
 type BrushRange = { startIndex: number; endIndex: number };
+type BuyoutDay = TrendDay & { buyoutPercent: number | null };
 
 const countFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 const moneyFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
 const compactMoneyFormat = new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFractionDigits: 1 });
 const percentFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 4 });
+const buyoutPercentFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
 
 function dateLabel(value: string | number, month: "short" | "long" = "short") {
   const date = typeof value === "number" ? new Date(value) : new Date(`${value}T12:00:00Z`);
@@ -141,6 +143,50 @@ function UnitsChart({ days }: { days: TrendDay[] }) {
         </ResponsiveContainer>
       </div>
       <div className="analytics-legend"><span><i className="orders" />Отправлено товаров</span><span><i className="delivered" />Куплено товаров</span></div>
+    </div>
+  </section>;
+}
+
+function BuyoutTooltip({ active, payload }: TooltipContentProps) {
+  const day = payload?.[0]?.payload as BuyoutDay | undefined;
+  if (!active || !day || day.buyoutPercent === null) return null;
+  return <div className="analytics-tooltip">
+    <strong>{fullDate(day.date)}</strong>
+    <span>Процент выкупа <b className="positive">{buyoutPercentFormat.format(day.buyoutPercent)}%</b></span>
+    <span>Выкуплено <b>{countFormat.format(day.purchasedUnits)} из {countFormat.format(day.sentUnits)}</b></span>
+  </div>;
+}
+
+function BuyoutChart({ days }: { days: TrendDay[] }) {
+  const tooltip = useChartTooltipTrigger();
+  const totals = days.reduce((sum, day) => ({
+    sentUnits: sum.sentUnits + day.sentUnits,
+    purchasedUnits: sum.purchasedUnits + day.purchasedUnits,
+  }), { sentUnits: 0, purchasedUnits: 0 });
+  const buyoutPercent = totals.sentUnits > 0 ? totals.purchasedUnits / totals.sentUnits * 100 : null;
+  const chartDays: BuyoutDay[] = days.map((day) => ({
+    ...day,
+    buyoutPercent: day.sentUnits > 0 ? day.purchasedUnits / day.sentUnits * 100 : null,
+  }));
+
+  return <section className="panel analytics-chart-panel analytics-buyout-panel">
+    <div className="panel-head"><div><h2>Процент выкупа товаров</h2><span className="small-note">Выкуплено из всех отправленных · по дате заказа</span></div></div>
+    <div className="panel-body analytics-chart-body">
+      <div className="analytics-chart-total">
+        <span>За период {buyoutPercent === null ? <b>—</b> : <b className="positive">{buyoutPercentFormat.format(buyoutPercent)}%</b>}</span>
+        <span>Выкуплено <b>{countFormat.format(totals.purchasedUnits)}</b> из <b>{countFormat.format(totals.sentUnits)}</b> отправленных товаров</span>
+      </div>
+      {totals.sentUnits > 0 ? <div className="analytics-chart-canvas" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 600, height: 270 }}>
+          <LineChart data={chartDays} margin={{ top: 10, right: 12, bottom: 4, left: -4 }}>
+            <CartesianGrid vertical={false} stroke="#e8ede9" />
+            <XAxis dataKey="date" tickFormatter={(date: string) => dateLabel(date)} interval="preserveStartEnd" minTickGap={18} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#dfe6e1" }} tickMargin={9} height={32} />
+            <YAxis width={48} tickCount={5} domain={[0, 100]} tickFormatter={(value: number) => `${Math.round(value)}%`} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
+            <Tooltip trigger={tooltip.trigger} content={BuyoutTooltip} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
+            <Line dataKey="buyoutPercent" name="Процент выкупа" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} connectNulls isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div> : <p className="analytics-empty">За выбранный период нет отправленных товаров.</p>}
     </div>
   </section>;
 }
@@ -313,7 +359,7 @@ export function AnalyticsWorkspace() {
 
   return <>
     <header className="page-heading">
-      <div><div className="eyebrow">Аналитика</div><h1>Графики</h1><p className="page-description">Продажи, прибыль с одной штуки и добавочная стоимость за выбранный период.</p></div>
+      <div><div className="eyebrow">Аналитика</div><h1>Графики</h1><p className="page-description">Продажи, прибыль с одной штуки, добавочная стоимость и процент выкупа за выбранный период.</p></div>
     </header>
 
     <section className="panel analytics-period-panel">
@@ -355,6 +401,7 @@ export function AnalyticsWorkspace() {
       <UnitsChart days={visibleDays} />
       <ProductProfitChart days={visibleDays} products={data.catalogProducts} productProfitDays={data.productProfitDays.filter((point) => visibleDates.has(point.date))} />
       <RateChart points={visibleRates} days={visibleDays} />
+      <BuyoutChart days={visibleDays} />
     </div>}
   </>;
 }
