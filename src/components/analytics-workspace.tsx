@@ -16,11 +16,11 @@ type AnalyticsChartDay = TrendDay & {
 type RatePoint = { date: string; timestamp: number; postingNumber: string; ratePercent: number };
 type RateChartPoint = RatePoint & { averageRatePercent?: number; averageWindowDays?: number };
 type CatalogProduct = { id: string; sku: string; title: string };
-type ProductProfitDay = { date: string; productId: string; profitCents: number; units: number };
+type ProductProfitDay = { date: string; productId: string; profitCents: number; units: number; historicalProfitCents: number | null; historicalUnits: number };
 type AnalyticsData = { days: TrendDay[]; catalogProducts: CatalogProduct[]; productProfitDays: ProductProfitDay[]; ratePoints: RatePoint[]; availableFrom: string; availableTo: string };
 type BrushRange = { startIndex: number; endIndex: number };
 type BuyoutDay = AnalyticsChartDay;
-type ChartSeries = { key: string; label: string; color: string; dashed?: boolean; bar?: boolean };
+type ChartSeries = { key: string; label: string; color: string; dashed?: boolean; dotted?: boolean; bar?: boolean; compareProductId?: string };
 
 const countFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 const averageCountFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
@@ -116,8 +116,11 @@ function parseAnalyticsData(value: unknown): AnalyticsData {
     if (!row || typeof row.date !== "string" || typeof row.productId !== "string") return [];
     const profitCents = Number(row.profitCents);
     const units = Number(row.units);
-    return Number.isFinite(profitCents) && Number.isFinite(units) && units > 0
-      ? [{ date: row.date, productId: row.productId, profitCents, units }]
+    const historicalProfitCents = row.historicalProfitCents == null ? null : Number(row.historicalProfitCents);
+    const historicalUnits = Number(row.historicalUnits) || 0;
+    return Number.isFinite(profitCents) && Number.isFinite(units) && Number.isFinite(historicalUnits)
+      && (units > 0 || historicalUnits > 0)
+      ? [{ date: row.date, productId: row.productId, profitCents, units, historicalProfitCents: Number.isFinite(historicalProfitCents) ? historicalProfitCents : null, historicalUnits }]
       : [];
   }) : [];
   const ratePoints = Array.isArray(record?.ratePoints) ? record.ratePoints.flatMap((item) => {
@@ -169,12 +172,27 @@ function useSeriesVisibility() {
   };
 }
 
-function SeriesLegend({ items, hiddenKeys, onToggle }: { items: ChartSeries[]; hiddenKeys: string[]; onToggle: (key: string) => void }) {
+function SeriesLegend({ items, hiddenKeys, onToggle, comparisonProductId, onCompare }: {
+  items: ChartSeries[];
+  hiddenKeys: string[];
+  onToggle: (key: string) => void;
+  comparisonProductId?: string | null;
+  onCompare?: (productId: string) => void;
+}) {
   return <div className="analytics-series-legend">
-    {items.map((item) => <button key={item.key} type="button" className="analytics-series-toggle" aria-pressed={!hiddenKeys.includes(item.key)} onClick={() => onToggle(item.key)}>
-      <i className={`analytics-series-swatch${item.bar ? " bar" : ""}${item.dashed ? " dashed" : ""}`} style={{ color: item.color }} />
-      <span>{item.label}</span>
-    </button>)}
+    {items.map((item) => {
+      const toggle = <button key={item.key} type="button" className="analytics-series-toggle" aria-pressed={!hiddenKeys.includes(item.key)} onClick={() => onToggle(item.key)}>
+        <i className={`analytics-series-swatch${item.bar ? " bar" : ""}${item.dashed ? " dashed" : ""}${item.dotted ? " dotted" : ""}`} style={{ color: item.color }} />
+        <span>{item.label}</span>
+      </button>;
+      if (!item.compareProductId || !onCompare) return toggle;
+      return <span key={item.key} className="analytics-series-control">
+        {toggle}
+        <button type="button" className="analytics-series-compare" aria-label={`Сравнить ${item.label.replace(/ · средняя$/, "")} с добавочной стоимостью на дату заказа`} aria-pressed={comparisonProductId === item.compareProductId} onClick={() => onCompare(item.compareProductId!)}>
+          {comparisonProductId === item.compareProductId ? "Сравнение" : "Сравнить"}
+        </button>
+      </span>;
+    })}
   </div>;
 }
 
@@ -292,29 +310,57 @@ function BuyoutChart({ days, smoothingDays }: { days: AnalyticsChartDay[]; smoot
 
 const productLineColors = ["#16885f", "#4978b8", "#c17d16", "#8a63b8", "#cf5d5d", "#168e9e", "#76604e"];
 
-type ProductProfitChartDay = { date: string; unitsByProduct: Record<string, number>; averageUnitsByProduct: Record<string, number>; averageWindowDays?: number; [key: string]: unknown };
+type ProductProfitChartDay = {
+  date: string;
+  unitsByProduct: Record<string, number>;
+  averageUnitsByProduct: Record<string, number>;
+  historicalUnitsByProduct: Record<string, number>;
+  averageProfitByProduct: Record<string, number | null>;
+  historicalProfitByProduct: Record<string, number | null>;
+  averageWindowDays?: number;
+  [key: string]: unknown;
+};
 
-function ProductProfitTooltip({ active, payload }: TooltipContentProps) {
+function ProductProfitTooltip({ active, payload, products, comparisonProductId, smoothingDays }: TooltipContentProps & {
+  products: CatalogProduct[];
+  comparisonProductId: string | null;
+  smoothingDays: number | null;
+}) {
   const day = payload?.[0]?.payload as ProductProfitChartDay | undefined;
   if (!active || !day) return null;
-  const rows = (payload ?? []).flatMap((entry) => {
-    const profitPerUnit = Number(entry.value);
-    const dataKey = String(entry.dataKey ?? "");
-    const isAverage = dataKey.startsWith("average_profit_");
-    const productId = dataKey.replace(/^(?:average_)?profit_/, "");
-    const units = (isAverage ? day.averageUnitsByProduct : day.unitsByProduct)[productId] ?? 0;
-    return Number.isFinite(profitPerUnit) && profitPerUnit > 0 && units > 0
-      ? [{ productId, key: dataKey, title: String(entry.name ?? "Товар"), color: String(entry.color ?? "#16885f"), profitPerUnit, units, isAverage }]
-      : [];
+  const visibleKeys = new Set((payload ?? []).map((entry) => String(entry.dataKey ?? "")));
+  const rows = products.flatMap((product, index) => {
+    const averageVisible = visibleKeys.has(`profit_${product.id}`);
+    const smoothingVisible = visibleKeys.has(`average_profit_${product.id}`);
+    const historicalVisible = comparisonProductId === product.id && visibleKeys.has(`historical_profit_${product.id}`);
+    if (!averageVisible && !smoothingVisible && !historicalVisible) return [];
+    return [{
+      product,
+      color: productLineColors[index % productLineColors.length],
+      averageVisible,
+      smoothingVisible,
+      averageProfit: day.averageProfitByProduct[product.id],
+      historicalProfit: day.historicalProfitByProduct[product.id],
+      averageUnits: day.unitsByProduct[product.id] ?? 0,
+      historicalUnits: day.historicalUnitsByProduct[product.id] ?? 0,
+      smoothedProfit: Number(day[`average_profit_${product.id}`]),
+      smoothedUnits: day.averageUnitsByProduct[product.id] ?? 0,
+      comparing: comparisonProductId === product.id,
+    }];
   });
   if (!rows.length) return null;
   return <div className="analytics-tooltip analytics-product-tooltip">
     <strong>{fullDate(day.date)}</strong>
-    {rows.map((row) => <span key={row.key}>
+    {rows.map((row) => <span key={row.product.id}>
       <i className="analytics-tooltip-dot" style={{ backgroundColor: row.color }} />
       <span className="analytics-product-tooltip-value">
-        <span className="analytics-product-tooltip-title">{row.title}</span>
-        <span className="analytics-product-tooltip-stats"><b className="positive">{moneyFormat.format(row.profitPerUnit)} ₽ / шт.</b><small>Продано {row.isAverage ? `за ${day.averageWindowDays} дн.` : "за день"}: {countFormat.format(row.units)} шт.</small></span>
+        <span className="analytics-product-tooltip-title">{row.product.title} · {row.product.sku}</span>
+        {row.averageVisible && <span className="analytics-product-tooltip-stats"><span>Общая средняя</span><b className="positive">{row.averageProfit == null ? "—" : `${moneyFormat.format(row.averageProfit)} ₽ / шт.`}</b><small>Продано за день: {countFormat.format(row.averageUnits)} шт.</small></span>}
+        {row.comparing && <>
+          <span className="analytics-product-tooltip-stats"><span>На дату заказа</span><b className="positive">{row.historicalProfit == null ? "—" : `${moneyFormat.format(row.historicalProfit)} ₽ / шт.`}</b><small>Продано: {countFormat.format(row.historicalUnits)} шт.</small></span>
+          {row.averageProfit != null && row.historicalProfit != null && <small>Разница (средняя − на дату): {row.averageProfit - row.historicalProfit > 0 ? "+" : ""}{moneyFormat.format(row.averageProfit - row.historicalProfit)} ₽ / шт.</small>}
+        </>}
+        {row.smoothingVisible && row.smoothedProfit > 0 && row.smoothedUnits > 0 && <span className="analytics-product-tooltip-stats"><span>Скользящее среднее за {smoothingDays} дн.</span><b className="positive">{moneyFormat.format(row.smoothedProfit)} ₽ / шт.</b><small>Продано: {countFormat.format(row.smoothedUnits)} шт.</small></span>}
       </span>
     </span>)}
   </div>;
@@ -323,22 +369,35 @@ function ProductProfitTooltip({ active, payload }: TooltipContentProps) {
 function ProductProfitChart({ days, allDays, products, productProfitDays, smoothingDays }: { days: AnalyticsChartDay[]; allDays: AnalyticsChartDay[]; products: CatalogProduct[]; productProfitDays: ProductProfitDay[]; smoothingDays: number | null }) {
   const tooltip = useChartTooltipTrigger();
   const series = useSeriesVisibility();
+  const [comparisonProductId, setComparisonProductId] = useState<string | null>(null);
   const legendItems: ChartSeries[] = products.flatMap((product, index) => {
     const color = productLineColors[index % productLineColors.length];
     return [
-      { key: `profit_${product.id}`, label: `${product.title} · день`, color },
-      ...(smoothingDays ? [{ key: `average_profit_${product.id}`, label: `${product.title} · среднее`, color, dashed: true }] : []),
+      { key: `profit_${product.id}`, label: `${product.title} · средняя`, color, compareProductId: product.id },
+      ...(smoothingDays ? [{ key: `average_profit_${product.id}`, label: `${product.title} · скользящее среднее`, color, dashed: true }] : []),
+      ...(comparisonProductId === product.id ? [{ key: `historical_profit_${product.id}`, label: `${product.title} · на дату заказа`, color, dotted: true }] : []),
     ];
   });
   const pointByProductDay = useMemo(() => new Map(productProfitDays.map((point) => [`${point.date}\u0000${point.productId}`, point])), [productProfitDays]);
   const allChartDays = useMemo(() => allDays.map((day, dayIndex) => {
     const unitsByProduct: Record<string, number> = {};
     const averageUnitsByProduct: Record<string, number> = {};
-    const chartDay: ProductProfitChartDay = { date: day.date, unitsByProduct, averageUnitsByProduct, averageWindowDays: smoothingDays ?? undefined };
+    const historicalUnitsByProduct: Record<string, number> = {};
+    const averageProfitByProduct: Record<string, number | null> = {};
+    const historicalProfitByProduct: Record<string, number | null> = {};
+    const chartDay: ProductProfitChartDay = { date: day.date, unitsByProduct, averageUnitsByProduct, historicalUnitsByProduct, averageProfitByProduct, historicalProfitByProduct, averageWindowDays: smoothingDays ?? undefined };
     for (const product of products) {
       const point = pointByProductDay.get(`${day.date}\u0000${product.id}`);
-      chartDay[`profit_${product.id}`] = point && point.profitCents > 0 && point.units > 0 ? point.profitCents / point.units / 100 : null;
+      const averageProfit = point && point.profitCents > 0 && point.units > 0 ? point.profitCents / point.units / 100 : null;
+      const historicalProfit = point && point.historicalProfitCents != null && point.historicalProfitCents > 0 && point.historicalUnits > 0
+        ? point.historicalProfitCents / point.historicalUnits / 100
+        : null;
+      averageProfitByProduct[product.id] = averageProfit;
+      historicalProfitByProduct[product.id] = historicalProfit;
+      chartDay[`profit_${product.id}`] = averageProfit;
+      chartDay[`historical_profit_${product.id}`] = historicalProfit;
       unitsByProduct[product.id] = point?.units ?? 0;
+      historicalUnitsByProduct[product.id] = point?.historicalUnits ?? 0;
       if (smoothingDays) {
         let profitCents = 0;
         let units = 0;
@@ -359,14 +418,15 @@ function ProductProfitChart({ days, allDays, products, productProfitDays, smooth
   const visibleDates = useMemo(() => new Set(days.map((day) => day.date)), [days]);
   const chartDays = useMemo(() => allChartDays.filter((day) => visibleDates.has(day.date)), [allChartDays, visibleDates]);
   const hasVisibleData = chartDays.some((day) => products.some((product) =>
-    Number(day[`profit_${product.id}`]) > 0 || Number(day[`average_profit_${product.id}`]) > 0,
+    Number(day[`profit_${product.id}`]) > 0 || Number(day[`average_profit_${product.id}`]) > 0
+      || (comparisonProductId === product.id && Number(day[`historical_profit_${product.id}`]) > 0),
   ));
 
   return <section className="panel analytics-chart-panel analytics-product-profit-panel">
-    <div className="panel-head"><div><h2>Прибыль с проданного товара</h2><span className="small-note">Рубли с одной штуки · дата доставки или выкупа{smoothingDays ? ` · пунктир — среднее за ${smoothingDays} дн.` : ""}</span></div></div>
+    <div className="panel-head"><div><h2>Прибыль с проданного товара</h2><span className="small-note">Рубли с одной штуки · дата доставки или выкупа{smoothingDays ? ` · штриховая линия — скользящее среднее за ${smoothingDays} дн.` : ""}</span></div></div>
     <div className="panel-body analytics-chart-body">
-      <p className="analytics-profit-chart-note">Начисления Ozon минус закупка и добавочная стоимость на дату продажи. Показана положительная прибыль по невозвращённым товарам.</p>
-      <SeriesLegend items={legendItems} hiddenKeys={series.hiddenKeys} onToggle={series.toggle} />
+      <p className="analytics-profit-chart-note">Сплошная линия — с общей средней добавочной стоимостью. Точечная — расчёт на дату заказа для выбранного товара. Показана положительная прибыль по невозвращённым товарам.</p>
+      <SeriesLegend items={legendItems} hiddenKeys={series.hiddenKeys} onToggle={series.toggle} comparisonProductId={comparisonProductId} onCompare={(productId) => setComparisonProductId((current) => current === productId ? null : productId)} />
       {hasVisibleData ? <div className="analytics-chart-canvas" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}>
           <LineChart data={chartDays} margin={{ top: 10, right: 12, bottom: 4, left: -4 }}>
@@ -374,13 +434,14 @@ function ProductProfitChart({ days, allDays, products, productProfitDays, smooth
             <XAxis dataKey="date" tickFormatter={(date: string) => dateLabel(date)} interval="preserveStartEnd" minTickGap={18} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#dfe6e1" }} tickMargin={9} height={32} />
             <YAxis width={56} tickCount={5} domain={[0, "auto"]} tickFormatter={(value: number) => `${compactMoneyFormat.format(value)} ₽`} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
             <ReferenceLine y={0} stroke="#8e9992" strokeWidth={1.5} />
-            <Tooltip trigger={tooltip.trigger} content={ProductProfitTooltip} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
+            <Tooltip trigger={tooltip.trigger} content={(props) => <ProductProfitTooltip {...props} products={products} comparisonProductId={comparisonProductId} smoothingDays={smoothingDays} />} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
             {products.map((product) => {
               const index = products.findIndex((candidate) => candidate.id === product.id);
               const color = productLineColors[index % productLineColors.length];
               return <Fragment key={product.id}>
                 {series.isVisible(`profit_${product.id}`) && <Line dataKey={`profit_${product.id}`} name={`${product.title} · ${product.sku}`} type="monotone" stroke={color} strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} connectNulls={false} isAnimationActive={false} />}
                 {smoothingDays && series.isVisible(`average_profit_${product.id}`) && <Line dataKey={`average_profit_${product.id}`} name={`${product.title} · ${product.sku} · среднее`} type="monotone" stroke={color} strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={{ r: 4, strokeWidth: 1 }} connectNulls={false} isAnimationActive={false} />}
+                {comparisonProductId === product.id && series.isVisible(`historical_profit_${product.id}`) && <Line dataKey={`historical_profit_${product.id}`} name={`${product.title} · ${product.sku} · на дату заказа`} type="monotone" stroke={color} strokeWidth={2.5} strokeDasharray="2 3" dot={false} activeDot={{ r: 5, strokeWidth: 2 }} connectNulls={false} isAnimationActive={false} />}
               </Fragment>;
             })}
           </LineChart>

@@ -158,12 +158,17 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; letter
 .analytics-product-profit-panel .analytics-chart-canvas { height: 310px; }
 .analytics-profit-chart-note { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
 .analytics-series-legend { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 4px 0 2px; }
+.analytics-series-control { display: inline-flex; min-width: 0; align-items: center; gap: 3px; }
 .analytics-series-toggle { display: inline-flex; min-width: 0; min-height: 32px; align-items: center; gap: 7px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: #fff; font: inherit; font-size: 11px; cursor: pointer; }
+.analytics-series-compare { min-height: 28px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #fff; font: inherit; font-size: 10px; cursor: pointer; }
+.analytics-series-compare[aria-pressed="true"] { border-color: var(--green); color: var(--green-dark); background: #eff8f3; }
 .analytics-series-toggle[aria-pressed="false"] { opacity: .48; }
 .analytics-series-toggle:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.analytics-series-compare:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .analytics-series-toggle span { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .analytics-series-swatch { width: 18px; height: 0; flex: 0 0 18px; border-top: 2px solid currentColor; }
 .analytics-series-swatch.dashed { border-top-style: dashed; }
+.analytics-series-swatch.dotted { border-top-style: dotted; }
 .analytics-series-swatch.bar { width: 10px; height: 10px; flex-basis: 10px; border: 0; border-radius: 2px; background: currentColor; }
 .analytics-tooltip { display: grid; min-width: 170px; max-width: min(260px, calc(100vw - 48px)); gap: 5px; padding: 10px 12px; border: 1px solid #dfe7e1; border-radius: 10px; color: #536158; background: #fff; box-shadow: 0 8px 24px rgba(24, 50, 40, .15); font-size: 12px; }
 .analytics-tooltip strong { margin-bottom: 2px; color: var(--ink); font-size: 12px; }

@@ -355,6 +355,7 @@ export async function getAccountingSnapshot(userId: string, now = new Date(), in
     if (!posting || (item.ozonSku && saleSkusByPosting.get(posting.externalId)?.has(item.ozonSku))) continue;
     orderAmountCentsByPosting.set(posting.externalId, (orderAmountCentsByPosting.get(posting.externalId) ?? 0) + Math.round(Number(item.marketplaceBuyoutAmount ?? 0) * 100));
   }
+  const unitCostByProduct = new Map(result.products.map((product) => [product.productId, product.landedUnitCostExact ?? product.landedUnitCost]));
   const profitByPosting = calculateFinalPostingProfits({
     postings: visiblePostingRows,
     items: visiblePostingItemRows.map((item) => ({
@@ -370,7 +371,7 @@ export async function getAccountingSnapshot(userId: string, now = new Date(), in
       ? [{ postingNumber: returned.postingNumber, productId: returned.productId, quantity: returned.quantity }]
       : []),
     amountCentsByPosting: orderAmountCentsByPosting,
-    unitCostByProduct: new Map(result.products.map((product) => [product.productId, product.landedUnitCostExact ?? product.landedUnitCost])),
+    unitCostByProduct,
   });
   const dateKey = (date: Date) => {
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -439,6 +440,7 @@ export async function getAccountingSnapshot(userId: string, now = new Date(), in
           ? [{ postingId, productId: returned.productId, quantity: returned.quantity, restocked: Boolean(restockedAt && restockedAt <= now && hasRestockedReturn(returned)) }]
           : [];
       }),
+      averageUnitCostByProduct: unitCostByProduct,
       saleCostsByPostingProduct: addedCostHistoryByPostingId.saleCostsByPostingProduct,
     })
     : undefined;

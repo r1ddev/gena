@@ -1,6 +1,13 @@
 import Decimal from "decimal.js";
 
-export type ProductProfitDay = { date: string; productId: string; profitCents: number; units: number };
+export type ProductProfitDay = {
+  date: string;
+  productId: string;
+  profitCents: number;
+  units: number;
+  historicalProfitCents: number | null;
+  historicalUnits: number;
+};
 
 type Item = { postingId: string; productId: string | null; ozonSku?: string; quantity: string | number; price: string | number; movementEnabled?: boolean };
 type Accrual = { postingId: string | null; productId?: string | null; ozonSku?: string | null; amount: string | number; category?: string; sourceGroup?: string; accrualDate?: string; isOzonWriteoffCompensation?: boolean; ignored?: boolean };
@@ -56,6 +63,7 @@ export function calculateProductProfitDays(input: {
   accruals: Accrual[];
   now: Date;
   returns: { postingId: string; productId: string; quantity: string | number; restocked: boolean }[];
+  averageUnitCostByProduct: Map<string, string | null>;
   saleCostsByPostingProduct: Map<string, { quantity: string; unitLandedCost: string }>;
 }): ProductProfitDay[] {
   const saleDateByPosting = new Map(input.saleDays.map(({ postingId, date }) => [postingId, date]));
@@ -95,7 +103,7 @@ export function calculateProductProfitDays(input: {
     returnedByPostingProduct.set(key, (returnedByPostingProduct.get(key) ?? new Decimal(0)).plus(quantity));
   }
 
-  const points = new Map<string, { profitCents: number; units: Decimal }>();
+  const points = new Map<string, { profitCents: number; units: Decimal; historicalProfitCents: number; historicalUnits: Decimal }>();
   for (const [postingId, items] of itemsByPosting) {
     const date = saleDateByPosting.get(postingId);
     if (!date) continue;
@@ -109,24 +117,42 @@ export function calculateProductProfitDays(input: {
       const key = `${postingId}\u0000${productId}`;
       if (unresolvedReturnKeys.has(key)) continue;
       const soldQuantity = Decimal.max(0, postedQuantity.minus(returnedByPostingProduct.get(key) ?? 0));
+      if (!soldQuantity.gt(0)) continue;
+      const revenue = financeByPostingProduct.get(key) ?? new Decimal(0);
+      const averageUnitCost = decimal(input.averageUnitCostByProduct.get(productId) ?? "");
+      const averageProfit = averageUnitCost ? revenue.minus(averageUnitCost.times(soldQuantity)) : null;
       const saleCost = input.saleCostsByPostingProduct.get(key);
       const costedQuantity = decimal(saleCost?.quantity ?? 0);
       const unitLandedCost = decimal(saleCost?.unitLandedCost ?? 0);
-      if (!soldQuantity.gt(0) || !costedQuantity || !unitLandedCost || costedQuantity.lt(soldQuantity)) continue;
-      const revenue = financeByPostingProduct.get(key) ?? new Decimal(0);
-      const profit = revenue.minus(unitLandedCost.times(soldQuantity));
-      if (!profit.gt(0)) continue;
+      const historicalProfit = costedQuantity && unitLandedCost && costedQuantity.gte(soldQuantity)
+        ? revenue.minus(unitLandedCost.times(soldQuantity))
+        : null;
+      if (!averageProfit?.gt(0) && !historicalProfit?.gt(0)) continue;
       const dayKey = `${date}\u0000${productId}`;
-      const current = points.get(dayKey) ?? { profitCents: 0, units: new Decimal(0) };
+      const current = points.get(dayKey) ?? {
+        profitCents: 0,
+        units: new Decimal(0),
+        historicalProfitCents: 0,
+        historicalUnits: new Decimal(0),
+      };
       points.set(dayKey, {
-        profitCents: current.profitCents + profit.times(100).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toNumber(),
-        units: current.units.plus(soldQuantity),
+        profitCents: current.profitCents + (averageProfit?.gt(0) ? averageProfit.times(100).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toNumber() : 0),
+        units: current.units.plus(averageProfit?.gt(0) ? soldQuantity : 0),
+        historicalProfitCents: current.historicalProfitCents + (historicalProfit?.gt(0) ? historicalProfit.times(100).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toNumber() : 0),
+        historicalUnits: current.historicalUnits.plus(historicalProfit?.gt(0) ? soldQuantity : 0),
       });
     }
   }
 
   return [...points.entries()].map(([key, value]) => {
     const [date, productId] = key.split("\u0000");
-    return { date, productId, profitCents: value.profitCents, units: value.units.toNumber() };
+    return {
+      date,
+      productId,
+      profitCents: value.profitCents,
+      units: value.units.toNumber(),
+      historicalProfitCents: value.historicalUnits.gt(0) ? value.historicalProfitCents : null,
+      historicalUnits: value.historicalUnits.toNumber(),
+    };
   }).sort((left, right) => left.date.localeCompare(right.date) || left.productId.localeCompare(right.productId));
 }
