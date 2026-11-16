@@ -4,14 +4,14 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { AlertCircle, CheckCircle2, Link2, Plus, XCircle } from "lucide-react";
 import { asRecord, findRows, getId, requestJson, type JsonRecord } from "./api";
 import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
-import { cycleTableSort, filterAndSortRows, TableEmptyRow, TableHead, type TableColumn, type TableSort } from "./table-controls";
+import { cycleTableSort, filterAndSortRows, paginateRows, TableEmptyRow, TableHead, TablePagination, TABLE_PAGE_SIZE, type TableColumn, type TableSort } from "./table-controls";
 import { ProductImageInput } from "./product-image-input";
 import { notifyProductCatalogChanged, PRODUCT_CATALOG_CHANGED_EVENT, ProductArticle } from "./product-hover-card";
+import { ProductSelect, productSelectOptions, type ProductSelectOption } from "./product-select";
 import { OzonOrderLink } from "./ozon-order-link";
 import { OzonAccrualLink } from "./ozon-accrual-link";
 import { ozonReturnStatusLabel } from "@/ozon/return-status";
 
-type Option = { id: string; label: string };
 type DispositionView = "pending" | "ignored";
 const sourceLabels: Record<string, string> = {
   finance: "Начисление по заказу",
@@ -102,7 +102,7 @@ export function UnmatchedItems() {
   const [disposition, setDisposition] = useState<DispositionView>("pending");
   const [counts, setCounts] = useState<Record<DispositionView, number | null>>({ pending: null, ignored: null });
   const [sourceCounts, setSourceCounts] = useState<Record<string, unknown>>({});
-  const [products, setProducts] = useState<Option[]>([]);
+  const [products, setProducts] = useState<ProductSelectOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -113,12 +113,20 @@ export function UnmatchedItems() {
   const [productImages, setProductImages] = useState<Record<string, File | null>>({});
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [sort, setSort] = useState<TableSort>(null);
+  const [page, setPage] = useState(1);
   const requestSequence = useRef(0);
   const visibleRows = useMemo(() => filterAndSortRows(rows, unmatchedColumns, filters, sort), [rows, filters, sort]);
+  const localPagination = useMemo(() => paginateRows(visibleRows, page), [visibleRows, page]);
   const hasActiveFilters = Object.values(filters).some((value) => value.trim());
+
+  function updateFilter(key: string, value: string) {
+    setFilters((current) => ({ ...current, [key]: value }));
+    setPage(1);
+  }
 
   function updateSort(key: string) {
     setSort((current) => cycleTableSort(current, key));
+    setPage(1);
   }
 
   const refresh = useCallback(async (requestedDisposition: DispositionView = disposition) => {
@@ -145,14 +153,7 @@ export function UnmatchedItems() {
     void refresh();
   }, [refresh]);
   useEffect(() => {
-    requestJson("/api/products").then((value) => setProducts(findRows(value).map((row) => {
-      const id = getId(row); if (!id) return null;
-      const identifiers = [
-        typeof row.offerId === "string" && row.offerId ? `Артикул ${row.offerId}` : "",
-        typeof row.ozonSku === "string" && row.ozonSku ? `SKU Ozon ${row.ozonSku}` : "",
-      ].filter(Boolean);
-      return { id, label: `${String(row.title ?? "Товар")}${identifiers.length ? ` · ${identifiers.join(" · ")}` : ""}` };
-    }).filter((item): item is Option => item !== null))).catch(() => setProducts([]));
+    requestJson("/api/products").then((value) => setProducts(productSelectOptions(value))).catch(() => setProducts([]));
   }, []);
   useEffect(() => {
     const refreshAfterSync = () => { void refresh(); };
@@ -172,7 +173,7 @@ export function UnmatchedItems() {
       await requestJson(`/api/external-items?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
       setSuccess(action === "map" ? "Артикул связан с товаром каталога." : action === "ignore" ? "Выбор игнорировать сохранён для последующих синхронизаций." : "Товар возвращён в список несопоставленных.");
       setMode((current) => { const { [id]: _removed, ...rest } = current; return rest; });
-      if (action === "restore") setDisposition("pending");
+      if (action === "restore") { setDisposition("pending"); setPage(1); }
       else await refresh("pending");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось сохранить выбор"); }
     finally { setBusy(""); }
@@ -210,13 +211,13 @@ export function UnmatchedItems() {
   });
 
   return <section id="unmatched-ozon-items" className="panel" style={{ marginTop: 16 }}>
-    <div className="panel-head"><div><h2>Записи Ozon без связи с каталогом</h2>{disposition === "pending" && sourceBreakdown.length > 0 && <span className="small-note" style={{ display: "block", marginTop: 4 }}>{sourceBreakdown.join(" · ")}</span>}</div><span className="badge orange">{visibleRows.length === rows.length ? rows.length : `${visibleRows.length} / ${rows.length}`}</span></div>
+    <div className="panel-head"><div><h2>{disposition === "ignored" ? "Игнорируемые товары" : "Товары Ozon без связи с каталогом"}</h2>{disposition === "pending" && sourceBreakdown.length > 0 && <span className="small-note" style={{ display: "block", marginTop: 4 }}>{sourceBreakdown.join(" · ")}</span>}</div><span className="badge orange">{visibleRows.length === rows.length ? rows.length : `${visibleRows.length} / ${rows.length}`}</span></div>
     <div className="toolbar" role="tablist" aria-label="Записи Ozon" style={{ padding: "12px 18px 0" }}>
-      <button type="button" role="tab" aria-selected={disposition === "pending"} className={`button small${disposition === "pending" ? "" : " secondary"}`} onClick={() => setDisposition("pending")}>Не сопоставлено{counts.pending === null ? "" : ` · ${counts.pending}`}</button>
-      <button type="button" role="tab" aria-selected={disposition === "ignored"} className={`button small${disposition === "ignored" ? "" : " secondary"}`} onClick={() => setDisposition("ignored")}>Игнорируемые{counts.ignored === null ? "" : ` · ${counts.ignored}`}</button>
+      <button type="button" role="tab" aria-selected={disposition === "pending"} className={`button small${disposition === "pending" ? "" : " secondary"}`} onClick={() => { setDisposition("pending"); setPage(1); }}>Не сопоставлено{counts.pending === null ? "" : ` · ${counts.pending}`}</button>
+      <button type="button" role="tab" aria-selected={disposition === "ignored"} className={`button small${disposition === "ignored" ? "" : " secondary"}`} onClick={() => { setDisposition("ignored"); setPage(1); }}>Игнорируемые{counts.ignored === null ? "" : ` · ${counts.ignored}`}</button>
     </div>
     {error && <div className="error-banner" role="alert" style={{ margin: "12px 18px 0" }}><AlertCircle size={14} />{error}</div>}{success && <div className="success-banner" role="status" style={{ margin: "12px 18px 0" }}><CheckCircle2 size={14} />{success}</div>}
-    {loading && rows.length === 0 && !hasActiveFilters ? <div className="panel-body"><div className="loading-line" /></div> : rows.length === 0 && !error && !hasActiveFilters ? <div className="empty-state" style={{ minHeight: 130 }}><div><div className="empty-icon"><CheckCircle2 size={18} /></div><div className="empty-title">{disposition === "ignored" ? "Нет игнорируемых товаров" : "Нет записей без связи с каталогом"}</div><p className="empty-description">{disposition === "ignored" ? "Товары, выбранные для игнорирования, появятся здесь." : "Такие записи появятся после синхронизации Ozon."}</p></div></div> : <div className="table-wrap"><table><TableHead columns={unmatchedColumns} filters={filters} onFilter={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} sort={sort} onSort={updateSort} /><tbody>{error ? <TableEmptyRow colSpan={unmatchedColumns.length} message={error} /> : loading && hasActiveFilters ? <TableEmptyRow colSpan={unmatchedColumns.length} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={unmatchedColumns.length} message="По заданным условиям совпадений нет." onClear={() => setFilters({})} /> : visibleRows.map((row, index) => {
+    {loading && rows.length === 0 && !hasActiveFilters ? <div className="panel-body"><div className="loading-line" /></div> : rows.length === 0 && !error && !hasActiveFilters ? <div className="empty-state" style={{ minHeight: 130 }}><div><div className="empty-icon"><CheckCircle2 size={18} /></div><div className="empty-title">{disposition === "ignored" ? "Нет игнорируемых товаров" : "Нет товаров без связи с каталогом"}</div><p className="empty-description">{disposition === "ignored" ? "Товары, выбранные для игнорирования, появятся здесь." : "Товары появятся после синхронизации Ozon."}</p></div></div> : <div className="table-wrap"><table><TableHead columns={unmatchedColumns} rows={rows} filters={filters} onFilter={updateFilter} sort={sort} onSort={updateSort} /><tbody>{error ? <TableEmptyRow colSpan={unmatchedColumns.length} message={error} /> : loading && hasActiveFilters ? <TableEmptyRow colSpan={unmatchedColumns.length} message="Обновляем список…" /> : visibleRows.length === 0 ? <TableEmptyRow colSpan={unmatchedColumns.length} message="По заданным условиям совпадений нет." onClear={() => { setFilters({}); setPage(1); }} /> : localPagination.rows.map((row, index) => {
       const id = getId(row) ?? String(index); const currentMode = mode[id]; const ozonSku = ozonSkuFor(row); const article = articleFor(row); const productName = nameFor(row);
       const defaults = { title: productName, offerId: article, ozonSku };
       const draft = productDrafts[id] ?? {};
@@ -225,7 +226,7 @@ export function UnmatchedItems() {
       const source = sourceInfoFor(row); const sourceKind = String(source.kind ?? "other");
       return <Fragment key={id}>
         <tr><td><span className="table-primary">Артикул: {article ? <ProductArticle identifier={article} identifierLabel="Артикул" fallback={row} /> : "—"}</span><span className="table-secondary">SKU Ozon: {ozonSku ? <ProductArticle identifier={ozonSku} identifierLabel="SKU Ozon" fallback={row} /> : "—"}</span></td><td><span className="table-primary">{sourceLabels[sourceKind] ?? sourceLabels.other}</span><span className="table-secondary">{sourceDetails(row)}</span></td><td>{String(row.firstSeenAt ?? "—").slice(0, 10)}</td><td>
-          {disposition === "ignored" ? <button className="button secondary small" disabled={busy === id} onClick={() => void decide(row, "restore")}>Вернуть</button> : currentMode === "map" ? <div className="toolbar"><select aria-label="Выберите товар каталога" value={selected[id] ?? ""} onChange={(event) => setSelected((current) => ({ ...current, [id]: event.target.value }))}><option value="">Выберите товар…</option>{products.map((product) => <option key={product.id} value={product.id}>{product.label}</option>)}</select><button className="button small" disabled={!selected[id] || busy === id} onClick={() => void decide(row, "map")}><Link2 size={12} />Связать</button><button className="icon-button" aria-label="Отмена" onClick={() => setMode((current) => ({ ...current, [id]: undefined as never }))}><XCircle size={14} /></button></div>
+          {disposition === "ignored" ? <button className="button secondary small" disabled={busy === id} onClick={() => void decide(row, "restore")}>Вернуть</button> : currentMode === "map" ? <div className="toolbar unmatched-product-select"><ProductSelect ariaLabel="Выберите товар каталога" id={`unmatched-product-${id}`} value={selected[id] ?? ""} products={products} onChange={(productId) => setSelected((current) => ({ ...current, [id]: productId }))} /><button className="button small" disabled={!selected[id] || busy === id} onClick={() => void decide(row, "map")}><Link2 size={12} />Связать</button><button className="icon-button" aria-label="Отмена" onClick={() => setMode((current) => ({ ...current, [id]: undefined as never }))}><XCircle size={14} /></button></div>
             : currentMode === "create" ? <span className="small-note">Форма создания ниже</span>
               : <div className="row-actions"><button className="button secondary small" disabled={products.length === 0} onClick={() => setMode((current) => ({ ...current, [id]: "map" }))}><Link2 size={12} />Сопоставить</button><button className="button secondary small" onClick={() => setMode((current) => ({ ...current, [id]: "create" }))}><Plus size={12} />Создать товар</button><button className="button secondary small" disabled={busy === id} onClick={() => void decide(row, "ignore")}><XCircle size={12} />Игнорировать</button></div>}
         </td></tr>
@@ -245,5 +246,6 @@ export function UnmatchedItems() {
         </td></tr>}
       </Fragment>;
     })}</tbody></table></div>}
+    <TablePagination page={localPagination.page} pageSize={TABLE_PAGE_SIZE} total={visibleRows.length} label={disposition === "ignored" ? "Игнорируемые товары" : "Несопоставленные товары"} busy={loading} onPageChange={setPage} />
   </section>;
 }

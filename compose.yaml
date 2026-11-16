@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-gena}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run npm run start:local to create a local .env file}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gena} -d ${POSTGRES_DB:-gena}"]
       interval: 5s
@@ -19,6 +19,7 @@ services:
     command: ["npm", "run", "db:migrate"]
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gena}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-gena}
+      PGAPPNAME: gena-migrate
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Run npm run start:local to create a local .env file}
     depends_on:
       db:
@@ -30,7 +31,9 @@ services:
     command: ["node", "server.js"]
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gena}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-gena}
+      PGAPPNAME: gena-web
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Run npm run start:local to create a local .env file}
+      APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-}
       APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
       PORT: 3000
       HOSTNAME: 0.0.0.0
@@ -46,6 +49,7 @@ services:
     command: ["npm", "run", "worker"]
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gena}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-gena}
+      PGAPPNAME: gena-worker
       POSTGRES_DB: ${POSTGRES_DB:-gena}
       POSTGRES_USER: ${POSTGRES_USER:-gena}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run npm run start:local to create a local .env file}
@@ -60,3 +64,8 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+
+volumes:
+  postgres-data:
+    external: true
+    name: gena-ozon-accounting-mvp-postgres-data

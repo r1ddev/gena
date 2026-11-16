@@ -1,9 +1,9 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import Decimal from "decimal.js";
 import { z } from "zod";
 import { db } from "@/db";
-import { products, purchaseReceiptLines, purchaseReceipts, purchases, purchaseStatusEnum } from "@/db/schema";
-import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+import { productLinks, products, purchaseReceiptLines, purchaseReceipts, purchases, purchaseStatusEnum } from "@/db/schema";
+import { errorResponse, handleLocalGet, parseBody, requireAuthenticatedMutation } from "../_lib/http";
 import { isoDate, nonNegativeDecimal, positiveInteger } from "../_lib/validation";
 
 const purchaseSchema = z.object({
@@ -17,30 +17,36 @@ const purchaseSchema = z.object({
 const purchaseStatusSchema = z.object({ status: z.enum(purchaseStatusEnum.enumValues) });
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const [purchaseRows, receipts, receiptLines, catalog] = await Promise.all([
-      db.select().from(purchases).orderBy(desc(purchases.purchasedAt), desc(purchases.createdAt)),
-      db.select().from(purchaseReceipts),
-      db.select().from(purchaseReceiptLines),
-      db.select().from(products),
+      db.select().from(purchases).where(eq(purchases.userId, userId)).orderBy(desc(purchases.purchasedAt), desc(purchases.createdAt)),
+      db.select().from(purchaseReceipts).where(eq(purchaseReceipts.userId, userId)),
+      db.select().from(purchaseReceiptLines).where(eq(purchaseReceiptLines.userId, userId)),
+      db.select().from(products).where(eq(products.userId, userId)),
     ]);
+    const activeProductIds = new Set(catalog.filter((product) => !product.archived).map((product) => product.id));
+    const visiblePurchases = purchaseRows.filter((purchase) => activeProductIds.has(purchase.productId));
+    const visiblePurchaseIds = new Set(visiblePurchases.map((purchase) => purchase.id));
+    const visibleReceipts = receipts.filter((receipt) => visiblePurchaseIds.has(receipt.purchaseId));
+    const visibleReceiptIds = new Set(visibleReceipts.map((receipt) => receipt.id));
+    const visibleReceiptLines = receiptLines.filter((line) => visibleReceiptIds.has(line.receiptId) && activeProductIds.has(line.productId));
     const productById = new Map(catalog.map((product) => [product.id, product]));
     const linesByReceiptId = new Map<string, typeof receiptLines>();
-    for (const line of receiptLines) linesByReceiptId.set(line.receiptId, [...(linesByReceiptId.get(line.receiptId) ?? []), line]);
-    return { items: purchaseRows.map((purchase) => {
-      const purchaseReceiptsForRow = receipts.filter((receipt) => receipt.purchaseId === purchase.id);
+    for (const line of visibleReceiptLines) linesByReceiptId.set(line.receiptId, [...(linesByReceiptId.get(line.receiptId) ?? []), line]);
+    return { items: visiblePurchases.map((purchase) => {
+      const purchaseReceiptsForRow = visibleReceipts.filter((receipt) => receipt.purchaseId === purchase.id);
       const received = purchaseReceiptsForRow.reduce((sum, receipt) => sum.plus((linesByReceiptId.get(receipt.id) ?? []).reduce((lineSum, line) => lineSum.plus(line.quantity), new Decimal(0))), new Decimal(0));
       const ordered = new Decimal(purchase.orderedQuantity);
       const product = productById.get(purchase.productId);
       return {
         ...purchase,
-        sku: product?.sku ?? "",
-        title: product?.title ?? "Товар удалён",
+        sku: product?.sku ?? purchase.productSkuSnapshot,
+        title: product?.title ?? (purchase.productTitleSnapshot || "Товар удалён"),
         receipts: purchaseReceiptsForRow.map((receipt) => ({
           ...receipt,
           lines: (linesByReceiptId.get(receipt.id) ?? []).map((line) => {
             const actualProduct = productById.get(line.productId);
-            return { ...line, sku: actualProduct?.sku ?? "", title: actualProduct?.title ?? "Товар удалён" };
+            return { ...line, sku: actualProduct?.sku ?? line.productSkuSnapshot, title: actualProduct?.title ?? (line.productTitleSnapshot || "Товар удалён") };
           }),
         })),
         receivedQuantity: received.toFixed(3),
@@ -53,20 +59,45 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const body = await parseBody(request, purchaseSchema);
-    const [item] = await db.insert(purchases).values(body).returning();
+    const [product] = await db.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
+      .from(products).leftJoin(productLinks, and(eq(productLinks.productId, products.id), eq(productLinks.userId, userId))).where(and(eq(products.id, body.productId), eq(products.userId, userId))).limit(1);
+    if (!product || product.archived) throw new Error("Выберите товар из текущего каталога.");
+    const [item] = await db.insert(purchases).values({
+      userId,
+      ...body,
+      productSkuSnapshot: product.offerId || product.sku,
+      productTitleSnapshot: product.title,
+    }).returning();
     return Response.json({ item }, { status: 201 });
   } catch (error) { return errorResponse(error); }
 }
 
 export async function PATCH(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id || !z.string().uuid().safeParse(id).success) throw new Error("Не указан корректный идентификатор закупки.");
-    const body = await parseBody(request, purchaseStatusSchema);
-    const [item] = await db.update(purchases).set({ status: body.status }).where(eq(purchases.id, id)).returning();
+    const body = await parseBody(request, z.union([purchaseSchema, purchaseStatusSchema]));
+    if ("status" in body) {
+      const [existing] = await db.select({ productArchived: products.archived }).from(purchases)
+        .innerJoin(products, and(eq(products.id, purchases.productId), eq(products.userId, userId))).where(and(eq(purchases.id, id), eq(purchases.userId, userId))).limit(1);
+      if (!existing) throw new Error("Закупка не найдена.");
+      if (existing.productArchived) throw new Error("Эта закупка связана с товаром вне текущего каталога.");
+      const [item] = await db.update(purchases).set({ status: body.status }).where(and(eq(purchases.id, id), eq(purchases.userId, userId))).returning();
+      if (!item) throw new Error("Закупка не найдена.");
+      return Response.json({ item });
+    }
+
+    const [product] = await db.select({ id: products.id, sku: products.sku, title: products.title, offerId: productLinks.offerId, archived: products.archived })
+      .from(products).leftJoin(productLinks, and(eq(productLinks.productId, products.id), eq(productLinks.userId, userId))).where(and(eq(products.id, body.productId), eq(products.userId, userId))).limit(1);
+    if (!product || product.archived) throw new Error("Выберите товар из текущего каталога.");
+    const [item] = await db.update(purchases).set({
+      ...body,
+      productSkuSnapshot: product.offerId || product.sku,
+      productTitleSnapshot: product.title,
+    }).where(and(eq(purchases.id, id), eq(purchases.userId, userId))).returning();
     if (!item) throw new Error("Закупка не найдена.");
     return Response.json({ item });
   } catch (error) { return errorResponse(error); }
@@ -74,10 +105,10 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new Error("Не указан идентификатор закупки.");
-    const [deleted] = await db.delete(purchases).where(eq(purchases.id, id)).returning({ id: purchases.id });
+    const [deleted] = await db.delete(purchases).where(and(eq(purchases.id, id), eq(purchases.userId, userId))).returning({ id: purchases.id });
     if (!deleted) throw new Error("Запись не найдена.");
     return Response.json({ deleted: deleted.id });
   } catch (error) { return errorResponse(error); }

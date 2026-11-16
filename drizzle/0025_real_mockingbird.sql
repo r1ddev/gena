@@ -1,0 +1,1 @@
+ALTER TABLE "ozon_finance_accruals" ADD COLUMN "related_skus" jsonb;

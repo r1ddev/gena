@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 import { NextResponse } from "next/server";
 import { ZodError, type ZodType } from "zod";
+import { getAuthenticatedUser } from "@/security/auth";
 
 const localHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
@@ -14,8 +15,35 @@ function isPrivateNetworkHost(host: string) {
   return isIP(ipv6) === 6 && (/^(fc|fd)/.test(ipv6) || /^fe[89ab]/.test(ipv6));
 }
 
-function isAllowedLocalHost(host: string) {
-  return localHosts.has(host) || isPrivateNetworkHost(host);
+function getConfiguredPublicOrigin() {
+  const value = process.env.APP_PUBLIC_ORIGIN?.trim();
+  if (!value) return undefined;
+  try {
+    const origin = new URL(value);
+    if (
+      origin.protocol !== "https:" ||
+      origin.origin !== value ||
+      origin.username ||
+      origin.password ||
+      origin.pathname !== "/" ||
+      origin.search ||
+      origin.hash
+    ) return undefined;
+    return origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function getRequestHost(rawHost: string | null) {
+  if (!rawHost) return undefined;
+  try {
+    const url = new URL(`http://${rawHost}`);
+    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) return undefined;
+    return { hostname: url.hostname.toLowerCase(), authority: rawHost.toLowerCase() };
+  } catch {
+    return undefined;
+  }
 }
 
 export function json(data: unknown, status = 200) {
@@ -23,6 +51,10 @@ export function json(data: unknown, status = 200) {
 }
 
 export function errorResponse(error: unknown) {
+  if (error && typeof error === "object" && "status" in error && typeof error.status === "number") {
+    const message = error instanceof Error ? error.message : "Не удалось выполнить запрос.";
+    return json({ error: message, message }, error.status);
+  }
   if (error instanceof ZodError) {
     return json({ error: "Некорректные данные", details: error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })) }, 400);
   }
@@ -35,13 +67,29 @@ export function errorResponse(error: unknown) {
   return json({ error: message, message }, status);
 }
 
-export async function handleLocalGet<T>(request: Request, operation: () => Promise<T>) {
+export async function handleLocalGet<T>(request: Request, operation: (userId: string) => Promise<T>) {
   try {
-    assertLocalRequest(request);
-    return json(await operation());
+    const user = await getAuthenticatedUser(request);
+    if (!user) return json({ error: "Для продолжения войдите в аккаунт." }, 401);
+    return json(await operation(user.id));
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+export async function requireAuthenticatedUser(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user) {
+    const error = new Error("Для продолжения войдите в аккаунт.") as Error & { status: number };
+    error.status = 401;
+    throw error;
+  }
+  return user.id;
+}
+
+export async function requireAuthenticatedMutation(request: Request) {
+  assertLocalMutation(request);
+  return requireAuthenticatedUser(request);
 }
 
 export async function parseBody<T>(request: Request, schema: ZodType<T>): Promise<T> {
@@ -54,18 +102,23 @@ export async function parseBody<T>(request: Request, schema: ZodType<T>): Promis
   return schema.parse(body);
 }
 
-export function assertLocalRequest(request: Request) {
-  const rawHost = request.headers.get("host");
-  let host = "";
-  try { host = new URL(`http://${rawHost ?? ""}`).hostname.toLowerCase(); } catch { /* reject below */ }
-  if (!host || !isAllowedLocalHost(host)) throw new Error("Приложение доступно только на этом компьютере и в локальной сети.");
-}
-
 export function assertLocalMutation(request: Request) {
-  assertLocalRequest(request);
   const rawHost = request.headers.get("host");
+  const requestHost = getRequestHost(rawHost);
+  const publicOrigin = getConfiguredPublicOrigin();
+  const isPublicRequest = Boolean(
+    requestHost &&
+    publicOrigin &&
+    requestHost.hostname === publicOrigin.hostname &&
+    [publicOrigin.hostname, publicOrigin.host].includes(requestHost.authority),
+  );
   const requestUrl = new URL(request.url);
-  const expectedOrigin = new URL(`${requestUrl.protocol}//${rawHost ?? ""}`).origin;
+  const expectedOrigins = isPublicRequest && publicOrigin
+    ? new Set([publicOrigin.origin])
+    : new Set([
+        new URL(`${requestUrl.protocol}//${rawHost ?? ""}`).origin,
+        new URL(`http://${rawHost ?? ""}`).origin,
+      ]);
   const origin = request.headers.get("origin");
   if (origin) {
     let originUrl: URL;
@@ -75,9 +128,11 @@ export function assertLocalMutation(request: Request) {
       throw new Error("Некорректный источник запроса.");
     }
     const originHost = originUrl.hostname.toLowerCase();
+    const isAllowedOriginHost = localHosts.has(originHost) || isPrivateNetworkHost(originHost) ||
+      (isPublicRequest && publicOrigin?.origin === originUrl.origin);
     if (
-      !isAllowedLocalHost(originHost) ||
-      originUrl.origin !== expectedOrigin ||
+      !isAllowedOriginHost ||
+      !expectedOrigins.has(originUrl.origin) ||
       originUrl.username ||
       originUrl.password ||
       originUrl.pathname !== "/" ||

@@ -1,26 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Pencil, Plus, Trash2, Truck, X } from "lucide-react";
-import { asRecord, findRows, getId, localToday, requestJson, type JsonRecord } from "./api";
+import { AlertCircle, Barcode, CheckCircle2, Download, Pencil, Plus, Share2, Trash2, Truck, X } from "lucide-react";
+import { asRecord, getId, localToday, requestJson, type JsonRecord } from "./api";
 import { ResourcePage } from "./resource-page";
+import { ProductSelect, productFallbackOption, productSelectOptions, type ProductSelectOption } from "./product-select";
+import { OZON_SYNC_COMPLETED_EVENT } from "./ozon-sync-events";
 
-type ProductOption = { id: string; label: string };
-type SupplyEditLine = { productId: string; quantity: string; sku: string };
+type SupplyEditLine = { productId: string; quantity: string; sku: string; title: string };
+const supplyMarketplaceOptions = [
+  { value: "ozon", label: "Ozon" },
+  { value: "wb", label: "WB" },
+  { value: "avito", label: "Авито" },
+  { value: "other", label: "Другая площадка" },
+  { value: "unknown", label: "Не указана" },
+];
 
-function productOptions(value: unknown): ProductOption[] {
-  return findRows(value).flatMap((row) => {
-    const id = getId(row);
-    if (!id) return [];
-    const article = typeof row.sku === "string" && row.sku ? row.sku : typeof row.offerId === "string" && row.offerId ? row.offerId : "Артикул не указан";
-    return [{ id, label: article }];
-  });
-}
+function productOptions(value: unknown): ProductSelectOption[] { return productSelectOptions(value); }
 
-function SupplyEntryForm({ products, onSaved }: { products: ProductOption[]; onSaved: () => void }) {
+function SupplyEntryForm({ products, productsLoading, productsLoadError, onRetryProducts, onSaved }: { products: ProductSelectOption[]; productsLoading: boolean; productsLoadError: string; onRetryProducts: () => void; onSaved: () => void }) {
   const [lines, setLines] = useState([{ productId: "", quantity: "" }]);
   const [suppliedAt, setSuppliedAt] = useState(localToday());
-  const [shippingCost, setShippingCost] = useState("0");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -29,8 +29,8 @@ function SupplyEntryForm({ products, onSaved }: { products: ProductOption[]; onS
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError(""); setSuccess("");
     try {
-      await requestJson("/api/supplies", { method: "POST", body: JSON.stringify({ suppliedAt, shippingCost: Number(shippingCost), note, lines: lines.map((line) => ({ productId: line.productId, quantity: Number(line.quantity) })) }) });
-      setLines([{ productId: "", quantity: "" }]); setShippingCost("0"); setNote(""); setSuccess("Поставка создана: товар перемещён на склад Ozon. Расход на доставку учтён."); onSaved();
+      await requestJson("/api/supplies", { method: "POST", body: JSON.stringify({ suppliedAt, note, lines: lines.map((line) => ({ productId: line.productId, quantity: Number(line.quantity) })) }) });
+      setLines([{ productId: "", quantity: "" }]); setNote(""); setSuccess("Поставка создана: товар перемещён на склад Ozon."); onSaved();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось создать поставку"); }
     finally { setBusy(false); }
   }
@@ -42,31 +42,30 @@ function SupplyEntryForm({ products, onSaved }: { products: ProductOption[]; onS
       {success && <div className="success-banner" role="status"><CheckCircle2 size={15} />{success}</div>}
       <div className="form-grid">
         <div className="field"><label htmlFor="supply-date">Дата поставки *</label><input id="supply-date" type="date" required value={suppliedAt} onChange={(event) => setSuppliedAt(event.target.value)} /></div>
-        <div className="field"><label htmlFor="supply-shipping">Доставка, ₽</label><input id="supply-shipping" type="number" min="0" step="0.01" value={shippingCost} onChange={(event) => setShippingCost(event.target.value)} /></div>
         <div className="field wide"><label htmlFor="supply-note">Комментарий</label><input id="supply-note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Номер заявки или заметка" /></div>
       </div>
       <div className="form-help" style={{ marginBottom: 8, color: "#5f6d64", fontWeight: 700 }}>Состав поставки</div>
+      <p className="form-help">Закупочная стоимость и себестоимость с добавочной фиксируются автоматически на момент создания.</p>
       <div className="line-items">{lines.map((line, index) => <div className="line-item" key={index}>
-        <div className="field"><label htmlFor={`supply-product-${index}`}>Артикул *</label><select id={`supply-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, productId: event.target.value } : item))}><option value="">Выберите артикул…</option>{products.map((product) => <option value={product.id} key={product.id}>{product.label}</option>)}</select></div>
+        <div className="field"><label htmlFor={`supply-product-${index}`}>Товар *</label><ProductSelect id={`supply-product-${index}`} required value={line.productId} products={products} loading={productsLoading} loadError={Boolean(productsLoadError)} onRetry={onRetryProducts} disabled={!productsLoading && !productsLoadError && products.length === 0} placeholder={products.length === 0 ? "Нет товаров в каталоге" : "Выберите товар…"} onChange={(productId) => setLines((current) => current.map((item, row) => row === index ? { ...item, productId } : item))} /></div>
         <div className="field"><label htmlFor={`supply-quantity-${index}`}>Количество, шт. *</label><input id={`supply-quantity-${index}`} type="number" min="1" step="1" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, quantity: event.target.value } : item))} /></div>
         <button type="button" className="icon-button" aria-label="Удалить товар из поставки" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((_, row) => row !== index))}><Trash2 size={14} /></button>
       </div>)}</div>
-      <div className="form-actions" style={{ justifyContent: "space-between" }}><button type="button" className="button secondary" onClick={() => setLines((current) => [...current, { productId: "", quantity: "" }])}><Plus size={14} />Добавить товар</button><button className="button" disabled={busy || products.length === 0}>{busy ? "Сохраняем…" : "Создать поставку"}</button></div>
-      {products.length === 0 && <p className="form-help">Сначала добавьте товары в каталог.</p>}
-      <p className="form-help">Расход на доставку уменьшает расчётный денежный баланс и один раз входит в общий коэффициент себестоимости. Удаление поставки отменит её влияние.</p>
+      <div className="form-actions" style={{ justifyContent: "space-between" }}><button type="button" className="button secondary" disabled={productsLoading || Boolean(productsLoadError) || products.length === 0} onClick={() => setLines((current) => [...current, { productId: "", quantity: "" }])}><Plus size={14} />Добавить товар</button><button className="button" disabled={busy || productsLoading || Boolean(productsLoadError) || products.length === 0}>{busy ? "Сохраняем…" : "Создать поставку"}</button></div>
+      <p className="form-help">Расходы на кросс-докинг загружаются вместе с общими расходами Ozon.</p>
     </form>
   </section>;
 }
 
-function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: JsonRecord; products: ProductOption[]; onClose: () => void; onSaved: () => void }) {
+function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: JsonRecord; products: ProductSelectOption[]; onClose: () => void; onSaved: () => void }) {
   const id = getId(supply);
   const initialLines = Array.isArray(supply.lines) ? supply.lines.flatMap((value) => {
     const line = asRecord(value);
-    return line && typeof line.productId === "string" ? [{ productId: line.productId, quantity: String(line.quantity ?? ""), sku: typeof line.sku === "string" ? line.sku : "" }] : [];
+    return line && typeof line.productId === "string" ? [{ productId: line.productId, quantity: String(line.quantity ?? ""), sku: typeof line.sku === "string" ? line.sku : "", title: typeof line.title === "string" ? line.title : "" }] : [];
   }) : [];
-  const [lines, setLines] = useState<SupplyEditLine[]>(initialLines.length ? initialLines : [{ productId: "", quantity: "", sku: "" }]);
+  const [lines, setLines] = useState<SupplyEditLine[]>(initialLines.length ? initialLines : [{ productId: "", quantity: "", sku: "", title: "" }]);
   const [suppliedAt, setSuppliedAt] = useState(typeof supply.suppliedAt === "string" ? supply.suppliedAt.slice(0, 10) : localToday());
-  const [shippingCost, setShippingCost] = useState(String(supply.shippingCost ?? "0"));
+  const [marketplace, setMarketplace] = useState(String(supply.marketplace ?? "unknown"));
   const [note, setNote] = useState(String(supply.note ?? ""));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -80,7 +79,7 @@ function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: Json
         method: "PATCH",
         body: JSON.stringify({
           suppliedAt,
-          shippingCost: Number(shippingCost),
+          marketplace,
           note,
           lines: lines.map((line) => ({ productId: line.productId, quantity: Number(line.quantity) })),
         }),
@@ -97,44 +96,196 @@ function SupplyEditDialog({ supply, products, onClose, onSaved }: { supply: Json
         {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}
         <div className="form-grid">
           <div className="field"><label htmlFor="edit-supply-date">Дата поставки *</label><input id="edit-supply-date" type="date" required value={suppliedAt} onChange={(event) => setSuppliedAt(event.target.value)} /></div>
-          <div className="field"><label htmlFor="edit-supply-shipping">Доставка, ₽</label><input id="edit-supply-shipping" type="number" min="0" step="0.01" value={shippingCost} onChange={(event) => setShippingCost(event.target.value)} /></div>
+          <div className="field"><label htmlFor="edit-supply-marketplace">Площадка *</label><select id="edit-supply-marketplace" value={marketplace} required onChange={(event) => setMarketplace(event.target.value)}>{supplyMarketplaceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
           <div className="field wide"><label htmlFor="edit-supply-note">Комментарий</label><input id="edit-supply-note" value={note} onChange={(event) => setNote(event.target.value)} /></div>
         </div>
         <div className="form-help" style={{ marginBottom: 8, color: "#5f6d64", fontWeight: 700 }}>Состав поставки</div>
-        <div className="line-items">{lines.map((line, index) => <div className="line-item" key={index}>
-          <div className="field"><label htmlFor={`edit-supply-product-${index}`}>Артикул *</label><select id={`edit-supply-product-${index}`} required value={line.productId} onChange={(event) => setLines((current) => current.map((item, row) => {
+        <div className="line-items">{lines.map((line, index) => {
+          const availableProducts = products.filter((product) => product.id === line.productId || !lines.some((other, row) => row !== index && other.productId === product.id));
+          const fallbackOption = line.productId && !products.some((product) => product.id === line.productId)
+            ? productFallbackOption(line.productId, { sku: line.sku, title: line.title })
+            : undefined;
+          return <div className="line-item" key={index}>
+          <div className="field"><label htmlFor={`edit-supply-product-${index}`}>Товар *</label><ProductSelect id={`edit-supply-product-${index}`} required value={line.productId} products={availableProducts} fallbackOption={fallbackOption} onChange={(productId) => setLines((current) => current.map((item, row) => {
             if (row !== index) return item;
-            const productId = event.target.value;
-            return { ...item, productId, sku: products.find((product) => product.id === productId)?.label ?? item.sku };
-          }))}><option value="">Выберите артикул…</option>{line.productId && !products.some((product) => product.id === line.productId) && <option value={line.productId}>{line.sku || "Артикул сохранён"}</option>}{products.filter((product) => product.id === line.productId || !lines.some((other, row) => row !== index && other.productId === product.id)).map((product) => <option value={product.id} key={product.id}>{product.label}</option>)}</select></div>
+            const product = products.find((candidate) => candidate.id === productId);
+            return { ...item, productId, sku: product ? product.offerId || product.sku : item.sku, title: product?.title ?? item.title };
+          }))} /></div>
           <div className="field"><label htmlFor={`edit-supply-quantity-${index}`}>Количество, шт. *</label><input id={`edit-supply-quantity-${index}`} type="number" min="1" step="1" required value={line.quantity} onChange={(event) => setLines((current) => current.map((item, row) => row === index ? { ...item, quantity: event.target.value } : item))} /></div>
           <button type="button" className="icon-button" aria-label="Удалить товар из поставки" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((_, row) => row !== index))}><Trash2 size={14} /></button>
-        </div>)}</div>
-        <div className="form-actions" style={{ justifyContent: "space-between" }}><button type="button" className="button secondary" onClick={() => setLines((current) => [...current, { productId: "", quantity: "", sku: "" }])}><Plus size={14} />Добавить товар</button><div className="toolbar"><button type="button" className="button secondary" onClick={onClose}>Отмена</button><button className="button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></div></div>
+        </div>;
+        })}</div>
+        <div className="form-actions" style={{ justifyContent: "space-between" }}><button type="button" className="button secondary" onClick={() => setLines((current) => [...current, { productId: "", quantity: "", sku: "", title: "" }])}><Plus size={14} />Добавить товар</button><div className="toolbar"><button type="button" className="button secondary" onClick={onClose}>Отмена</button><button className="button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></div></div>
       </form>
+    </section>
+  </div>;
+}
+
+type SupplyCargoLabel = { id: string; cargoId: string; cargoType: string; ready: boolean; needsRetry: boolean; imageUrl: string | null };
+
+function readCargoLabels(value: unknown): SupplyCargoLabel[] {
+  const items = asRecord(value)?.items;
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((item) => {
+    const label = asRecord(item);
+    if (!label || typeof label.id !== "string" || typeof label.cargoId !== "string") return [];
+    return [{
+      id: label.id,
+      cargoId: label.cargoId,
+      cargoType: typeof label.cargoType === "string" ? label.cargoType : "",
+      ready: label.ready === true,
+      needsRetry: label.needsRetry === true,
+      imageUrl: typeof label.imageUrl === "string" ? label.imageUrl : null,
+    }];
+  });
+}
+
+function cargoTypeLabel(value: string) {
+  if (value.toUpperCase() === "BOX") return "Короб";
+  if (value.toUpperCase() === "PALLET") return "Палета";
+  return value || "Грузоместо";
+}
+
+function SupplyLabelsDialog({ supply, onClose }: { supply: JsonRecord; onClose: () => void }) {
+  const [error, setError] = useState("");
+  const [labels, setLabels] = useState<SupplyCargoLabel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sharingCargoId, setSharingCargoId] = useState("");
+  const [shareErrors, setShareErrors] = useState<Record<string, string>>({});
+  const id = getId(supply);
+  const ozonSupplyId = typeof supply.ozonSupplyId === "string" ? supply.ozonSupplyId : "";
+  const title = typeof supply.note === "string" && supply.note.trim() ? supply.note : `Поставка ${ozonSupplyId ? `Ozon № ${ozonSupplyId}` : ""}`;
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const value = await requestJson(`/api/supplies/labels?supplyId=${encodeURIComponent(id)}`);
+        if (!cancelled) setLabels(readCargoLabels(value));
+      } catch (reason) {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : "Не удалось загрузить этикетки.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    const onSyncComplete = () => { void load(); };
+    void load();
+    window.addEventListener(OZON_SYNC_COMPLETED_EVENT, onSyncComplete);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(OZON_SYNC_COMPLETED_EVENT, onSyncComplete);
+    };
+  }, [id]);
+
+  async function shareCargoLabel(label: SupplyCargoLabel) {
+    if (!label.imageUrl) return;
+    setSharingCargoId(label.id);
+    setShareErrors((current) => ({ ...current, [label.id]: "" }));
+    try {
+      const response = await fetch(label.imageUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error("Не удалось загрузить этикетку.");
+      const file = new File([await response.blob()], `cargo-${label.cargoId}.png`, { type: "image/png" });
+      const files = [file];
+      if (!navigator.share || !navigator.canShare?.({ files })) {
+        throw new Error("Этот браузер не поддерживает отправку PNG через системное меню.");
+      }
+      await navigator.share({ files, title: `Этикетка грузоместа ${label.cargoId}` });
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setShareErrors((current) => ({
+        ...current,
+        [label.id]: reason instanceof Error ? reason.message : "Не удалось открыть меню отправки.",
+      }));
+    } finally {
+      setSharingCargoId("");
+    }
+  }
+
+  return <div className="product-edit-backdrop">
+    <section className="panel product-edit-dialog supply-label-dialog" role="dialog" aria-modal="true" aria-labelledby="supply-label-title">
+      <div className="panel-head"><div><h2 id="supply-label-title">{title}</h2><span className="small-note">{typeof supply.marketplaceLabel === "string" ? supply.marketplaceLabel : "Поставка"}</span></div><button type="button" className="icon-button" aria-label="Закрыть" onClick={onClose}><X size={15} /></button></div>
+      <div className="panel-body">
+        {error && <div className="error-banner" role="alert"><AlertCircle size={15} />{error}</div>}
+        {supply.marketplace === "ozon" && ozonSupplyId
+          ? <>
+              {loading ? <div className="loading-line" aria-label="Загружаем этикетки" /> : labels.length === 0
+                ? <p className="supply-label-empty">Для этой поставки грузоместа пока не найдены.</p>
+                : <div className="supply-label-list">{labels.map((label) => <article className="supply-label-card" key={label.id}>
+                    <div className="supply-label-card-head"><div><strong>Грузоместо {label.cargoId}</strong><span>{cargoTypeLabel(label.cargoType)}</span></div>
+                      {label.ready && label.imageUrl && <div className="supply-label-card-actions">
+                        <a className="button secondary small" href={`${label.imageUrl}?download=1`}><Download size={13} />Скачать PNG</a>
+                        <button type="button" className="button secondary small" disabled={Boolean(sharingCargoId)} onClick={() => void shareCargoLabel(label)}>
+                          <Share2 size={13} />{sharingCargoId === label.id ? "Открываем…" : "Поделиться"}
+                        </button>
+                      </div>}
+                    </div>
+                    {shareErrors[label.id] && <p className="supply-label-share-error" role="alert">{shareErrors[label.id]}</p>}
+                    {label.ready && label.imageUrl
+                      ? <div className="supply-label-preview"><img className="supply-label-image" src={label.imageUrl} alt={`Этикетка грузоместа ${label.cargoId}`} /></div>
+                      : <p className="supply-label-pending">{label.needsRetry ? "Ozon не подготовил этикетку. Повторим при следующей синхронизации." : "Этикетка появится после следующей синхронизации с Ozon."}</p>}
+                  </article>)}</div>}
+            </>
+          : <p className="supply-label-empty">Этикетки доступны для поставок Ozon с привязанным номером поставки.</p>}
+        <div className="form-actions supply-label-actions">
+          <button type="button" className="button secondary" onClick={onClose}>Закрыть</button>
+        </div>
+      </div>
     </section>
   </div>;
 }
 
 export function SuppliesWorkspace() {
   const [refreshKey, setRefreshKey] = useState(0);
-  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [products, setProducts] = useState<ProductSelectOption[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
+  const [productsLoadError, setProductsLoadError] = useState("");
+  const [productsLoadAttempt, setProductsLoadAttempt] = useState(0);
   const [editingSupply, setEditingSupply] = useState<JsonRecord | null>(null);
+  const [labelsSupply, setLabelsSupply] = useState<JsonRecord | null>(null);
 
-  useEffect(() => { requestJson("/api/products").then((value) => setProducts(productOptions(value))).catch(() => setProducts([])); }, []);
+  useEffect(() => {
+    let active = true;
+    setProductsLoading(true);
+    setProductsLoadError("");
+    requestJson("/api/products").then((value) => {
+      if (active) setProducts(productOptions(value));
+    }).catch(() => {
+      if (active) {
+        setProducts([]);
+        setProductsLoadError("Не удалось загрузить список товаров.");
+      }
+    }).finally(() => {
+      if (active) setProductsLoading(false);
+    });
+    return () => { active = false; };
+  }, [productsLoadAttempt]);
 
   return <>
-    <ResourcePage refreshKey={refreshKey} beforeTable={<SupplyEntryForm products={products} onSaved={() => setRefreshKey((value) => value + 1)} />} rowActions={(row) => <button type="button" className="button secondary small" onClick={() => setEditingSupply(row)}><Pencil size={12} />Изменить</button>} config={{
+    <ResourcePage refreshKey={refreshKey} beforeTable={<SupplyEntryForm products={products} productsLoading={productsLoading} productsLoadError={productsLoadError} onRetryProducts={() => setProductsLoadAttempt((attempt) => attempt + 1)} onSaved={() => setRefreshKey((value) => value + 1)} />} rowActions={(row) => {
+      const label = `Изменить поставку ${String(row.note ?? "")}`.trim();
+      return <button type="button" className="icon-button supply-row-edit" aria-label={label} title={label} onClick={() => setEditingSupply(row)}><Pencil size={14} /></button>;
+    }} config={{
     title: "Поставки на Ozon", eyebrow: "Перемещение товара",
     description: "Создавайте поставки вручную после оформления заявки в Ozon. Сервис не ждёт приёмки: складской остаток перемещается сразу.",
     collectionUrl: "/api/supplies", createUrl: "/api/supplies", hideCreate: true,
     fields: [], columns: [
-      { key: "suppliedAt", label: "Дата", kind: "date" }, { key: "articles", label: "Артикулы", primary: true },
-      { key: "quantity", label: "Единиц", kind: "quantity" }, { key: "shippingCost", label: "Доставка", kind: "money" }, { key: "note", label: "Комментарий" },
+      { key: "suppliedAt", label: "Дата", kind: "date" }, { key: "marketplaceLabel", label: "Площадка" }, { key: "articles", label: "Артикулы", primary: true },
+      { key: "shippingCost", label: "Доставка", kind: "money" },
+      { key: "quantity", label: "Единиц", kind: "quantity" }, { key: "note", label: "Комментарий" },
+      { key: "cargoLabels", label: "Грузоместа", value: (row) => row.cargoLabelCount, render: (row) => {
+        const total = typeof row.cargoLabelCount === "number" ? row.cargoLabelCount : 0;
+        const ready = typeof row.readyCargoLabelCount === "number" ? row.readyCargoLabelCount : 0;
+        const label = total ? `${ready} из ${total}` : "Открыть";
+        return <button type="button" className="button secondary small" aria-label={`Открыть этикетки и детали поставки ${String(row.ozonSupplyId ?? row.note ?? "")}`} onClick={() => setLabelsSupply(row)}><Barcode size={13} />{label}</button>;
+      } },
     ],
     deleteUrl: (row: JsonRecord) => typeof row.id === "string" ? `/api/supplies?id=${encodeURIComponent(row.id)}` : null,
     emptyTitle: "Поставок пока нет", emptyDescription: "Создайте поставку после оформления заявки в Ozon. Она сразу переместит товар между вашими складами.",
   }} />
     {editingSupply && <SupplyEditDialog key={getId(editingSupply)} supply={editingSupply} products={products} onClose={() => setEditingSupply(null)} onSaved={() => { setEditingSupply(null); setRefreshKey((value) => value + 1); }} />}
+    {labelsSupply && getId(labelsSupply) && <SupplyLabelsDialog key={getId(labelsSupply)} supply={labelsSupply} onClose={() => setLabelsSupply(null)} />}
   </>;
 }

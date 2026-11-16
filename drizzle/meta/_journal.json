@@ -127,6 +127,146 @@
       "when": 1792536788374,
       "tag": "0017_product_reassignment_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792545519293,
+      "tag": "0018_product_deletion_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792581281446,
+      "tag": "0019_freezing_makkari",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792614353036,
+      "tag": "0020_ozon_shared_expense_history_marker",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792654474029,
+      "tag": "0021_ozon_payout_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792660916519,
+      "tag": "0022_supply_unit_cost_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792714039924,
+      "tag": "0023_return_item_writeoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792745470138,
+      "tag": "0024_return_note",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792934413644,
+      "tag": "0025_real_mockingbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793031944290,
+      "tag": "0026_ozon_compensation_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1793091685499,
+      "tag": "0027_posting_added_cost_rate",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793217923239,
+      "tag": "0028_youthful_beyonder",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793724340762,
+      "tag": "0029_payout_manual_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793725719029,
+      "tag": "0030_remove_payout_manual_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793818514294,
+      "tag": "0031_supply_marketplace_attribution",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793822770672,
+      "tag": "0032_add_audit_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793865839902,
+      "tag": "0033_exclude_ozon_payouts_from_accounting",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793877303418,
+      "tag": "0034_supply_cargo_labels",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793884227347,
+      "tag": "0035_version_cargo_label_layout",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793993127715,
+      "tag": "0036_youthful_blur",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794000155000,
+      "tag": "0037_audit_user_attribution",
+      "breakpoints": true
     }
   ]
 }

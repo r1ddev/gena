@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db, pool } from "@/db";
 import { appSettings, syncJobs } from "@/db/schema";
 import { makeDailyBackup } from "./backup";
@@ -23,32 +23,47 @@ function zonedParts(date = new Date()) {
 }
 
 async function enqueueScheduledSync(now = new Date()) {
-  const [settingsRows, activeJobs, latestScheduled] = await Promise.all([
-    db.select().from(appSettings).where(eq(appSettings.id, 1)).limit(1),
-    db.select({ id: syncJobs.id }).from(syncJobs).where(inArray(syncJobs.status, ["queued", "running"])).limit(1),
-    db.select().from(syncJobs).where(eq(syncJobs.kind, "scheduled")).orderBy(desc(syncJobs.requestedAt)).limit(1),
-  ]);
-  const settings = settingsRows[0];
-  if (!settings?.ozonClientId || !settings.ozonApiKeyEncrypted || activeJobs.length) return;
-  const intervalMs = Math.max(1, settings.syncIntervalHours) * 60 * 60 * 1000;
-  const latestRequest = latestScheduled[0]?.requestedAt;
-  const baseline = !settings.lastSyncAt || (latestRequest && latestRequest > settings.lastSyncAt) ? latestRequest : settings.lastSyncAt;
-  if (baseline && now.getTime() - baseline.getTime() < intervalMs) return;
-  await db.insert(syncJobs).values({ kind: "scheduled", status: "queued", summary: { intervalHours: settings.syncIntervalHours } });
+  const settingsRows = await db.select().from(appSettings);
+  for (const settings of settingsRows) {
+    if (!settings.ozonClientId || !settings.ozonApiKeyEncrypted) continue;
+    const [activeJobs, latestScheduled] = await Promise.all([
+      db.select({ id: syncJobs.id }).from(syncJobs)
+        .where(and(eq(syncJobs.userId, settings.userId), inArray(syncJobs.status, ["queued", "running"])))
+        .limit(1),
+      db.select().from(syncJobs)
+        .where(and(eq(syncJobs.userId, settings.userId), eq(syncJobs.kind, "scheduled")))
+        .orderBy(desc(syncJobs.requestedAt))
+        .limit(1),
+    ]);
+    if (activeJobs.length) continue;
+    const intervalMs = Math.max(1, settings.syncIntervalHours) * 60 * 60 * 1000;
+    const latestRequest = latestScheduled[0]?.requestedAt;
+    const baseline = !settings.lastSyncAt || (latestRequest && latestRequest > settings.lastSyncAt) ? latestRequest : settings.lastSyncAt;
+    if (baseline && now.getTime() - baseline.getTime() < intervalMs) continue;
+    const [job] = await db.insert(syncJobs)
+      .values({ userId: settings.userId, kind: "scheduled", status: "queued", summary: { intervalHours: settings.syncIntervalHours } })
+      .returning({ id: syncJobs.id });
+    if (job) process.stdout.write(`Scheduled sync queued (${settings.syncIntervalHours}h interval).\n`);
+  }
 }
 
 async function processJob() {
   if (working) return;
   working = true;
   try {
-    const jobId = await claimNextJob();
-    if (!jobId) return;
+    const job = await claimNextJob();
+    if (!job) return;
+    const startedAt = Date.now();
+    process.stdout.write(`Sync job ${job.id} started.\n`);
     try {
-      const summary = await syncOzonData(jobId);
+      const summary = await syncOzonData(job.userId, job.id);
       const warnings = Array.isArray(summary.warnings) ? summary.warnings : [];
-      await db.update(syncJobs).set({ status: "completed", finishedAt: new Date(), heartbeatAt: new Date(), summary, error: warnings.length ? warnings.join("\n") : null }).where(eq(syncJobs.id, jobId));
+      await db.update(syncJobs).set({ status: "completed", finishedAt: new Date(), heartbeatAt: new Date(), summary, error: warnings.length ? warnings.join("\n") : null }).where(and(eq(syncJobs.userId, job.userId), eq(syncJobs.id, job.id)));
+      process.stdout.write(`Sync job ${job.id} completed in ${Math.round((Date.now() - startedAt) / 1000)}s${warnings.length ? ` with ${warnings.length} warning(s)` : ""}.\n`);
     } catch (error) {
-      await db.update(syncJobs).set({ status: "failed", finishedAt: new Date(), heartbeatAt: new Date(), error: error instanceof Error ? error.message : String(error) }).where(eq(syncJobs.id, jobId));
+      const message = error instanceof Error ? error.message : String(error);
+      await db.update(syncJobs).set({ status: "failed", finishedAt: new Date(), heartbeatAt: new Date(), error: message }).where(and(eq(syncJobs.userId, job.userId), eq(syncJobs.id, job.id)));
+      process.stderr.write(`Sync job ${job.id} failed: ${message}\n`);
     }
   } finally {
     working = false;
@@ -57,15 +72,18 @@ async function processJob() {
 
 async function failInterruptedSyncJobs() {
   const now = new Date();
-  const interrupted = await db.update(syncJobs)
-    .set({ status: "failed", finishedAt: now, heartbeatAt: now, error: "Синхронизация прервана при остановке фонового процесса." })
-    .where(eq(syncJobs.status, "running"))
-    .returning({ id: syncJobs.id });
+  const interrupted = await db.select({ id: syncJobs.id, userId: syncJobs.userId })
+    .from(syncJobs).where(eq(syncJobs.status, "running"));
+  for (const job of interrupted) {
+    await db.update(syncJobs)
+      .set({ status: "failed", finishedAt: now, heartbeatAt: now, error: "Синхронизация прервана при остановке фонового процесса." })
+      .where(and(eq(syncJobs.id, job.id), eq(syncJobs.userId, job.userId)));
+  }
   if (interrupted.length) process.stderr.write(`Marked ${interrupted.length} interrupted sync job(s) as failed.\n`);
 }
 
 async function run() {
-  process.stdout.write(`Worker started (${timezone}).\n`);
+  process.stdout.write(`Worker started (${timezone}); checks the sync schedule every 30 seconds.\n`);
   await failInterruptedSyncJobs();
   while (!stopping) {
     const { day, hour } = zonedParts();

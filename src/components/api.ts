@@ -57,13 +57,16 @@ export function valueAt(record: JsonRecord, path: string): unknown {
   return path.split(".").reduce<unknown>((value, key) => asRecord(value)?.[key], record);
 }
 
-export function displayValue(value: unknown, kind?: "money" | "quantity" | "date" | "status"): string {
+export function displayValue(value: unknown, kind?: "money" | "quantity" | "percent" | "date" | "status"): string {
   if (value == null || value === "") return "—";
   if (typeof value === "boolean") return value ? "Да" : "Нет";
   if (typeof value === "number" || (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value.trim()))) {
     const number = Number(value);
     if (Number.isFinite(number) && (kind === "money" || kind === "quantity")) {
       return new Intl.NumberFormat("ru-RU", { minimumFractionDigits: kind === "money" ? 2 : 0, maximumFractionDigits: kind === "money" ? 2 : 3 }).format(number) + (kind === "money" ? " ₽" : "");
+    }
+    if (Number.isFinite(number) && kind === "percent") {
+      return `${new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(number)}%`;
     }
   }
   if (typeof value === "string" && kind === "date") {

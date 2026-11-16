@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/app-shell";
+import { AuthGate } from "@/components/auth-gate";
+import { TableColumnResizing } from "@/components/table-column-resizing";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,7 +12,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ru">
-      <body><AppShell>{children}</AppShell></body>
+      <body><TableColumnResizing /><AuthGate><AppShell>{children}</AppShell></AuthGate></body>
     </html>
   );
 }

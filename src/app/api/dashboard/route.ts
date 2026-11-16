@@ -1,16 +1,15 @@
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { appSettings, externalItems, syncJobs } from "@/db/schema";
+import { appSettings, syncJobs } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
 import { handleLocalGet } from "../_lib/http";
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
-    const [snapshot, settingsRows, jobs, externalRows] = await Promise.all([
-      getAccountingSnapshot(),
-      db.select().from(appSettings).limit(1),
-      db.select().from(syncJobs).orderBy(desc(syncJobs.requestedAt)).limit(10),
-      db.select().from(externalItems),
+  return handleLocalGet(request, async (userId) => {
+    const [snapshot, settingsRows, jobs] = await Promise.all([
+      getAccountingSnapshot(userId),
+      db.select().from(appSettings).where(eq(appSettings.userId, userId)).limit(1),
+      db.select().from(syncJobs).where(eq(syncJobs.userId, userId)).orderBy(desc(syncJobs.requestedAt)).limit(10),
     ]);
     const settings = settingsRows[0];
     return {
@@ -23,7 +22,7 @@ export async function GET(request: Request) {
         syncIntervalHours: settings?.syncIntervalHours ?? 24,
       },
       syncJobs: jobs,
-      unresolvedExternalItems: externalRows.filter((item) => item.disposition === "pending"),
+      unresolvedExternalItems: snapshot.unresolvedExternalItems,
     };
   });
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "ozon_payouts" DROP COLUMN "manual_scope";

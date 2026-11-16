@@ -1,13 +1,13 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { productImages } from "@/db/schema";
-import { assertLocalRequest, errorResponse } from "@/app/api/_lib/http";
+import { errorResponse, requireAuthenticatedUser } from "@/app/api/_lib/http";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    assertLocalRequest(request);
+    const userId = await requireAuthenticatedUser(request);
     const { id } = await context.params;
-    const [image] = await db.select().from(productImages).where(eq(productImages.productId, id)).limit(1);
+    const [image] = await db.select().from(productImages).where(and(eq(productImages.productId, id), eq(productImages.userId, userId))).limit(1);
     if (!image) throw new Error("Изображение товара не найдено.");
     return new Response(new Uint8Array(image.data), {
       headers: {

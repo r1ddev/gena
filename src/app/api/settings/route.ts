@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { appSettings } from "@/db/schema";
 import { encryptSecret } from "@/security/secrets";
 import { DEFAULT_ACCOUNTING_START_DATE, isValidHistoryStartDate } from "@/ozon/sync-range";
-import { assertLocalMutation, errorResponse, handleLocalGet, parseBody } from "../_lib/http";
+import { errorResponse, handleLocalGet, parseBody, requireAuthenticatedMutation } from "../_lib/http";
 
 const settingsSchema = z.object({
   clientId: z.string().trim().min(1).max(100),
@@ -14,8 +14,8 @@ const settingsSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
-    const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1)).limit(1);
+  return handleLocalGet(request, async (userId) => {
+    const [settings] = await db.select().from(appSettings).where(eq(appSettings.userId, userId)).limit(1);
     return {
       configured: Boolean(settings?.ozonClientId && settings?.ozonApiKeyEncrypted),
       clientId: settings?.ozonClientId ?? "",
@@ -30,28 +30,22 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     const body = await parseBody(request, settingsSchema);
-    const [existing] = await db.select().from(appSettings).where(eq(appSettings.id, 1)).limit(1);
+    const [existing] = await db.select().from(appSettings).where(eq(appSettings.userId, userId)).limit(1);
     if (!body.apiKey && !existing?.ozonApiKeyEncrypted) throw new Error("Укажите API-ключ Ozon.");
     const values = {
-      id: 1,
       ozonClientId: body.clientId,
       ...(body.apiKey ? { ozonApiKeyEncrypted: encryptSecret(body.apiKey) } : {}),
       accountingStartDate: body.accountingStartDate,
       syncIntervalHours: body.syncIntervalHours,
       updatedAt: new Date(),
     };
-    await db.insert(appSettings).values(values).onConflictDoUpdate({
-      target: appSettings.id,
-      set: {
-        ozonClientId: values.ozonClientId,
-        ...(values.ozonApiKeyEncrypted ? { ozonApiKeyEncrypted: values.ozonApiKeyEncrypted } : {}),
-        accountingStartDate: values.accountingStartDate,
-        syncIntervalHours: values.syncIntervalHours,
-        updatedAt: values.updatedAt,
-      },
-    });
+    if (existing) {
+      await db.update(appSettings).set(values).where(eq(appSettings.userId, userId));
+    } else {
+      await db.insert(appSettings).values({ ...values, userId });
+    }
     return Response.json({
       saved: true,
       clientId: body.clientId,

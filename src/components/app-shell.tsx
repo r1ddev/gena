@@ -5,12 +5,13 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import {
-  Archive, ArrowLeftRight, Banknote, Boxes, Calculator, ChartNoAxesCombined,
-  ChevronRight, CircleDollarSign, ClipboardList, LayoutDashboard,
-  Menu, Package, RotateCcw, Settings2, ShoppingCart, Truck,
+  Archive, ArrowLeftRight, Boxes, Calculator, ChartNoAxesCombined, CreditCard, LineChart,
+  ChevronRight, CircleDollarSign, ClipboardList, FileClock, History, LayoutDashboard,
+  LogOut, Menu, Package, RotateCcw, Settings2, ShoppingCart, Truck,
   Wallet, X,
 } from "lucide-react";
 import { ProductCatalogProvider } from "./product-hover-card";
+import { useAuth } from "./auth-gate";
 
 const navSections = [
   {
@@ -21,6 +22,8 @@ const navSections = [
       { href: "/purchases", label: "Закупки", icon: ShoppingCart },
       { href: "/supplies", label: "Поставки на Ozon", icon: Truck },
       { href: "/expenses", label: "Расходы", icon: Wallet },
+      { href: "/ozon-expenses", label: "Операции Ozon", icon: CircleDollarSign },
+      { href: "/payouts", label: "Выплаты Ozon", icon: CreditCard },
     ],
   },
   {
@@ -34,13 +37,19 @@ const navSections = [
   },
   {
     label: "Аналитика",
-    links: [{ href: "/scenario", label: "Номинальный расчёт", icon: Calculator }],
+    links: [
+      { href: "/analytics", label: "Графики", icon: LineChart },
+      { href: "/scenario", label: "Номинальный расчёт", icon: Calculator },
+      { href: "/added-cost-history", label: "История добавочной стоимости", icon: History },
+      { href: "/audit-logs", label: "Журнал действий", icon: FileClock },
+    ],
   },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user, logout } = useAuth();
 
   return (
     <div className="app-frame">
@@ -63,6 +72,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         ))}
         <div className="sidebar-spacer" />
         <Link className={`nav-link ${pathname.startsWith("/settings") ? "active" : ""}`} href="/settings" aria-current={pathname.startsWith("/settings") ? "page" : undefined} onClick={() => setMobileOpen(false)}><Settings2 size={16} strokeWidth={1.8} /><span>Настройки</span></Link>
+        <div className="sidebar-account">
+          <span title={user.login}>{user.login}</span>
+          <button type="button" onClick={() => void logout()} aria-label="Выйти из аккаунта" title="Выйти"><LogOut size={15} /></button>
+        </div>
         <div className="sidebar-bottom">Личный кабинет · Ozon FBO</div>
       </aside>
 

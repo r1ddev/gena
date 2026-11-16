@@ -1,10 +1,10 @@
-import { eq, or } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { productImages, productLinks, products } from "@/db/schema";
 import { getAccountingSnapshot } from "@/domain/accounting-repository";
 import { readProductImage } from "../_lib/product-image";
-import { assertLocalMutation, errorResponse, handleLocalGet } from "../_lib/http";
+import { errorResponse, handleLocalGet, requireAuthenticatedMutation } from "../_lib/http";
 
 const productSchema = z.object({
   title: z.string().trim().min(1).max(300),
@@ -13,16 +13,16 @@ const productSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  return handleLocalGet(request, async () => {
+  return handleLocalGet(request, async (userId) => {
     const [snapshot, links, imageRows] = await Promise.all([
-      getAccountingSnapshot(),
-      db.select().from(productLinks),
-      db.select({ productId: productImages.productId }).from(productImages),
+      getAccountingSnapshot(userId),
+      db.select().from(productLinks).where(eq(productLinks.userId, userId)),
+      db.select({ productId: productImages.productId }).from(productImages).where(eq(productImages.userId, userId)),
     ]);
     const imageProductIds = new Set(imageRows.map(({ productId }) => productId));
     const linkByProductId = new Map(links.map((link) => [link.productId, link]));
     return {
-      items: snapshot.products.filter((product) => !product.reassignmentPending).map(({ archived: _archived, reassignmentPending: _reassignmentPending, reassignmentOfferId: _reassignmentOfferId, reassignmentOzonSku: _reassignmentOzonSku, ...product }) => {
+      items: snapshot.products.map(({ archived: _archived, ...product }) => {
         const link = linkByProductId.get(product.id);
         return {
           ...product,
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    assertLocalMutation(request);
+    const userId = await requireAuthenticatedMutation(request);
     let rawBody: unknown;
     let image: Awaited<ReturnType<typeof readProductImage>> = null;
     if (request.headers.get("content-type")?.includes("multipart/form-data")) {
@@ -55,19 +55,20 @@ export async function POST(request: Request) {
         body.ozonSku ? eq(productLinks.ozonSku, body.ozonSku) : undefined,
       ].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined);
       const linked = identifiers.length
-        ? await tx.select().from(productLinks).where(or(...identifiers))
+        ? await tx.select().from(productLinks).where(and(eq(productLinks.userId, userId), or(...identifiers)))
         : [];
       if (linked.length) throw new Error("Этот артикул или SKU Ozon уже указан у другого товара.");
 
       const [product] = await tx.insert(products).values({
+        userId,
         sku: body.offerId || body.ozonSku,
         title: body.title,
       }).returning({ id: products.id, sku: products.sku, title: products.title, category: products.category, createdAt: products.createdAt, updatedAt: products.updatedAt });
 
-      if (image) await tx.insert(productImages).values({ productId: product.id, ...image });
+      if (image) await tx.insert(productImages).values({ userId, productId: product.id, ...image });
 
       if (body.offerId || body.ozonSku) {
-        await tx.insert(productLinks).values({ productId: product.id, offerId: body.offerId, ozonSku: body.ozonSku });
+        await tx.insert(productLinks).values({ userId, productId: product.id, offerId: body.offerId, ozonSku: body.ozonSku });
       }
       return { ...product, imageUrl: image ? `/api/products/${product.id}/image` : null };
     });

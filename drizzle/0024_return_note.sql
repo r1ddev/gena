@@ -1,0 +1,1 @@
+ALTER TABLE "ozon_returns" ADD COLUMN "note" text DEFAULT '' NOT NULL;

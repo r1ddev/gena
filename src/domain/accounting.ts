@@ -4,10 +4,23 @@ Decimal.set({ precision: 24, rounding: Decimal.ROUND_HALF_UP });
 
 export type AccountingInput = {
   products: { id: string; sku: string; title: string }[];
-  purchases: { id: string; amountPaid: string | number }[];
-  receipts: { productId: string; quantity: string | number; unitCost: string | number; includeInAverageCost?: boolean; receivedAt?: string }[];
+  purchases: { id: string; amountPaid: string | number; sourceLabel?: string }[];
+  receipts: {
+    productId: string;
+    quantity: string | number;
+    unitCost: string | number;
+    includeInAverageCost?: boolean;
+    receivedAt?: string;
+    productSku?: string;
+    productTitle?: string;
+    purchaseId?: string;
+    purchaseDate?: string;
+    purchaseNote?: string;
+    receiptNote?: string;
+  }[];
   supplies: { productId: string; quantity: string | number; shippingCost: string | number; suppliedAt?: string }[];
-  expenses: { amount: string | number; spentAt?: string }[];
+  expenses: { amount: string | number; spentAt?: string; sourceLabel?: string; note?: string }[];
+  ozonSharedExpenses?: { amount: string | number; spentAt?: string; sourceLabel?: string; typeId?: string; unitNumber?: string; externalKey?: string }[];
   postings: {
     id: string;
     status: string;
@@ -15,6 +28,9 @@ export type AccountingInput = {
     marketplaceBuyoutAt?: string | null;
     isMarketplaceBuyout: boolean;
     accountingEnabled?: boolean;
+    externalId?: string;
+    orderNumber?: string;
+    orderDate?: string | null;
   }[];
   postingItems: {
     postingId: string;
@@ -26,8 +42,10 @@ export type AccountingInput = {
     ozonSku?: string;
     isMarketplaceBuyout?: boolean;
     marketplaceBuyoutAt?: string | null;
+    offerId?: string;
+    title?: string;
   }[];
-  financeAccruals: { postingId: string | null; productId?: string | null; ozonSku?: string | null; amount: string | number; category?: string; accrualDate?: string; isOzonWriteoffCompensation?: boolean; ignored?: boolean }[];
+  financeAccruals: { postingId: string | null; productId?: string | null; ozonSku?: string | null; amount: string | number; category?: string; accrualDate?: string; isOzonWriteoffCompensation?: boolean; ignored?: boolean; sourceGroup?: "orders" | "shared" | "compensation"; sourceLabel?: string }[];
   returns: {
     externalId?: string;
     postingId: string | null;
@@ -36,10 +54,16 @@ export type AccountingInput = {
     destination: "seller" | "ozon" | "unknown";
     returnedAt?: string | null;
     receivedBySellerAt: string | null;
+    writtenOffAt?: string | null;
     availableAtOzon: string | null;
+    postingNumber?: string | null;
+    productSku?: string;
+    productTitle?: string;
+    status?: string;
+    note?: string;
   }[];
-  manualWriteoffs: { productId: string; quantity: string | number; writtenOffAt?: string }[];
-  ozonWriteoffs: { productId: string | null; quantity: string | number; occurredAt?: string | null; compensationStatus?: string; compensationAmount?: string | number | null }[];
+  manualWriteoffs: { productId: string; quantity: string | number; writtenOffAt?: string; productSku?: string; productTitle?: string; note?: string }[];
+  ozonWriteoffs: { productId: string | null; quantity: string | number; occurredAt?: string | null; compensationStatus?: string; compensationAmount?: string | number | null; externalId?: string; productSku?: string; productTitle?: string }[];
   stockAdjustments: { productId: string; warehouse: "seller" | "ozon"; actualQuantity: string | number; countedAt?: string }[];
 };
 
@@ -50,8 +74,18 @@ export type ProductAccounting = {
   receivedQuantity: string;
   averagePurchaseCost: string | null;
   landedUnitCost: string | null;
+  landedUnitCostExact: string | null;
   sellerStock: string;
   ozonStock: string;
+  successfulDeliveryQuantity: string;
+  attemptedDeliveryQuantity: string;
+  deliverySuccessPercent: string | null;
+  soldQuantity: string;
+  profitPerUnit: string | null;
+  marginPercent: string | null;
+  financeCoveragePercent: string | null;
+  financeCoveredPostings: string;
+  financeRelevantPostings: string;
 };
 
 export type AccountingResult = {
@@ -63,15 +97,28 @@ export type AccountingResult = {
     ozonWriteoffCompensation: string;
     purchases: string;
     expenses: string;
+    ozonSharedExpenses: string;
     supplyShipping: string;
     total: string;
+  };
+  cashFlow: {
+    inflows: { source: string; amount: string }[];
+    outflows: { source: string; amount: string }[];
+    totalIncome: string;
+    totalExpenses: string;
+    total: string;
+    pendingOzon: { count: number; income: string; expenses: string };
   };
   profitBreakdown: {
     recognizedOzon: string;
     recognizedOzonOther: string;
+    orderProfit: string;
     ozonWriteoffCompensation: string;
     soldPurchaseCost: string;
     soldSharedCosts: string;
+    soldMySharedCosts: string;
+    soldOzonSharedCosts: string;
+    sharedExpenseCoefficient: string;
     manualLossPurchaseCost: string;
     manualLossSharedCosts: string;
     ozonWriteoffPurchaseCost: string;
@@ -81,6 +128,8 @@ export type AccountingResult = {
   sharedExpenseCoefficient: string;
   receivedPurchaseValue: string;
   sharedExpenses: string;
+  mySharedExpenses: string;
+  ozonSharedExpenses: string;
   preliminaryOrders: { count: number; grossAmount: string; expectedProfit: string | null };
   products: ProductAccounting[];
   costingIssues: { productId: string; sku: string; title: string }[];
@@ -130,6 +179,20 @@ function isCancelled(posting: AccountingInput["postings"][number]) {
   return /cancel|отмен|declin|reject/i.test(posting.status);
 }
 
+function isDeliveredStatus(posting: PostingInput) {
+  const status = posting.status.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return status === "delivered" || /^доставлен[аоы]?$/.test(status);
+}
+
+function isNominallySoldItem(posting: PostingInput, item: PostingItemInput, now: Date) {
+  if (item.movementEnabled === false || isCancelled(posting) || !isDeliveredStatus(posting)) return false;
+  if (isMarketplaceBuyoutItem(posting, item)) {
+    const buyoutAt = item.marketplaceBuyoutAt ?? (posting.isMarketplaceBuyout ? posting.marketplaceBuyoutAt : null);
+    return Boolean(buyoutAt) && Date.parse(buyoutAt!) <= now.getTime();
+  }
+  return isDelivered(posting, now);
+}
+
 function isAccountableItem(item: PostingItemInput) {
   return item.productId !== null && !item.ignored;
 }
@@ -177,13 +240,23 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
   }
 
   const receivedPurchaseValue = sum([...receivedValueByProduct.values()]);
-  const sharedExpenses = sum([
-    ...input.expenses.filter((expense) => isEffectiveAt(expense.spentAt, now)).map((expense) => d(expense.amount)),
-    ...input.supplies.filter((supply) => isEffectiveAt(supply.suppliedAt, now)).map((supply) => d(supply.shippingCost)),
-  ]);
+  const mySharedExpenses = sum(input.expenses
+    .filter((expense) => isEffectiveAt(expense.spentAt, now))
+    .map((expense) => d(expense.amount)));
+  const ozonSharedFinanceAmount = sum((input.ozonSharedExpenses ?? [])
+    .filter((expense) => isEffectiveAt(expense.spentAt, now))
+    .map((expense) => d(expense.amount)));
+  const ozonSharedExpenses = ozonSharedFinanceAmount.negated();
+  const sharedExpenses = mySharedExpenses.plus(ozonSharedExpenses);
   const sharedExpenseCoefficient = receivedPurchaseValue.isZero()
     ? new Decimal(0)
     : sharedExpenses.div(receivedPurchaseValue);
+  const mySharedExpenseCoefficient = receivedPurchaseValue.isZero()
+    ? new Decimal(0)
+    : mySharedExpenses.div(receivedPurchaseValue);
+  const ozonSharedExpenseCoefficient = receivedPurchaseValue.isZero()
+    ? new Decimal(0)
+    : ozonSharedExpenses.div(receivedPurchaseValue);
 
   const averageByProduct = new Map<string, Decimal>();
   const landedByProduct = new Map<string, Decimal>();
@@ -239,17 +312,31 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
   const returnedQuantityByPostingProduct = new Map<string, Decimal>();
   const profitReconciliationIssues: AccountingResult["profitReconciliationIssues"] = [];
   for (const returned of input.returns) {
-    if (!returned.productId || returned.destination !== "seller") continue;
-    const restockedAt = returned.receivedBySellerAt;
+    const restockWarehouse = returned.destination === "seller" || returned.destination === "ozon" ? returned.destination : null;
+    const restockedAt = returned.destination === "seller" ? returned.receivedBySellerAt
+      : returned.destination === "ozon" ? returned.availableAtOzon : null;
+    if (returned.writtenOffAt && isEffectiveAt(returned.writtenOffAt, now)) {
+      if (returned.productId && restockWarehouse && restockedAt && isEffectiveAt(restockedAt, now) && Date.parse(restockedAt) <= Date.parse(returned.writtenOffAt)) {
+        stockEvent(returned.productId, restockWarehouse, restockedAt, d(returned.quantity));
+        stockEvent(returned.productId, restockWarehouse, returned.writtenOffAt, d(returned.quantity).negated());
+      }
+      continue;
+    }
+    if (!returned.productId || !restockWarehouse) continue;
     if (!restockedAt || !isEffectiveAt(restockedAt, now)) continue;
     if (!returned.postingId) {
-      stockEvent(returned.productId, returned.destination, restockedAt, d(returned.quantity));
+      stockEvent(returned.productId, restockWarehouse, restockedAt, d(returned.quantity));
       const product = productById.get(returned.productId);
       profitReconciliationIssues.push({
         externalId: returned.externalId ?? "",
         productId: returned.productId,
         sku: product?.sku ?? "",
       });
+      continue;
+    }
+    const returnPosting = postingById.get(returned.postingId);
+    if (returnPosting && isCancelled(returnPosting)) {
+      if (restockWarehouse === "seller") stockEvent(returned.productId, "seller", restockedAt, d(returned.quantity));
       continue;
     }
     const key = `${returned.postingId}:${returned.productId}`;
@@ -265,7 +352,7 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
       });
     }
     if (!acceptedQuantity.gt(0)) continue;
-    stockEvent(returned.productId, "seller", restockedAt, acceptedQuantity);
+    stockEvent(returned.productId, restockWarehouse, restockedAt, acceptedQuantity);
     returnedQuantityByPostingProduct.set(key, alreadyRestocked.plus(acceptedQuantity));
   }
 
@@ -284,6 +371,13 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
 
   let soldPurchaseCost = new Decimal(0);
   let soldSharedCosts = new Decimal(0);
+  let soldMySharedCosts = new Decimal(0);
+  let soldOzonSharedCosts = new Decimal(0);
+  let nominalSoldPurchaseCost = new Decimal(0);
+  let nominalSoldSharedCosts = new Decimal(0);
+  const postedQuantityByPostingProduct = new Map<string, Decimal>();
+  const recognizedQuantityByPostingProduct = new Map<string, Decimal>();
+  const nominalQuantityByPostingProduct = new Map<string, Decimal>();
   const previewPostingIds = new Set<string>();
   let previewGross = new Decimal(0);
   let previewProfit = new Decimal(0);
@@ -297,10 +391,18 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
     if (!mappablePostingIds.has(posting.id)) continue;
     const items = input.postingItems.filter((candidate) => candidate.postingId === posting.id && isAccountableItem(candidate));
     const recognizedQuantityByProduct = new Map<string, Decimal>();
+    const nominalQuantityByProduct = new Map<string, Decimal>();
     for (const item of items) {
       if (item.movementEnabled === false) continue;
+      const key = `${posting.id}:${item.productId}`;
+      postedQuantityByPostingProduct.set(key, (postedQuantityByPostingProduct.get(key) ?? new Decimal(0)).plus(d(item.quantity)));
+      if (isNominallySoldItem(posting, item, now)) {
+        nominalQuantityByProduct.set(item.productId!, (nominalQuantityByProduct.get(item.productId!) ?? new Decimal(0)).plus(d(item.quantity)));
+        nominalQuantityByPostingProduct.set(key, (nominalQuantityByPostingProduct.get(key) ?? new Decimal(0)).plus(d(item.quantity)));
+      }
       if (isRecognizedItem(posting, item, now)) {
         recognizedQuantityByProduct.set(item.productId!, (recognizedQuantityByProduct.get(item.productId!) ?? new Decimal(0)).plus(d(item.quantity)));
+        recognizedQuantityByPostingProduct.set(key, (recognizedQuantityByPostingProduct.get(key) ?? new Decimal(0)).plus(d(item.quantity)));
       } else if (isDelivered(posting, now) && !isMarketplaceBuyoutItem(posting, item)) {
         previewPostingIds.add(posting.id);
         const quantity = d(item.quantity);
@@ -322,11 +424,23 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
       const landedCost = landedByProduct.get(productId) ?? new Decimal(0);
       soldPurchaseCost = soldPurchaseCost.plus(soldQuantity.times(averageCost));
       soldSharedCosts = soldSharedCosts.plus(soldQuantity.times(landedCost.minus(averageCost)));
+      soldMySharedCosts = soldMySharedCosts.plus(soldQuantity.times(averageCost).times(mySharedExpenseCoefficient));
+      soldOzonSharedCosts = soldOzonSharedCosts.plus(soldQuantity.times(averageCost).times(ozonSharedExpenseCoefficient));
+    }
+    for (const [productId, quantity] of nominalQuantityByProduct) {
+      const returned = returnedQuantityByPostingProduct.get(`${posting.id}:${productId}`) ?? new Decimal(0);
+      const soldQuantity = Decimal.max(0, quantity.minus(returned));
+      const averageCost = averageByProduct.get(productId) ?? new Decimal(0);
+      const landedCost = landedByProduct.get(productId) ?? new Decimal(0);
+      nominalSoldPurchaseCost = nominalSoldPurchaseCost.plus(soldQuantity.times(averageCost));
+      nominalSoldSharedCosts = nominalSoldSharedCosts.plus(soldQuantity.times(landedCost.minus(averageCost)));
     }
   }
 
   let manualLossPurchaseCost = new Decimal(0);
   let manualLossSharedCosts = new Decimal(0);
+  let nominalReturnWriteoffCost = new Decimal(0);
+  const linkedReturnWriteoffs = new Map<string, { postingId: string; productId: string; quantity: Decimal }>();
   for (const writeoff of input.manualWriteoffs) {
     if (!isEffectiveAt(writeoff.writtenOffAt, now)) continue;
     const quantity = d(writeoff.quantity);
@@ -335,6 +449,59 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
     const landedCost = landedByProduct.get(writeoff.productId) ?? new Decimal(0);
     manualLossPurchaseCost = manualLossPurchaseCost.plus(quantity.times(averageCost));
     manualLossSharedCosts = manualLossSharedCosts.plus(quantity.times(landedCost.minus(averageCost)));
+  }
+  for (const returned of input.returns) {
+    if (!returned.writtenOffAt || !isEffectiveAt(returned.writtenOffAt, now) || !returned.productId) continue;
+    const quantity = d(returned.quantity);
+    if (!quantity.gt(0)) continue;
+    if (returned.postingId && postedQuantityByPostingProduct.has(`${returned.postingId}:${returned.productId}`)) {
+      const key = `${returned.postingId}:${returned.productId}`;
+      const existing = linkedReturnWriteoffs.get(key);
+      linkedReturnWriteoffs.set(key, {
+        postingId: returned.postingId,
+        productId: returned.productId,
+        quantity: (existing?.quantity ?? new Decimal(0)).plus(quantity),
+      });
+      continue;
+    }
+    if (returned.postingId) {
+      const product = productById.get(returned.productId);
+      profitReconciliationIssues.push({ externalId: returned.externalId ?? "", productId: returned.productId, sku: product?.sku ?? "" });
+    }
+    if (!averageByProduct.has(returned.productId)) recordMissingCost(returned.productId);
+    const averageCost = averageByProduct.get(returned.productId) ?? new Decimal(0);
+    const landedCost = landedByProduct.get(returned.productId) ?? new Decimal(0);
+    manualLossPurchaseCost = manualLossPurchaseCost.plus(quantity.times(averageCost));
+    manualLossSharedCosts = manualLossSharedCosts.plus(quantity.times(landedCost.minus(averageCost)));
+  }
+  for (const { postingId, productId, quantity } of linkedReturnWriteoffs.values()) {
+    const key = `${postingId}:${productId}`;
+    const postedQuantity = postedQuantityByPostingProduct.get(key) ?? new Decimal(0);
+    const writeoffQuantity = Decimal.min(quantity, postedQuantity);
+    if (quantity.gt(postedQuantity)) {
+      const product = productById.get(productId);
+      profitReconciliationIssues.push({
+        externalId: input.returns.find((returned) => returned.postingId === postingId && returned.productId === productId)?.externalId ?? "",
+        productId,
+        sku: product?.sku ?? "",
+      });
+    }
+    const recognizedSoldQuantity = Decimal.max(
+      0,
+      (recognizedQuantityByPostingProduct.get(key) ?? new Decimal(0)).minus(returnedQuantityByPostingProduct.get(key) ?? new Decimal(0)),
+    );
+    const confirmedLossQuantity = Decimal.max(0, writeoffQuantity.minus(Decimal.min(writeoffQuantity, recognizedSoldQuantity)));
+    const nominalSoldQuantity = Decimal.max(
+      0,
+      (nominalQuantityByPostingProduct.get(key) ?? new Decimal(0)).minus(returnedQuantityByPostingProduct.get(key) ?? new Decimal(0)),
+    );
+    const nominalLossQuantity = Decimal.max(0, writeoffQuantity.minus(Decimal.min(writeoffQuantity, nominalSoldQuantity)));
+    const averageCost = averageByProduct.get(productId) ?? new Decimal(0);
+    const landedCost = landedByProduct.get(productId) ?? new Decimal(0);
+    if ((confirmedLossQuantity.gt(0) || nominalLossQuantity.gt(0)) && !averageByProduct.has(productId)) recordMissingCost(productId);
+    manualLossPurchaseCost = manualLossPurchaseCost.plus(confirmedLossQuantity.times(averageCost));
+    manualLossSharedCosts = manualLossSharedCosts.plus(confirmedLossQuantity.times(landedCost.minus(averageCost)));
+    nominalReturnWriteoffCost = nominalReturnWriteoffCost.plus(nominalLossQuantity.times(landedCost));
   }
 
   let ozonWriteoffPurchaseCost = new Decimal(0);
@@ -354,7 +521,7 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
     if (accrual.isOzonWriteoffCompensation) return true;
     return accrual.postingId !== null
       && postingById.has(accrual.postingId)
-      && (!category || category === "POSTING" || category === "ITEM");
+      && (!category || category === "POSTING" || category === "ITEM" || category === "NON_ITEM");
   });
   const recognizedFinance = orderFinance.filter((accrual) => {
     const posting = accrual.postingId ? postingById.get(accrual.postingId) : undefined;
@@ -377,20 +544,174 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
     if (isCancelled(posting)) return true;
     return recognizedPostings.has(posting.id);
   });
-  const ignoredFinance = orderFinance.filter((accrual) => !recognizedFinance.includes(accrual));
+  const nominallyCompletePostingIds = new Set(input.postings.filter((posting) => {
+    if (!mappablePostingIds.has(posting.id)) return false;
+    if (isCancelled(posting)) return true;
+    const items = input.postingItems.filter((item) => item.postingId === posting.id && isAccountableItem(item));
+    return items.length > 0 && items.every((item) => isNominallySoldItem(posting, item, now));
+  }).map((posting) => posting.id));
+  const nominalOrderFinance = orderFinance.filter((accrual) => {
+    if (accrual.isOzonWriteoffCompensation || accrual.ignored || !isEffectiveAt(accrual.accrualDate, now)) return false;
+    const posting = accrual.postingId ? postingById.get(accrual.postingId) : undefined;
+    if (!posting || !mappablePostingIds.has(posting.id)) return false;
+    if (isCancelled(posting)) return true;
+    if (accrual.category?.toUpperCase() === "ITEM") {
+      const candidates = input.postingItems.filter((item) =>
+        item.postingId === posting.id &&
+        (accrual.ozonSku ? item.ozonSku === accrual.ozonSku : item.productId === accrual.productId),
+      );
+      return candidates.length > 0 && candidates.every((item) => isAccountableItem(item) && isNominallySoldItem(posting, item, now));
+    }
+    return nominallyCompletePostingIds.has(posting.id);
+  });
+  const isOrderAccrual = (accrual: AccountingInput["financeAccruals"][number]) => accrual.sourceGroup === "orders"
+    || (!accrual.sourceGroup && orderFinance.includes(accrual) && !accrual.isOzonWriteoffCompensation);
+  const pendingOrderFinance = input.financeAccruals.filter((accrual) =>
+    isOrderAccrual(accrual) && !recognizedFinance.includes(accrual) && isEffectiveAt(accrual.accrualDate, now),
+  );
   const recognizedFinanceAmount = sum(recognizedFinance.map((accrual) => d(accrual.amount)));
   const recognizedOzonWriteoffCompensation = sum(recognizedFinance
     .filter((accrual) => accrual.isOzonWriteoffCompensation)
     .map((accrual) => d(accrual.amount)));
   const recognizedOzonOther = recognizedFinanceAmount.minus(recognizedOzonWriteoffCompensation);
-  const unrecognizedFinanceAmount = sum(ignoredFinance.map((accrual) => d(accrual.amount)));
+  const nominalOrderFinanceAmount = sum(nominalOrderFinance.map((accrual) => d(accrual.amount)));
+  const orderProfit = nominalOrderFinanceAmount.minus(nominalSoldPurchaseCost).minus(nominalSoldSharedCosts).minus(nominalReturnWriteoffCost);
+  const unrecognizedFinanceAmount = sum(pendingOrderFinance.map((accrual) => d(accrual.amount)));
 
-  const cashOutflow = sum([
-    ...input.purchases.map((purchase) => d(purchase.amountPaid)),
-    ...input.expenses.filter((expense) => isEffectiveAt(expense.spentAt, now)).map((expense) => d(expense.amount)),
-    ...input.supplies.filter((supply) => isEffectiveAt(supply.suppliedAt, now)).map((supply) => d(supply.shippingCost)),
-  ]);
-  const cashBalance = recognizedFinanceAmount.minus(cashOutflow);
+  const productSales = new Map<string, {
+    attempted: Decimal;
+    delivered: Decimal;
+    sold: Decimal;
+    revenue: Decimal;
+    relevantPostingIds: Set<string>;
+    soldByPosting: Map<string, Decimal>;
+    revenueByPosting: Map<string, Decimal>;
+    financeByPosting: Map<string, Decimal>;
+  }>();
+  const salesFor = (productId: string) => {
+    const current = productSales.get(productId);
+    if (current) return current;
+    const created = {
+      attempted: new Decimal(0), delivered: new Decimal(0), sold: new Decimal(0), revenue: new Decimal(0),
+      relevantPostingIds: new Set<string>(), soldByPosting: new Map<string, Decimal>(), revenueByPosting: new Map<string, Decimal>(), financeByPosting: new Map<string, Decimal>(),
+    };
+    productSales.set(productId, created);
+    return created;
+  };
+  const accountableItemsByPosting = new Map<string, PostingItemInput[]>();
+  for (const item of input.postingItems) {
+    if (item.movementEnabled === false || !isAccountableItem(item)) continue;
+    accountableItemsByPosting.set(item.postingId, [...(accountableItemsByPosting.get(item.postingId) ?? []), item]);
+  }
+  for (const posting of input.postings) {
+    const items = accountableItemsByPosting.get(posting.id) ?? [];
+    for (const item of items) {
+      const stats = salesFor(item.productId!);
+      const quantity = d(item.quantity);
+      const nominallySold = isNominallySoldItem(posting, item, now);
+      const deliveryResolved = nominallySold || isCancelled(posting);
+      if (deliveryResolved) {
+        stats.attempted = stats.attempted.plus(quantity);
+        stats.relevantPostingIds.add(posting.id);
+      }
+      if (!nominallySold) continue;
+      stats.delivered = stats.delivered.plus(quantity);
+      const returned = returnedQuantityByPostingProduct.get(`${posting.id}:${item.productId}`) ?? new Decimal(0);
+      const sold = Decimal.max(0, quantity.minus(returned));
+      stats.sold = stats.sold.plus(sold);
+      stats.revenue = stats.revenue.plus(sold.times(d(item.price)));
+      stats.soldByPosting.set(posting.id, (stats.soldByPosting.get(posting.id) ?? new Decimal(0)).plus(sold));
+      stats.revenueByPosting.set(posting.id, (stats.revenueByPosting.get(posting.id) ?? new Decimal(0)).plus(sold.times(d(item.price))));
+    }
+  }
+
+  const allocatePostingFinance = (postingId: string, amount: Decimal, sourceItems: PostingItemInput[]) => {
+    const weightsByProduct = new Map<string, Decimal>();
+    for (const item of sourceItems) {
+      if (!item.productId) continue;
+      const weight = Decimal.max(0, d(item.price).times(d(item.quantity)));
+      weightsByProduct.set(item.productId, (weightsByProduct.get(item.productId) ?? new Decimal(0)).plus(weight));
+    }
+    if (![...weightsByProduct.values()].some((weight) => weight.gt(0))) {
+      weightsByProduct.clear();
+      for (const item of sourceItems) {
+        if (!item.productId) continue;
+        weightsByProduct.set(item.productId, (weightsByProduct.get(item.productId) ?? new Decimal(0)).plus(d(item.quantity)));
+      }
+    }
+    const entries = [...weightsByProduct.entries()].filter(([, weight]) => weight.gt(0));
+    if (!entries.length) return;
+    const totalWeight = sum(entries.map(([, weight]) => weight));
+    let remaining = amount;
+    entries.forEach(([productId, weight], index) => {
+      const allocation = index === entries.length - 1 ? remaining : amount.times(weight).div(totalWeight);
+      remaining = remaining.minus(allocation);
+      const stats = salesFor(productId);
+      stats.financeByPosting.set(postingId, (stats.financeByPosting.get(postingId) ?? new Decimal(0)).plus(allocation));
+    });
+  };
+  for (const accrual of nominalOrderFinance) {
+    if (!accrual.postingId) continue;
+    const items = accountableItemsByPosting.get(accrual.postingId) ?? [];
+    const skuItems = accrual.ozonSku ? items.filter((item) => item.ozonSku === accrual.ozonSku) : [];
+    const productItems = accrual.productId ? items.filter((item) => item.productId === accrual.productId) : [];
+    const exactItems = skuItems.length ? skuItems : productItems;
+    if (exactItems.length) {
+      allocatePostingFinance(accrual.postingId, d(accrual.amount), exactItems);
+      continue;
+    }
+    const deliveredItems = items.filter((item) => {
+      const posting = postingById.get(item.postingId);
+      return posting ? isNominallySoldItem(posting, item, now) : false;
+    });
+    allocatePostingFinance(accrual.postingId, d(accrual.amount), deliveredItems.length ? deliveredItems : items);
+  }
+
+  const inflowsBySource = new Map<string, Decimal>();
+  const outflowsBySource = new Map<string, Decimal>();
+  const addCashMovement = (source: string, amount: Decimal) => {
+    if (amount.gt(0)) inflowsBySource.set(source, (inflowsBySource.get(source) ?? new Decimal(0)).plus(amount));
+    if (amount.lt(0)) outflowsBySource.set(source, (outflowsBySource.get(source) ?? new Decimal(0)).plus(amount.abs()));
+  };
+  for (const accrual of input.financeAccruals) {
+    if (!isEffectiveAt(accrual.accrualDate, now)) continue;
+    const isOrder = isOrderAccrual(accrual);
+    const groupLabel = accrual.sourceGroup === "compensation" || accrual.isOzonWriteoffCompensation
+      ? "Компенсации Ozon за списания"
+      : isOrder ? "Операции по заказам Ozon" : "Общие операции Ozon";
+    addCashMovement(groupLabel, d(accrual.amount));
+  }
+  for (const purchase of input.purchases) {
+    addCashMovement("Закупки", d(purchase.amountPaid).negated());
+  }
+  for (const expense of input.expenses) {
+    if (!isEffectiveAt(expense.spentAt, now)) continue;
+    addCashMovement("Мои расходы", d(expense.amount).negated());
+  }
+  const totalIncome = sum([...inflowsBySource.values()]);
+  const totalExpenses = sum([...outflowsBySource.values()]);
+  const cashBalance = totalIncome.minus(totalExpenses);
+  const effectiveFinanceRows = input.financeAccruals.filter((accrual) => isEffectiveAt(accrual.accrualDate, now));
+  const allOzonFinanceAmount = sum(effectiveFinanceRows.map((accrual) => d(accrual.amount)));
+  const ozonCompensationAmount = sum(effectiveFinanceRows
+    .filter((accrual) => accrual.sourceGroup === "compensation" || accrual.isOzonWriteoffCompensation)
+    .map((accrual) => d(accrual.amount)));
+  const ozonOrderFinanceAmount = sum(effectiveFinanceRows
+    .filter((accrual) => isOrderAccrual(accrual) && !accrual.isOzonWriteoffCompensation)
+    .map((accrual) => d(accrual.amount)));
+  const ozonSharedCashAmount = allOzonFinanceAmount.minus(ozonCompensationAmount).minus(ozonOrderFinanceAmount);
+  const cashFlow = {
+    inflows: [...inflowsBySource.entries()].sort((left, right) => right[1].cmp(left[1])).map(([source, amount]) => ({ source, amount: money(amount) })),
+    outflows: [...outflowsBySource.entries()].sort((left, right) => right[1].cmp(left[1])).map(([source, amount]) => ({ source, amount: money(amount) })),
+    totalIncome: money(totalIncome),
+    totalExpenses: money(totalExpenses),
+    total: money(cashBalance),
+    pendingOzon: {
+      count: pendingOrderFinance.length,
+      income: money(sum(pendingOrderFinance.map((accrual) => Decimal.max(0, d(accrual.amount))))),
+      expenses: money(sum(pendingOrderFinance.map((accrual) => Decimal.max(0, d(accrual.amount).negated())))),
+    },
+  };
   const calculatedProfit = recognizedFinanceAmount
     .minus(soldPurchaseCost)
     .minus(soldSharedCosts)
@@ -401,11 +722,21 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
   const confirmedProfit = costingIssues.size || profitReconciliationIssues.length ? null : calculatedProfit;
   const purchaseCashOutflow = sum(input.purchases.map((purchase) => d(purchase.amountPaid)));
   const expenseCashOutflow = sum(input.expenses.filter((expense) => isEffectiveAt(expense.spentAt, now)).map((expense) => d(expense.amount)));
-  const supplyShippingOutflow = sum(input.supplies.filter((supply) => isEffectiveAt(supply.suppliedAt, now)).map((supply) => d(supply.shippingCost)));
 
   const products = input.products.map((product) => {
     const average = averageByProduct.get(product.id);
     const landed = landedByProduct.get(product.id);
+    const sales = productSales.get(product.id);
+    const soldQuantity = sales?.sold ?? new Decimal(0);
+    const financePostingIds = sales
+      ? [...sales.relevantPostingIds].filter((postingId) => sales.financeByPosting.has(postingId))
+      : [];
+    const coveredSoldQuantity = sum(financePostingIds.map((postingId) => sales?.soldByPosting.get(postingId) ?? new Decimal(0)));
+    const coveredRevenue = sum(financePostingIds.map((postingId) => sales?.revenueByPosting.get(postingId) ?? new Decimal(0)));
+    const coveredFinance = sum(financePostingIds.map((postingId) => sales?.financeByPosting.get(postingId) ?? new Decimal(0)));
+    const productProfit = sales && landed !== undefined && coveredSoldQuantity.gt(0)
+      ? coveredFinance.minus(coveredSoldQuantity.times(landed))
+      : null;
     return {
       productId: product.id,
       sku: product.sku,
@@ -413,8 +744,20 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
       receivedQuantity: units(receivedByProduct.get(product.id) ?? new Decimal(0)),
       averagePurchaseCost: average ? money(average) : null,
       landedUnitCost: landed ? money(landed) : null,
+      landedUnitCostExact: landed?.toString() ?? null,
       sellerStock: units(sellerStock.get(product.id) ?? new Decimal(0)),
       ozonStock: units(ozonStock.get(product.id) ?? new Decimal(0)),
+      successfulDeliveryQuantity: units(sales?.delivered ?? new Decimal(0)),
+      attemptedDeliveryQuantity: units(sales?.attempted ?? new Decimal(0)),
+      deliverySuccessPercent: sales?.attempted.gt(0) ? sales.delivered.div(sales.attempted).times(100).toDecimalPlaces(2).toFixed(2) : null,
+      soldQuantity: units(soldQuantity),
+      profitPerUnit: productProfit !== null ? money(productProfit.div(coveredSoldQuantity)) : null,
+      marginPercent: productProfit !== null && coveredRevenue.gt(0) ? productProfit.div(coveredRevenue).times(100).toDecimalPlaces(2).toFixed(2) : null,
+      financeCoveragePercent: sales?.relevantPostingIds.size
+        ? new Decimal(financePostingIds.length).div(sales.relevantPostingIds.size).times(100).toDecimalPlaces(2).toFixed(2)
+        : null,
+      financeCoveredPostings: String(financePostingIds.length),
+      financeRelevantPostings: String(sales?.relevantPostingIds.size ?? 0),
     };
   });
 
@@ -431,20 +774,26 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
     cashBalance: money(cashBalance),
     confirmedProfit: confirmedProfit === null ? null : money(confirmedProfit),
     cashBreakdown: {
-      recognizedOzon: money(recognizedFinanceAmount),
-      recognizedOzonOther: money(recognizedOzonOther),
-      ozonWriteoffCompensation: money(recognizedOzonWriteoffCompensation),
+      recognizedOzon: money(allOzonFinanceAmount),
+      recognizedOzonOther: money(ozonOrderFinanceAmount),
+      ozonWriteoffCompensation: money(ozonCompensationAmount),
       purchases: money(purchaseCashOutflow.negated()),
       expenses: money(expenseCashOutflow.negated()),
-      supplyShipping: money(supplyShippingOutflow.negated()),
+      ozonSharedExpenses: money(ozonSharedCashAmount),
+      supplyShipping: "0.00",
       total: money(cashBalance),
     },
+    cashFlow,
     profitBreakdown: {
       recognizedOzon: money(recognizedFinanceAmount),
       recognizedOzonOther: money(recognizedOzonOther),
+      orderProfit: money(orderProfit),
       ozonWriteoffCompensation: money(recognizedOzonWriteoffCompensation),
       soldPurchaseCost: money(soldPurchaseCost.negated()),
       soldSharedCosts: money(soldSharedCosts.negated()),
+      soldMySharedCosts: money(soldMySharedCosts.negated()),
+      soldOzonSharedCosts: money(soldOzonSharedCosts.negated()),
+      sharedExpenseCoefficient: sharedExpenseCoefficient.toDecimalPlaces(6).toFixed(6),
       manualLossPurchaseCost: money(manualLossPurchaseCost.negated()),
       manualLossSharedCosts: money(manualLossSharedCosts.negated()),
       ozonWriteoffPurchaseCost: money(ozonWriteoffPurchaseCost.negated()),
@@ -454,6 +803,8 @@ export function calculateAccounting(input: AccountingInput, now = new Date()): A
     sharedExpenseCoefficient: sharedExpenseCoefficient.toDecimalPlaces(4).toFixed(4),
     receivedPurchaseValue: money(receivedPurchaseValue),
     sharedExpenses: money(sharedExpenses),
+    mySharedExpenses: money(mySharedExpenses),
+    ozonSharedExpenses: money(ozonSharedExpenses),
     preliminaryOrders: { count: previewPostingIds.size, grossAmount: money(previewGross), expectedProfit: preliminaryCostIssue ? null : money(previewProfit) },
     products,
     costingIssues: [...costingIssues.values()],
