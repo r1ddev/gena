@@ -144,16 +144,28 @@ function parseAnalyticsData(value: unknown): AnalyticsData {
 
 function useChartTooltipTrigger() {
   const [trigger, setTrigger] = useState<"click" | "hover">("click");
+  const [dismissed, setDismissed] = useState(false);
   const touchMoved = useRef(false);
+  const canvasRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const media = window.matchMedia("(hover: hover) and (pointer: fine)");
     const update = () => setTrigger(media.matches ? "hover" : "click");
+    const dismissOutside = (event: PointerEvent) => {
+      if (!canvasRef.current?.contains(event.target as Node)) setDismissed(true);
+    };
     update();
     media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
+    document.addEventListener("pointerdown", dismissOutside);
+    return () => {
+      media.removeEventListener("change", update);
+      document.removeEventListener("pointerdown", dismissOutside);
+    };
   }, []);
   return {
     trigger,
+    active: dismissed ? false : undefined,
+    canvasRef,
+    onPointerEnter: () => setDismissed(false),
     onTouchStart: () => { touchMoved.current = false; setTrigger("hover"); },
     onTouchMove: () => { touchMoved.current = true; setTrigger("hover"); },
     onTouchEnd: () => { if (!touchMoved.current) setTrigger("click"); },
@@ -237,13 +249,13 @@ function UnitsChart({ days, smoothingDays }: { days: AnalyticsChartDay[]; smooth
     <div className="panel-head"><div><h2>Товары по дням</h2>{smoothingDays && <span className="small-note">Пунктир — среднее за {smoothingDays} дн.</span>}</div></div>
     <div className="panel-body analytics-chart-body">
       <div className="analytics-chart-total"><span>Отправлено товаров <b>{countFormat.format(totals.sentUnits)}</b></span><span>Куплено товаров <b className="positive">{countFormat.format(totals.purchasedUnits)}</b></span></div>
-      <div className="analytics-chart-canvas" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
+      <div ref={tooltip.canvasRef} className="analytics-chart-canvas" onPointerEnter={tooltip.onPointerEnter} onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 600, height: 270 }}>
           <ComposedChart data={days} margin={{ top: 10, right: 12, bottom: 4, left: -10 }}>
             <CartesianGrid vertical={false} stroke="#e8ede9" />
             <XAxis dataKey="date" tickFormatter={(date: string) => dateLabel(date)} interval="preserveStartEnd" minTickGap={18} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#dfe6e1" }} tickMargin={9} height={32} />
             <YAxis width={40} tickCount={5} allowDecimals={Boolean(smoothingDays)} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
-            <Tooltip trigger={tooltip.trigger} content={UnitsTooltip} cursor={{ fill: "rgba(22, 136, 95, .08)" }} isAnimationActive={false} />
+            <Tooltip active={tooltip.active} trigger={tooltip.trigger} content={UnitsTooltip} cursor={{ fill: "rgba(22, 136, 95, .08)" }} isAnimationActive={false} />
             {series.isVisible("sentUnits") && <Bar dataKey="sentUnits" name="Отправлено товаров" fill="#dce9e2" maxBarSize={22} radius={[3, 3, 0, 0]} isAnimationActive={false} />}
             {series.isVisible("purchasedUnits") && <Line dataKey="purchasedUnits" name="Куплено товаров" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} isAnimationActive={false} />}
             {smoothingDays && <>
@@ -291,13 +303,13 @@ function BuyoutChart({ days, smoothingDays }: { days: AnalyticsChartDay[]; smoot
         <span>За период {buyoutPercent === null ? <b>—</b> : <b className="positive">{buyoutPercentFormat.format(buyoutPercent)}%</b>}</span>
         <span>Выкуплено <b>{countFormat.format(totals.purchasedUnits)}</b> из <b>{countFormat.format(totals.sentUnits)}</b> отправленных товаров</span>
       </div>
-      {totals.sentUnits > 0 ? <div className="analytics-chart-canvas" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
+      {totals.sentUnits > 0 ? <div ref={tooltip.canvasRef} className="analytics-chart-canvas" onPointerEnter={tooltip.onPointerEnter} onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 600, height: 270 }}>
           <LineChart data={days} margin={{ top: 10, right: 12, bottom: 4, left: -4 }}>
             <CartesianGrid vertical={false} stroke="#e8ede9" />
             <XAxis dataKey="date" tickFormatter={(date: string) => dateLabel(date)} interval="preserveStartEnd" minTickGap={18} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#dfe6e1" }} tickMargin={9} height={32} />
             <YAxis width={48} tickCount={5} domain={[0, 100]} tickFormatter={(value: number) => `${Math.round(value)}%`} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
-            <Tooltip trigger={tooltip.trigger} content={BuyoutTooltip} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
+            <Tooltip active={tooltip.active} trigger={tooltip.trigger} content={BuyoutTooltip} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
             {series.isVisible("buyoutPercent") && <Line dataKey="buyoutPercent" name="Процент выкупа" type="monotone" stroke="#16885f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} connectNulls isAnimationActive={false} />}
             {smoothingDays && series.isVisible("averageBuyoutPercent") && <Line dataKey="averageBuyoutPercent" name={`Среднее за ${smoothingDays} дн.`} type="monotone" stroke="#16885f" strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={{ r: 4, strokeWidth: 1 }} connectNulls isAnimationActive={false} />}
           </LineChart>
@@ -427,14 +439,14 @@ function ProductProfitChart({ days, allDays, products, productProfitDays, smooth
     <div className="panel-body analytics-chart-body">
       <p className="analytics-profit-chart-note">Сплошная линия — с общей средней добавочной стоимостью. Точечная — расчёт на дату заказа для выбранного товара. Показана положительная прибыль по невозвращённым товарам.</p>
       <SeriesLegend items={legendItems} hiddenKeys={series.hiddenKeys} onToggle={series.toggle} comparisonProductId={comparisonProductId} onCompare={(productId) => setComparisonProductId((current) => current === productId ? null : productId)} />
-      {hasVisibleData ? <div className="analytics-chart-canvas" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
+      {hasVisibleData ? <div ref={tooltip.canvasRef} className="analytics-chart-canvas" onPointerEnter={tooltip.onPointerEnter} onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}>
           <LineChart data={chartDays} margin={{ top: 10, right: 12, bottom: 4, left: -4 }}>
             <CartesianGrid vertical={false} stroke="#e8ede9" />
             <XAxis dataKey="date" tickFormatter={(date: string) => dateLabel(date)} interval="preserveStartEnd" minTickGap={18} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#dfe6e1" }} tickMargin={9} height={32} />
             <YAxis width={56} tickCount={5} domain={[0, "auto"]} tickFormatter={(value: number) => `${compactMoneyFormat.format(value)} ₽`} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
             <ReferenceLine y={0} stroke="#8e9992" strokeWidth={1.5} />
-            <Tooltip trigger={tooltip.trigger} content={(props) => <ProductProfitTooltip {...props} products={products} comparisonProductId={comparisonProductId} smoothingDays={smoothingDays} />} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
+            <Tooltip active={tooltip.active} trigger={tooltip.trigger} content={(props) => <ProductProfitTooltip {...props} products={products} comparisonProductId={comparisonProductId} smoothingDays={smoothingDays} />} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
             {products.map((product) => {
               const index = products.findIndex((candidate) => candidate.id === product.id);
               const color = productLineColors[index % productLineColors.length];
@@ -467,14 +479,14 @@ function RateChart({ points, days, smoothingDays }: { points: RateChartPoint[]; 
     <div className="panel-head"><div><h2>Добавочная стоимость</h2>{smoothingDays && <span className="small-note">Пунктир — среднее дневных значений за {smoothingDays} дн.</span>}</div></div>
     <div className="panel-body analytics-chart-body">
       <div className="analytics-chart-total">Процент, сохранённый для каждого заказа</div>
-      {points.length ? <div className="analytics-chart-canvas" onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
+      {points.length ? <div ref={tooltip.canvasRef} className="analytics-chart-canvas" onPointerEnter={tooltip.onPointerEnter} onTouchStart={tooltip.onTouchStart} onTouchMove={tooltip.onTouchMove} onTouchEnd={tooltip.onTouchEnd} onTouchCancel={tooltip.onTouchCancel}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 440, height: 270 }}>
           <LineChart data={points} margin={{ top: 10, right: 12, bottom: 4, left: -4 }}>
             <CartesianGrid vertical={false} stroke="#e8ede9" />
             <XAxis type="number" dataKey="timestamp" scale="time" domain={domain} tickFormatter={(timestamp: number) => dateLabel(timestamp)} tickCount={5} minTickGap={18} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#dfe6e1" }} tickMargin={9} height={32} />
             <YAxis width={54} tickCount={5} tickFormatter={(value: number) => `${percentFormat.format(value)}%`} domain={["auto", "auto"]} tick={{ fill: "#839088", fontSize: 11 }} tickLine={false} axisLine={false} />
             <ReferenceLine y={0} stroke="#8e9992" strokeWidth={1.5} />
-            <Tooltip trigger={tooltip.trigger} content={RateTooltip} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
+            <Tooltip active={tooltip.active} trigger={tooltip.trigger} content={RateTooltip} cursor={{ stroke: "rgba(22, 136, 95, .35)" }} isAnimationActive={false} />
             {series.isVisible("ratePercent") && <Line dataKey="ratePercent" name="Добавочная стоимость" type="stepAfter" stroke="#16885f" strokeWidth={2.5} dot={{ r: 3, strokeWidth: 1 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive={false} />}
             {smoothingDays && series.isVisible("averageRatePercent") && <Line dataKey="averageRatePercent" name={`Среднее · ${smoothingDays} дн.`} type="monotone" stroke="#16885f" strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={{ r: 4, strokeWidth: 1 }} connectNulls isAnimationActive={false} />}
           </LineChart>
